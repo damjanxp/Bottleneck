@@ -24,3 +24,5 @@ export { MAX_SPEED, MIN_SPEED, PlaybackPacer } from "./playback.ts";
 export { RandomCursor, RandomStream, hash4, mix32, toSeed, uniform } from "./rng.ts";
 export { EXPECTED_SELF_CHECK_HASH, runSelfCheck, type SelfCheckResult } from "./selfCheck.ts";
 export { Simulation, TICK_SECONDS, type EventHandler, type TickSystem } from "./simulation.ts";
+export { EventKind, LaneBank, percentileNearestRank, type LaneCallbacks, type LaneMetrics, type ServiceOutcome } from "./lanes.ts";
+export { distributionMoments, makeSampler, shiftedLognormalFromMean, type Sampler } from "./sampling.ts";
