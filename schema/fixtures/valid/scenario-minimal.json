@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "venueId": "fixture-minimal",
+  "name": "Concert, gate A lane 2 fails 30 min before the start",
+  "eventType": "concert",
+  "timeline": { "referenceClock": "20:00", "gatesOpen": -5400, "eventStart": 0, "eventEnd": 9000, "horizon": 14400 },
+  "attendance": 3000,
+  "carShare": 0,
+  "arrivals": { "preset": "concert" },
+  "seed": 42,
+  "parameters": {
+    "freeWalkingSpeed": { "kind": "truncatedNormal", "mean": 1.3, "sd": 0.25, "min": 0.5, "max": 2.2 },
+    "nearestLaneShare": 0.3
+  },
+  "overrides": { "gate-a": { "laneCount": 5 } },
+  "timedEvents": [
+    { "kind": "laneFail", "at": -1800, "groupId": "gate-a", "laneIndex": 1 },
+    { "kind": "busBurst", "at": -2400, "sourceId": "tram", "count": 120 }
+  ]
+}

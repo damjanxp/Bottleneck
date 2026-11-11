@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "run.schema.json",
+  "title": "RunRecord",
+  "description": "The stored result of one seeded run: metrics plus everything needed to reproduce it, not every frame. The metrics shape is filled in during Phase 1. scenario is a full copy of the scenario as it was run (it includes the seed).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "engineVersion",
+    "createdAt",
+    "origin",
+    "scenario",
+    "venueHash",
+    "parameters",
+    "metrics",
+    "metricsHash"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "$ref": "common.schema.json#/definitions/Id"
+    },
+    "engineVersion": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "origin": {
+      "description": "'job' runs were computed by the backend and are trusted; 'clientReported' runs were uploaded from a browser.",
+      "type": "string",
+      "enum": [
+        "job",
+        "clientReported"
+      ]
+    },
+    "scenario": {
+      "$ref": "scenario.schema.json"
+    },
+    "venueHash": {
+      "description": "Hash of the venue geometry the run used, so comparisons can tell whether runs share a venue.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "parameters": {
+      "description": "The full resolved parameter set (defaults plus overrides) the run used.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "metrics": {
+      "description": "Run metrics (spec section 4.5). Structure defined in Phase 1.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "metricsHash": {
+      "description": "Hash of the canonical Float64 dump of the metrics (determinism check).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    }
+  }
+}

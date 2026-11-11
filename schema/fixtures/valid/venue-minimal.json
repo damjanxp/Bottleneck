@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "fixture-minimal",
+  "name": "Minimal venue: one source, one gate group, one destination",
+  "attribution": "Hand-made test fixture",
+  "walkableAreas": [
+    {
+      "id": "plaza",
+      "polygon": {
+        "outer": [
+          { "x": 0, "y": 0 },
+          { "x": 60, "y": 0 },
+          { "x": 60, "y": 40 },
+          { "x": 0, "y": 40 }
+        ],
+        "holes": [
+          [
+            { "x": 25, "y": 5 },
+            { "x": 30, "y": 5 },
+            { "x": 30, "y": 8 }
+          ]
+        ]
+      }
+    }
+  ],
+  "obstacles": [],
+  "sources": [{ "id": "tram", "name": "Tram stop", "position": { "x": 5, "y": 20 }, "share": 1 }],
+  "screeningStages": [],
+  "gateGroups": [
+    {
+      "id": "gate-a",
+      "name": "Gate A",
+      "line": { "a": { "x": 40, "y": 30 }, "b": { "x": 40, "y": 10 } },
+      "laneCount": 4,
+      "queueLength": 15,
+      "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.25, "sigma": 0.55 },
+      "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } }
+    }
+  ],
+  "destinations": [
+    {
+      "id": "hall",
+      "name": "Hall",
+      "area": {
+        "outer": [
+          { "x": 50, "y": 10 },
+          { "x": 60, "y": 10 },
+          { "x": 60, "y": 30 },
+          { "x": 50, "y": 30 }
+        ]
+      }
+    }
+  ]
+}

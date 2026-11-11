@@ -1,0 +1,13 @@
+{
+  "name": "@bottleneck/schema",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Types generated from /schema plus the raw JSON Schemas. Single source of truth for the venue, scenario and run formats.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

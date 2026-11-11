@@ -1,0 +1,145 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "common.schema.json",
+  "title": "Common",
+  "description": "Shared building blocks for the venue, scenario and run documents. All lengths are metres, all times are seconds.",
+  "definitions": {
+    "Id": {
+      "title": "Id",
+      "description": "Element or document id: letters, digits, '-' and '_', starting with a letter or digit.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+    },
+    "Name": {
+      "title": "Name",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "Point": {
+      "title": "Point",
+      "description": "A position in metres in the venue's own coordinate system (x to the right, y down, like the background image).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "Segment": {
+      "title": "Segment",
+      "description": "A straight line from a to b, in metres.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b"],
+      "properties": {
+        "a": { "$ref": "common.schema.json#/definitions/Point" },
+        "b": { "$ref": "common.schema.json#/definitions/Point" }
+      }
+    },
+    "Ring": {
+      "title": "Ring",
+      "description": "A closed polygon outline. The last point connects back to the first; do not repeat it.",
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 2000,
+      "items": { "$ref": "common.schema.json#/definitions/Point" }
+    },
+    "Polygon": {
+      "title": "Polygon",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outer"],
+      "properties": {
+        "outer": { "$ref": "common.schema.json#/definitions/Ring" },
+        "holes": {
+          "type": "array",
+          "maxItems": 200,
+          "items": { "$ref": "common.schema.json#/definitions/Ring" }
+        }
+      }
+    },
+    "Probability": {
+      "title": "Probability",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "Seconds": {
+      "title": "Seconds",
+      "description": "Simulated time in seconds. Absolute times are relative to the scenario's t = 0 (see Scenario.timeline).",
+      "type": "number"
+    },
+    "Distribution": {
+      "title": "Distribution",
+      "description": "A random quantity, such as a service time in seconds or a walking speed in m/s.",
+      "oneOf": [
+        { "$ref": "common.schema.json#/definitions/FixedDistribution" },
+        { "$ref": "common.schema.json#/definitions/UniformDistribution" },
+        { "$ref": "common.schema.json#/definitions/ExponentialDistribution" },
+        { "$ref": "common.schema.json#/definitions/TruncatedNormalDistribution" },
+        { "$ref": "common.schema.json#/definitions/ShiftedLognormalDistribution" }
+      ]
+    },
+    "FixedDistribution": {
+      "title": "FixedDistribution",
+      "description": "Always the same value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "const": "fixed" },
+        "value": { "type": "number", "minimum": 0 }
+      }
+    },
+    "UniformDistribution": {
+      "title": "UniformDistribution",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "min", "max"],
+      "properties": {
+        "kind": { "const": "uniform" },
+        "min": { "type": "number", "minimum": 0 },
+        "max": { "type": "number", "minimum": 0 }
+      }
+    },
+    "ExponentialDistribution": {
+      "title": "ExponentialDistribution",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mean"],
+      "properties": {
+        "kind": { "const": "exponential" },
+        "mean": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "TruncatedNormalDistribution": {
+      "title": "TruncatedNormalDistribution",
+      "description": "Normal(mean, sd) limited to [min, max] by redrawing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mean", "sd", "min", "max"],
+      "properties": {
+        "kind": { "const": "truncatedNormal" },
+        "mean": { "type": "number" },
+        "sd": { "type": "number", "minimum": 0 },
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+    "ShiftedLognormalDistribution": {
+      "title": "ShiftedLognormalDistribution",
+      "description": "shift + e^N with N ~ Normal(mu, sigma). Never below shift, with a long right tail. mu and sigma are the parameters of the underlying normal, so E[S] and E[S²] are exact (needed for the Pollaczek-Khinchine test).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "shift", "mu", "sigma"],
+      "properties": {
+        "kind": { "const": "shiftedLognormal" },
+        "shift": { "type": "number", "minimum": 0 },
+        "mu": { "type": "number" },
+        "sigma": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

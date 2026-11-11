@@ -1,0 +1,42 @@
+[
+  {
+    "why": "geometry must be in metres as {x, y} objects, not pixel arrays",
+    "schema": "venue.schema.json",
+    "patch": { "sources": [{ "id": "tram", "name": "Tram stop", "position": [120, 300], "share": 1 }] }
+  },
+  {
+    "why": "unknown fields are rejected",
+    "schema": "venue.schema.json",
+    "patch": { "colour": "red" }
+  },
+  {
+    "why": "a polygon needs at least 3 points",
+    "schema": "venue.schema.json",
+    "patch": { "walkableAreas": [{ "id": "plaza", "polygon": { "outer": [{ "x": 0, "y": 0 }, { "x": 1, "y": 1 }] } }] }
+  },
+  {
+    "why": "a newer schemaVersion than this code knows is rejected",
+    "schema": "venue.schema.json",
+    "patch": { "schemaVersion": 2 }
+  },
+  {
+    "why": "a probability above 1 is rejected",
+    "schema": "scenario.schema.json",
+    "patch": { "carShare": 1.5 }
+  },
+  {
+    "why": "the seed must be an unsigned 32-bit integer",
+    "schema": "scenario.schema.json",
+    "patch": { "seed": -1 }
+  },
+  {
+    "why": "a distribution must be one of the known kinds",
+    "schema": "scenario.schema.json",
+    "patch": { "parameters": { "freeWalkingSpeed": { "kind": "gamma", "shape": 2 } } }
+  },
+  {
+    "why": "the reference clock is a 24-hour HH:MM time",
+    "schema": "scenario.schema.json",
+    "patch": { "timeline": { "referenceClock": "8pm", "gatesOpen": -5400, "eventStart": 0, "eventEnd": 9000, "horizon": 14400 } }
+  }
+]

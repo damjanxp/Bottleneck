@@ -1,0 +1,358 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "venue.schema.json",
+  "title": "Venue",
+  "description": "One site: background image, scale and every drawn element. Geometry is stored in metres, never pixels. Vehicle elements (roads, barriers, lots, crossings) are added in Phase 3.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "name",
+    "walkableAreas",
+    "obstacles",
+    "sources",
+    "screeningStages",
+    "gateGroups",
+    "destinations"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "$ref": "common.schema.json#/definitions/Id"
+    },
+    "name": {
+      "$ref": "common.schema.json#/definitions/Name"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "attribution": {
+      "description": "Credit for the map the venue was drawn from, e.g. '© OpenStreetMap contributors'.",
+      "type": "string",
+      "maxLength": 500
+    },
+    "background": {
+      "$ref": "#/definitions/Background"
+    },
+    "parameters": {
+      "$ref": "#/definitions/VenueParameters"
+    },
+    "walkableAreas": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/definitions/WalkableArea"
+      }
+    },
+    "obstacles": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "$ref": "#/definitions/Obstacle"
+      }
+    },
+    "sources": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/definitions/PedestrianSource"
+      }
+    },
+    "screeningStages": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/definitions/ScreeningStage"
+      }
+    },
+    "gateGroups": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/definitions/GateGroup"
+      }
+    },
+    "destinations": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/definitions/Destination"
+      }
+    }
+  },
+  "definitions": {
+    "Background": {
+      "title": "Background",
+      "description": "The map image the venue is drawn on. Display only: the simulation never reads it. origin is where the image top-left corner sits, in venue metres.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image",
+        "widthPx",
+        "heightPx",
+        "metresPerPixel",
+        "origin"
+      ],
+      "properties": {
+        "image": {
+          "description": "Relative path (examples) or stored upload name (backend).",
+          "type": "string",
+          "maxLength": 300
+        },
+        "widthPx": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "heightPx": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "metresPerPixel": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "origin": {
+          "$ref": "common.schema.json#/definitions/Point"
+        }
+      }
+    },
+    "VenueParameters": {
+      "title": "VenueParameters",
+      "description": "Venue-scope assumptions (spec section 5). Missing values use the built-in defaults.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "speedDensity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gamma",
+            "rhoMax"
+          ],
+          "properties": {
+            "gamma": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "rhoMax": {
+              "description": "people per m²",
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        }
+      }
+    },
+    "WalkableArea": {
+      "title": "WalkableArea",
+      "description": "Where pedestrians may walk. Everything else blocks them; holes are obstacles.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "polygon"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "polygon": {
+          "$ref": "common.schema.json#/definitions/Polygon"
+        }
+      }
+    },
+    "Obstacle": {
+      "title": "Obstacle",
+      "description": "An area pedestrians cannot enter, even inside a walkable area.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "polygon"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "polygon": {
+          "$ref": "common.schema.json#/definitions/Polygon"
+        }
+      }
+    },
+    "PedestrianSource": {
+      "title": "PedestrianSource",
+      "description": "Where pedestrians appear: a bus or tram stop, a street entrance.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "position",
+        "share"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "position": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "share": {
+          "description": "Relative weight of arrivals from this source (weights are normalised over all pedestrian sources).",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "LaneLine": {
+      "title": "LaneLine",
+      "description": "The line the lanes of a gate group or screening stage stand on. Lanes are spaced evenly along it. People pass from the right-hand side of a→b to the left-hand side (the inside).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "a",
+        "b"
+      ],
+      "properties": {
+        "a": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "b": {
+          "$ref": "common.schema.json#/definitions/Point"
+        }
+      }
+    },
+    "ScreeningStage": {
+      "title": "ScreeningStage",
+      "description": "Security or bag-check lanes in front of one or more gate groups.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "line",
+        "laneCount",
+        "queueLength",
+        "serviceTime"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "line": {
+          "$ref": "#/definitions/LaneLine"
+        },
+        "laneCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "queueLength": {
+          "description": "Length of each lane's queue area in metres.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "serviceTime": {
+          "$ref": "common.schema.json#/definitions/Distribution"
+        }
+      }
+    },
+    "GateGroup": {
+      "title": "GateGroup",
+      "description": "A group of identical turnstile lanes between outside and inside. screeningStageId names the screening stage people pass before these gates, if any.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "line",
+        "laneCount",
+        "queueLength",
+        "serviceTime",
+        "scanFailure"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "screeningStageId": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "line": {
+          "$ref": "#/definitions/LaneLine"
+        },
+        "laneCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "queueLength": {
+          "description": "Length of each lane's queue area in metres.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "serviceTime": {
+          "$ref": "common.schema.json#/definitions/Distribution"
+        },
+        "scanFailure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rate",
+            "retryTime"
+          ],
+          "properties": {
+            "rate": {
+              "$ref": "common.schema.json#/definitions/Probability"
+            },
+            "retryTime": {
+              "$ref": "common.schema.json#/definitions/Distribution"
+            }
+          }
+        }
+      }
+    },
+    "Destination": {
+      "title": "Destination",
+      "description": "Where pedestrians go once inside (hall, stage). They finish when they reach it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "area"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "area": {
+          "$ref": "common.schema.json#/definitions/Polygon"
+        }
+      }
+    }
+  }
+}
