@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { strings } from "./strings.ts";
+import { SimulationView } from "./ui/SimulationView.tsx";
 import type { WorkerRequest, WorkerResponse } from "./workerProtocol.ts";
 
-const CURRENT_PHASE = 0;
+type SelfCheckResult = Extract<WorkerResponse, { type: "selfCheckResult" }>;
+type SelfCheckState = { status: "running" } | { status: "done"; result: SelfCheckResult } | { status: "error"; message: string };
 
-type SelfCheckState = { status: "running" } | { status: "done"; result: Extract<WorkerResponse, { type: "selfCheckResult" }> } | { status: "error"; message: string };
-
+/** Runs the engine self-check in its own short-lived worker, so it never delays the simulation. */
 function useEngineSelfCheck(): SelfCheckState {
   const [state, setState] = useState<SelfCheckState>({ status: "running" });
 
@@ -13,7 +14,9 @@ function useEngineSelfCheck(): SelfCheckState {
     const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), { type: "module" });
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const data = event.data;
-      setState(data.type === "selfCheckResult" ? { status: "done", result: data } : { status: "error", message: data.message });
+      if (data.type === "selfCheckResult") setState({ status: "done", result: data });
+      else if (data.type === "error") setState({ status: "error", message: data.message });
+      else return;
       worker.terminate();
     };
     worker.onerror = (event) => {
@@ -28,103 +31,52 @@ function useEngineSelfCheck(): SelfCheckState {
   return state;
 }
 
-function SelfCheckCard() {
+function SelfCheckLine() {
   const state = useEngineSelfCheck();
   const s = strings.selfCheck;
-
   return (
-    <section aria-labelledby="self-check-heading" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <h2 id="self-check-heading" className="text-lg font-semibold">
-        {s.heading}
-      </h2>
-      <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{s.explainer}</p>
-
-      <div aria-live="polite" className="mt-4">
-        {state.status === "running" && <p className="text-sm text-slate-500">{s.running}</p>}
-
-        {state.status === "error" && (
-          <p className="text-sm font-medium text-red-700 dark:text-red-400">
-            ✕ {s.failed}: {state.message}
-          </p>
-        )}
-
-        {state.status === "done" && (
-          <>
-            <p className={`text-sm font-semibold ${state.result.matches ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}`}>
-              {state.result.matches ? `✓ ${s.match}` : `✕ ${s.mismatch}`}
-            </p>
-            <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
-              <dt className="text-slate-500">{s.hash}</dt>
-              <dd className="font-mono break-all">{state.result.hash}</dd>
-              <dt className="text-slate-500">{s.expected}</dt>
-              <dd className="font-mono break-all">{state.result.expected}</dd>
-              <dt className="text-slate-500">{s.numbers}</dt>
-              <dd className="font-mono">{state.result.numbers.toLocaleString("en-GB")}</dd>
-              <dt className="text-slate-500">{s.duration}</dt>
-              <dd className="font-mono">{state.result.durationMs.toFixed(1)} ms</dd>
-              <dt className="text-slate-500">{s.engineVersion}</dt>
-              <dd className="font-mono">{state.result.engineVersion}</dd>
-            </dl>
-          </>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function Roadmap() {
-  const r = strings.roadmap;
-  return (
-    <section aria-labelledby="roadmap-heading" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <h2 id="roadmap-heading" className="text-lg font-semibold">
-        {r.heading}
-      </h2>
-      <ol className="mt-3 space-y-2 text-sm">
-        {r.phases.map((phase) => {
-          const state = phase.id < CURRENT_PHASE ? r.done : phase.id === CURRENT_PHASE ? r.inProgress : r.planned;
-          const marker = phase.id < CURRENT_PHASE ? "●" : phase.id === CURRENT_PHASE ? "◐" : "○";
-          return (
-            <li key={phase.id} className="flex gap-3">
-              <span aria-hidden="true" className={phase.id === CURRENT_PHASE ? "text-amber-500" : "text-slate-400"}>
-                {marker}
-              </span>
-              <span className="flex-1">
-                <span className="font-mono text-slate-500">{phase.id}</span> {phase.title}
-                {"optional" in phase && phase.optional && <span className="text-slate-500"> ({r.optional})</span>}
-              </span>
-              <span className="text-slate-500">{state}</span>
-            </li>
-          );
-        })}
-      </ol>
-    </section>
+    <p className="text-xs text-slate-500" aria-live="polite">
+      {s.heading}:{" "}
+      {state.status === "running" && s.running}
+      {state.status === "error" && (
+        <span className="font-medium text-red-700 dark:text-red-400">
+          ✕ {s.failed}: {state.message}
+        </span>
+      )}
+      {state.status === "done" && (
+        <>
+          <span className={state.result.matches ? "font-medium text-emerald-700 dark:text-emerald-400" : "font-medium text-red-700 dark:text-red-400"}>
+            {state.result.matches ? `✓ ${s.match}` : `✕ ${s.mismatch}`}
+          </span>{" "}
+          <span className="font-mono" title={`${state.result.numbers.toLocaleString("en-GB")} numbers, engine ${state.result.engineVersion}`}>
+            {state.result.hash.slice(0, 16)}… · {state.result.durationMs.toFixed(0)} ms
+          </span>
+        </>
+      )}
+    </p>
   );
 }
 
 export function App() {
   return (
-    <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 px-4 py-10 sm:py-16">
-      <header>
-        <h1 className="text-4xl font-bold tracking-tight">
+    <div className="mx-auto flex min-h-screen max-w-[1500px] flex-col gap-4 px-4 py-4 sm:py-6">
+      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h1 className="text-2xl font-bold tracking-tight">
           <span className="text-amber-500">⟩⟨</span> {strings.appName}
         </h1>
-        <p className="mt-3 text-lg text-slate-700 dark:text-slate-300">{strings.tagline}</p>
-        <p className="mt-3 text-slate-600 dark:text-slate-400">{strings.intro}</p>
-        <p className="mt-4 inline-block rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-900 dark:bg-amber-500/15 dark:text-amber-300">
-          {strings.status.current}
-        </p>
+        <p className="text-sm text-slate-600 dark:text-slate-400">{strings.tagline}</p>
       </header>
 
-      <main className="flex flex-col gap-6">
-        <SelfCheckCard />
-        <Roadmap />
+      <main>
+        <SimulationView />
       </main>
 
-      <footer className="mt-auto flex flex-wrap justify-between gap-2 pt-6 text-sm text-slate-500">
+      <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-800">
+        <SelfCheckLine />
+        <span>{strings.footer.note}</span>
         <a className="underline hover:text-slate-800 dark:hover:text-slate-200" href={strings.footer.sourceUrl}>
           {strings.footer.source}
         </a>
-        <span>{strings.footer.note}</span>
       </footer>
     </div>
   );
