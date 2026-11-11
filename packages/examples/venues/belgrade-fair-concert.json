@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "belgrade-fair-concert",
+  "name": "Belgrade Fair, concert in one hall",
+  "description": "A concert in one hall at Beogradski sajam: fixed start, one screening stage in front of the turnstile gate group.",
+  "attribution": "Layout drawn by hand after © OpenStreetMap contributors",
+  "walkableAreas": [
+    { "id": "forecourt", "name": "Forecourt and boulevard sidewalk", "polygon": { "outer": [{ "x": 0, "y": 0 }, { "x": 220, "y": 0 }, { "x": 220, "y": 140 }, { "x": 0, "y": 140 }] } },
+    { "id": "inside", "name": "Inside the grounds", "polygon": { "outer": [{ "x": 205, "y": 0 }, { "x": 300, "y": 0 }, { "x": 300, "y": 140 }, { "x": 205, "y": 140 }] } }
+  ],
+  "obstacles": [
+    { "id": "screen-wall-n", "name": "Screening funnel wall north", "polygon": { "outer": [{ "x": 180, "y": 0 }, { "x": 190, "y": 0 }, { "x": 190, "y": 62 }, { "x": 180, "y": 62 }] } },
+    { "id": "screen-wall-s", "name": "Screening funnel wall south", "polygon": { "outer": [{ "x": 180, "y": 78 }, { "x": 190, "y": 78 }, { "x": 190, "y": 140 }, { "x": 180, "y": 140 }] } },
+    { "id": "gate-wall-n", "name": "Wall north of gate", "polygon": { "outer": [{ "x": 205, "y": 0 }, { "x": 215, "y": 0 }, { "x": 215, "y": 62 }, { "x": 205, "y": 62 }] } },
+    { "id": "gate-wall-s", "name": "Wall south of gate", "polygon": { "outer": [{ "x": 205, "y": 78 }, { "x": 215, "y": 78 }, { "x": 215, "y": 140 }, { "x": 205, "y": 140 }] } },
+    { "id": "kiosk", "name": "Kiosk", "polygon": { "outer": [{ "x": 80, "y": 60 }, { "x": 100, "y": 60 }, { "x": 100, "y": 80 }, { "x": 80, "y": 80 }] } }
+  ],
+  "sources": [
+    { "id": "tram-stop", "name": "Tram stop, Bulevar vojvode Misica", "position": { "x": 10, "y": 40 }, "share": 0.4 },
+    { "id": "bus-stop", "name": "Bus stop, Bulevar vojvode Misica", "position": { "x": 10, "y": 100 }, "share": 0.35 },
+    { "id": "street-entrance", "name": "Street entrance", "position": { "x": 110, "y": 135 }, "share": 0.25 }
+  ],
+  "screeningStages": [
+    { "id": "screening-main", "name": "Bag check", "line": { "a": { "x": 185, "y": 74 }, "b": { "x": 185, "y": 66 } }, "laneCount": 4, "queueLength": 15, "serviceTime": { "kind": "shiftedLognormal", "shift": 2, "mu": -0.125, "sigma": 0.5 } }
+  ],
+  "gateGroups": [
+    { "id": "gate-main", "name": "Main turnstiles", "screeningStageId": "screening-main", "line": { "a": { "x": 210, "y": 73 }, "b": { "x": 210, "y": 67 } }, "laneCount": 4, "queueLength": 10, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } }
+  ],
+  "destinations": [
+    { "id": "hall", "name": "Concert hall", "area": { "outer": [{ "x": 250, "y": 30 }, { "x": 290, "y": 30 }, { "x": 290, "y": 110 }, { "x": 250, "y": 110 }] } }
+  ]
+}

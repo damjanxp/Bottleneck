@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "concert-lane-fails",
+  "venueId": "belgrade-fair-concert",
+  "name": "Concert, 5 lanes, one lane fails 30 min before the start",
+  "eventType": "concert",
+  "timeline": { "referenceClock": "20:00", "gatesOpen": -5400, "eventStart": 0, "eventEnd": 9000, "horizon": 3600 },
+  "attendance": 6000,
+  "carShare": 0,
+  "arrivals": { "preset": "concert" },
+  "seed": 1,
+  "overrides": { "gate-main": { "laneCount": 5 }, "screening-main": { "laneCount": 5 } },
+  "timedEvents": [{ "kind": "laneFail", "at": -1800, "groupId": "gate-main", "laneIndex": 2 }]
+}

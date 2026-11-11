@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "belgrade-fair-fair-day",
+  "name": "Belgrade Fair, open-door fair day",
+  "description": "Beogradski sajam on a fair day: pedestrians arrive from the tram and bus stops on Bulevar vojvode Misica and from the street entrance, cross the forecourt and enter through three gate groups into the halls. No screening.",
+  "attribution": "Layout drawn by hand after © OpenStreetMap contributors",
+  "walkableAreas": [
+    { "id": "forecourt", "name": "Forecourt and boulevard sidewalk", "polygon": { "outer": [{ "x": 0, "y": 0 }, { "x": 250, "y": 0 }, { "x": 250, "y": 200 }, { "x": 0, "y": 200 }] } },
+    { "id": "inside", "name": "Inside the grounds", "polygon": { "outer": [{ "x": 230, "y": 0 }, { "x": 360, "y": 0 }, { "x": 360, "y": 200 }, { "x": 230, "y": 200 }] } }
+  ],
+  "obstacles": [
+    { "id": "wall-n", "name": "Wall north of gate A", "polygon": { "outer": [{ "x": 236, "y": 0 }, { "x": 246, "y": 0 }, { "x": 246, "y": 40 }, { "x": 236, "y": 40 }] } },
+    { "id": "wall-ab", "name": "Wall between gates A and B", "polygon": { "outer": [{ "x": 236, "y": 52 }, { "x": 246, "y": 52 }, { "x": 246, "y": 100 }, { "x": 236, "y": 100 }] } },
+    { "id": "wall-bc", "name": "Wall between gates B and C", "polygon": { "outer": [{ "x": 236, "y": 112 }, { "x": 246, "y": 112 }, { "x": 246, "y": 162 }, { "x": 236, "y": 162 }] } },
+    { "id": "wall-s", "name": "Wall south of gate C", "polygon": { "outer": [{ "x": 236, "y": 174 }, { "x": 246, "y": 174 }, { "x": 246, "y": 200 }, { "x": 236, "y": 200 }] } },
+    { "id": "fountain", "name": "Fountain", "polygon": { "outer": [{ "x": 80, "y": 80 }, { "x": 110, "y": 80 }, { "x": 110, "y": 110 }, { "x": 80, "y": 110 }] } },
+    { "id": "pavilion", "name": "Information pavilion", "polygon": { "outer": [{ "x": 130, "y": 30 }, { "x": 190, "y": 30 }, { "x": 190, "y": 60 }, { "x": 130, "y": 60 }] } }
+  ],
+  "sources": [
+    { "id": "tram-stop", "name": "Tram stop, Bulevar vojvode Misica", "position": { "x": 8, "y": 60 }, "share": 0.35 },
+    { "id": "bus-stop", "name": "Bus stop, Bulevar vojvode Misica", "position": { "x": 8, "y": 170 }, "share": 0.3 },
+    { "id": "street-entrance", "name": "Street entrance", "position": { "x": 120, "y": 196 }, "share": 0.35 }
+  ],
+  "screeningStages": [],
+  "gateGroups": [
+    { "id": "gate-a", "name": "Gate A", "line": { "a": { "x": 240, "y": 50 }, "b": { "x": 240, "y": 42 } }, "laneCount": 8, "queueLength": 20, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } },
+    { "id": "gate-b", "name": "Gate B", "line": { "a": { "x": 240, "y": 110 }, "b": { "x": 240, "y": 102 } }, "laneCount": 8, "queueLength": 20, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } },
+    { "id": "gate-c", "name": "Gate C", "line": { "a": { "x": 240, "y": 172 }, "b": { "x": 240, "y": 166 } }, "laneCount": 6, "queueLength": 15, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } }
+  ],
+  "destinations": [
+    { "id": "hall-1", "name": "Hall 1", "area": { "outer": [{ "x": 280, "y": 10 }, { "x": 350, "y": 10 }, { "x": 350, "y": 90 }, { "x": 280, "y": 90 }] } },
+    { "id": "hall-2", "name": "Hall 2", "area": { "outer": [{ "x": 280, "y": 110 }, { "x": 350, "y": 110 }, { "x": 350, "y": 190 }, { "x": 280, "y": 190 }] } }
+  ]
+}

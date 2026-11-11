@@ -1,0 +1,16 @@
+{
+  "name": "@bottleneck/examples",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Built-in example venues and scenarios (JSON, valid against /schema).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bottleneck/schema": "*"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

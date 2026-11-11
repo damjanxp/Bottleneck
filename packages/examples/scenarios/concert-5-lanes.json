@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "concert-5-lanes",
+  "venueId": "belgrade-fair-concert",
+  "name": "Concert, 5 lanes",
+  "eventType": "concert",
+  "timeline": { "referenceClock": "20:00", "gatesOpen": -5400, "eventStart": 0, "eventEnd": 9000, "horizon": 3600 },
+  "attendance": 6000,
+  "carShare": 0,
+  "arrivals": { "preset": "concert" },
+  "seed": 1,
+  "overrides": { "gate-main": { "laneCount": 5 }, "screening-main": { "laneCount": 5 } }
+}
