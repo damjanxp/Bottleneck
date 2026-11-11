@@ -1,0 +1,13 @@
+{
+  "name": "@bottleneck/engine",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Pure TypeScript simulation engine. No DOM, no network. Runs in a Web Worker and in Node.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json"
+  }
+}

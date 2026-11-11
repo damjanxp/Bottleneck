@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // No "DOM" and no Node types: the engine must compile without either (invariant 6, engine purity).
+    "lib": ["ES2023"],
+    "types": []
+  },
+  "include": ["src"]
+}
