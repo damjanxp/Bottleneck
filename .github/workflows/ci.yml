@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Schema, lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The "CI version" of Node that determinism checks compare against (invariant 1).
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generated schema types are up to date
+        run: npm run schema:check
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - name: Unit and validation tests
+        run: npm test
+
+      - name: Build the web app
+        run: npm run build
