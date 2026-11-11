@@ -26,3 +26,24 @@ export { EXPECTED_SELF_CHECK_HASH, runSelfCheck, type SelfCheckResult } from "./
 export { Simulation, TICK_SECONDS, type EventHandler, type TickSystem } from "./simulation.ts";
 export { EventKind, LaneBank, percentileNearestRank, type LaneCallbacks, type LaneMetrics, type ServiceOutcome } from "./lanes.ts";
 export { distributionMoments, makeSampler, shiftedLognormalFromMean, type Sampler } from "./sampling.ts";
+export { AGENT_STATE_COUNT, AGENT_STATE_NAMES, AgentState } from "./agents.ts";
+export { PiecewiseLinearCurve, resolveArrivalPoints, type CurvePoint } from "./arrivals.ts";
+export { DENSITY_CELL, weidmannFactor } from "./density.ts";
+export { CELL_SIZE } from "./geometry.ts";
+export {
+  RUN_DEFAULTS,
+  SNAPSHOT_FIELDS,
+  SnapshotField,
+  createRun,
+  hashMetrics,
+  snapshotLength,
+  type LaneLayout,
+  type LaneLive,
+  type LaneReport,
+  type LiveDensity,
+  type ResolvedParameters,
+  type Run,
+  type RunDebug,
+  type RunMetrics,
+  type RunOptions,
+} from "./run.ts";

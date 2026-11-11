@@ -233,6 +233,40 @@ export class LaneBank {
     return displaced;
   }
 
+  /**
+   * A queued agent leaves this lane's FIFO without being served (it jockeys to another lane).
+   * Like a lane failure, its visit here is void: its wait so far is dropped from both sides of
+   * Little's law and it no longer counts as an arrival. Returns false if the agent is not queued
+   * here (for example, already in service).
+   */
+  withdraw(laneId: number, agent: number): boolean {
+    const lane = this.lane(laneId);
+    let i = lane.head;
+    while (i < lane.agents.length && lane.agents[i] !== agent) i++;
+    if (i === lane.agents.length) return false;
+    const now = this.sim.now;
+    lane.accumulate(now);
+    const commitTime = lane.commitTimes[i] as number;
+    lane.queueIntegral -= now - commitTime;
+    lane.queuedCommitSum -= commitTime;
+    lane.agents.splice(i, 1);
+    lane.commitTimes.splice(i, 1);
+    lane.ready.splice(i, 1);
+    lane.arrivals--;
+    if (lane.head === lane.agents.length) {
+      lane.clearQueue();
+      lane.queuedCommitSum = 0;
+    }
+    this.tryStart(laneId);
+    return true;
+  }
+
+  /** Calls fn(agent, position, ready) for every queued agent, head (position 0) first. */
+  forEachQueued(laneId: number, fn: (agent: number, position: number, ready: boolean) => void): void {
+    const lane = this.lane(laneId);
+    for (let i = lane.head; i < lane.agents.length; i++) fn(lane.agents[i] as number, i - lane.head, lane.ready[i] as boolean);
+  }
+
   reopen(laneId: number): void {
     const lane = this.lane(laneId);
     lane.accumulate(this.sim.now);
