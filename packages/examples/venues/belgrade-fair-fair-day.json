@@ -17,14 +17,14 @@
     { "id": "pavilion", "name": "Information pavilion", "polygon": { "outer": [{ "x": 130, "y": 30 }, { "x": 190, "y": 30 }, { "x": 190, "y": 60 }, { "x": 130, "y": 60 }] } }
   ],
   "sources": [
-    { "id": "tram-stop", "name": "Tram stop, Bulevar vojvode Misica", "position": { "x": 8, "y": 60 }, "share": 0.35 },
-    { "id": "bus-stop", "name": "Bus stop, Bulevar vojvode Misica", "position": { "x": 8, "y": 170 }, "share": 0.3 },
-    { "id": "street-entrance", "name": "Street entrance", "position": { "x": 120, "y": 196 }, "share": 0.35 }
+    { "id": "tram-stop", "name": "Tram stop, Bulevar vojvode Misica", "position": { "x": 8, "y": 60 }, "share": 0.6 },
+    { "id": "bus-stop", "name": "Bus stop, Bulevar vojvode Misica", "position": { "x": 8, "y": 170 }, "share": 0.15 },
+    { "id": "street-entrance", "name": "Street entrance", "position": { "x": 120, "y": 196 }, "share": 0.25 }
   ],
   "screeningStages": [],
   "gateGroups": [
-    { "id": "gate-a", "name": "Gate A", "line": { "a": { "x": 240, "y": 50 }, "b": { "x": 240, "y": 42 } }, "laneCount": 8, "queueLength": 20, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } },
-    { "id": "gate-b", "name": "Gate B", "line": { "a": { "x": 240, "y": 110 }, "b": { "x": 240, "y": 102 } }, "laneCount": 8, "queueLength": 20, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } },
+    { "id": "gate-a", "name": "Gate A", "line": { "a": { "x": 240, "y": 50 }, "b": { "x": 240, "y": 42 } }, "laneCount": 4, "queueLength": 30, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } },
+    { "id": "gate-b", "name": "Gate B", "line": { "a": { "x": 240, "y": 110 }, "b": { "x": 240, "y": 102 } }, "laneCount": 5, "queueLength": 20, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } },
     { "id": "gate-c", "name": "Gate C", "line": { "a": { "x": 240, "y": 172 }, "b": { "x": 240, "y": 166 } }, "laneCount": 6, "queueLength": 15, "serviceTime": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.2255, "sigma": 0.6 }, "scanFailure": { "rate": 0.03, "retryTime": { "kind": "uniform", "min": 5, "max": 15 } } }
   ],
   "destinations": [

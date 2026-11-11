@@ -55,19 +55,19 @@ export const exampleVenues: ExampleVenue[] = [
     "Open-door fair day: three gate groups, arrivals from the tram and bus stops and the street entrance, no screening.",
     fairDayVenue,
     [
-      { json: fairDayBaseline, description: "12,000 visitors over the day, all 22 gate lanes open." },
+      { json: fairDayBaseline, description: "4,000 visitors over a two-hour session, all 15 gate lanes open." },
       { json: fairDayBusBurst, description: "Baseline plus a full tram (1,500) and a full bus load (1,000) arriving 30 minutes after opening." },
-      { json: fairDayGateAReduced, description: "Gate A staffed with only 3 of its 8 lanes." },
+      { json: fairDayGateAReduced, description: "Gate A staffed with only 1 of its 4 lanes." },
     ],
   ),
   build(
     "belgrade-fair-concert",
-    "Concert in one hall: a bag-check stage in front of one turnstile gate group, fixed start, about 6,000 people.",
+    "Concert in one hall: a bag-check stage in front of one turnstile gate group, fixed start, about 4,500 people.",
     concertVenue,
     [
       { json: concert3Lanes, description: "3 turnstile lanes (about 2,700 people/h): expected to jam." },
       { json: concert5Lanes, description: "5 turnstile lanes (about 4,500 people/h): expected to mostly cope." },
-      { json: concertLaneFails, description: "5 lanes, one turnstile lane fails 30 minutes before the start." },
+      { json: concertLaneFails, description: "5 lanes, one turnstile lane fails 50 minutes before the start." },
     ],
   ),
 ];
