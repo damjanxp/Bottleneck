@@ -23,16 +23,16 @@ _Last updated: 2026-11-11_
 
 | | |
 |---|---|
-| **Current phase** | Phase 0: Foundation. Built; waiting for the live-page check. |
-| **Next phase** | Phase 1: pedestrian simulation on the built-in Belgrade Fair venues |
-| **Live demo** | Vercel, once the project is imported (see below) |
+| **Current phase** | Phase 1: pedestrian simulation, in progress (milestone 1a done; see [section 6](#phase-1-pedestrian-simulation)). Phase 0 is built and CI is green. |
+| **Next phase** | Phase 2: scenarios and comparison |
+| **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys |
 | **CI** | GitHub Actions: schema check, lint, typecheck, tests, build on every push |
+| **How the work is done** | Work is now orchestrated with subagents: the main agent plans and reviews, and subagents do focused pieces (code, tests, docs). Everything still lands on a `phase-N` branch and passes `npm run check` before merging. |
 
 ### What the owner needs to do now
 
-1. **Import the repository into Vercel** (one time): Vercel dashboard → *Add New… → Project* → import `damjanxp/Bottleneck`. Leave *Root Directory* as the repository root and the framework preset as "Other". `vercel.json` already sets the install command, build command, output folder and security headers. Every push to `main` then deploys automatically.
-2. **Check the live page** (Phase 0's [human] check): open the Vercel URL and confirm that the "Engine self-check" card says **✓ Match: bit-identical to Node**. Send me the URL and I'll add it here and to the README.
-3. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026). Everything works on 20.19 for now, but some newer tools, such as Vitest 5, already require 22 or later.
+1. **Check the live page** (Phase 0's [human] check): open the Vercel URL and confirm that the "Engine self-check" card says **✓ Match: bit-identical to Node**. Send me the URL and I'll add it here and to the README.
+2. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026). Everything works on 20.19 for now, but some newer tools, such as Vitest 5, already require 22 or later.
 
 ---
 
@@ -106,6 +106,29 @@ Each record has four short parts: context, decision, alternatives, consequences.
 - **Decision:** `packages/engine/tsconfig.json` compiles with `lib: ["ES2023"]` and no `DOM` or Node types, so `document` or `window` do not even type-check. ESLint additionally bans browser and Node globals, Node built-in modules and UI packages inside `packages/engine/src`.
 - **Consequences:** Invariant 6 has an automated check (lint and typecheck in CI) from Phase 0.
 
+### D-011 Little's law includes the wait-so-far of people still queuing
+- **Context:** Little's law says L = λ·W. A lane's reporting window ends at its last service start. If the lane is overloaded, people are still queuing at that moment, and their waiting has not been added to the sum of finished waits yet. Comparing only the finished waits with the queue length then fails for a definitional reason, not because anything is wrong.
+- **Decision:** The core checks Little's law as two independent counts of the same person-seconds: (a) the time-integral of the queue length, and (b) the sum of all waits, where people still queuing at the window end contribute their wait so far. The relative difference is `littleLawError` in the lane metrics and must be about 0 (the test asserts under 10⁻⁹) for every lane, overloaded or not. The textbook form, mean queue = arrival rate × mean wait within 3%, is asserted only when the lane has drained (at most 2 people still queuing at the window end).
+- **Alternatives:** Asserting the textbook form on every lane, including overloaded ones (fails by definition); dropping the check for overloaded lanes (loses the strongest bookkeeping test).
+- **Consequences:** The check works on every lane of every run, including runs that end with a queue. The 3% textbook check still covers the drained case, which is the one a reader expects from the formula.
+
+### D-012 The M/G/1 test runs 40 hours per seed
+- **Context:** Review B6 asks that a statistical test pass only if the 95% confidence interval (CI) contains the theory **and** its half-width is under 3% of the theoretical value. With 20 seeds × 10 h, the M/G/1 wait at 80% utilisation with a lognormal tail is too noisy: the half-width stays above 3%.
+- **Decision:** The M/G/1 Pollaczek–Khinchine test runs 40 simulated hours per seed (41 h in total, the first 1 h is warm-up and not counted), 20 pinned seeds, with the stricter two-part rule. The M/D/1 test keeps 10 h per seed (after a 1 h warm-up), because its service time never varies and it is much less noisy.
+- **Alternatives:** Loosening the 3% rule (hides noise, which is what B6 forbids); more seeds (costs the same run time and the t-value changes).
+- **Consequences:** The M/G/1 test is the slowest in the suite but still runs in CI in seconds, because the lane core is cheap.
+
+### D-013 Lane behaviour: logical FIFO, readiness, failure and retry
+- **Context:** Spec 4.1 and review B3 need queue waits that still count people who are queuing but not yet standing at the lane (spillback), plus lane failure and scan retries.
+- **Decision:**
+  - **Wait starts at commit.** A person joins the lane's FIFO (first in, first out) the moment it commits to the lane, wherever it stands. Wq runs from commit to service start.
+  - **Service needs "ready".** A service starts at max(previous completion, the moment the head of the line is physically at the lane). `markReady` tells the core when a person arrives there.
+  - **Lane failure:** the person already in service finishes. Everyone still queuing is handed back to the caller in arrival order, to be assigned as new lane-visits elsewhere (their time on the failed lane is dropped from both sides of Little's law, and their arrival there is not counted).
+  - **Scan retry:** a failed scan keeps the lane busy for extra seconds, and the same person tries again.
+  - **Second failure:** the person is rejected to the manual lane (the lane is freed, the person is not counted as served).
+- **Alternatives:** Wait starts only when the person reaches the queue area (hides the cost of spillback, review B3); a lane failure that cancels the person in service (not physical).
+- **Consequences:** The core only needs the number of lanes, a few callbacks and the simulation clock; the pedestrian world (milestone 1b) decides where people walk and which lane they choose.
+
 ---
 
 ## 3. Review notes triage
@@ -173,10 +196,10 @@ Every check from spec section 9, sorted into the phase where the work actually h
 ### Phase 1: Pedestrian simulation on a built-in venue
 - [ ] [test] Two runs with the same seed give identical output
 - [ ] [test] The same tiny scenario gives the same metrics hash in Node and in Chrome's Web Worker (Playwright)
-- [ ] [test] D/D/1: at 80% utilisation the queue stays 0; at 125% the queue at time t equals (λ − μ)·t ± 1
-- [ ] [test] M/D/1 at 70% utilisation, Poisson arrivals injected at one lane, 20 pinned seeds × 10 h after a 1 h warm-up: the 95% CI of mean Lq contains the theoretical 0.817 and its half-width is under 3% of it
-- [ ] [test] M/G/1 with the implemented scan-time distribution at 80% utilisation: mean Wq matches Pollaczek–Khinchine using that distribution's E[S] and E[S²], by the same rule
-- [ ] [test] Little's law (L = λW within 3%) and conservation (states sum to agents created) on every lane and snapshot of the example runs
+- [x] [test] D/D/1: at 80% utilisation the queue stays 0; at 125% the queue at time t equals (λ − μ)·t ± 1 (`packages/engine/test/queueing.test.ts`)
+- [x] [test] M/D/1 at 70% utilisation, Poisson arrivals injected at one lane, 20 pinned seeds × 10 h after a 1 h warm-up: the 95% CI of mean Lq contains the theoretical 0.817 and its half-width is under 3% of it (`queueing.test.ts`)
+- [x] [test] M/G/1 with the implemented scan-time distribution at 80% utilisation: mean Wq matches Pollaczek–Khinchine using that distribution's E[S] and E[S²], by the same rule (40 h per seed, see D-012; `queueing.test.ts`)
+- [ ] [test] Little's law (L = λW within 3%) and conservation (states sum to agents created) on every lane and snapshot of the example runs. **Lane core done (D-011, `queueing.test.ts`); example runs pending.**
 - [ ] [test] Failing 2 of 4 lanes 30 min before the start (about 85% utilisation beforehand, pinned seed) raises the remaining lanes' maximum queue by at least 30% compared with the same seed without the failure
 - [ ] [test] Translating the venue gives bit-identical metrics; rescaling by a small factor changes the mean over 20 paired seeds by less than 2%
 - [ ] [human] The performance target in 7.2 is measured on the reference machine (10,000 pedestrians at 8×: frame p95 < 33 ms, worker tick p95 < 12 ms), and the numbers are recorded
@@ -277,7 +300,24 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
   - The schema covers only the pedestrian elements so far (vehicles come in Phase 3).
   - `run.metrics` is an open object until Phase 1.
   - The page is a placeholder: no simulation view yet.
-- **Owner checks ([human]):** see [section 1](#what-the-owner-needs-to-do-now). Import into Vercel, open the URL, confirm the green "Match" line.
+- **Owner checks ([human]):** see [section 1](#what-the-owner-needs-to-do-now). Open the Vercel URL, confirm the green "Match" line.
+
+### Phase 1: Pedestrian simulation
+
+**Plan** (2026-11-11), split into milestones so each one ends with passing tests and a merge.
+- **1a. Lane queueing core + validation tests (done).** `LaneBank` in `packages/engine/src/lanes.ts`: logical FIFO per lane, exact service events, scan retry, lane failure, per-lane metrics. Validated against queueing theory in `packages/engine/test/queueing.test.ts` (decisions D-011 to D-013).
+- **1b. Pedestrian world.** Walkable grid, flow fields (shortest-path distance maps towards each destination), density and the Weidmann speed-density relation (with the floor from B4), movement in 0.25 s steps, lane choice, spillback when the queue area is full, the run API, and the metrics from spec 4.5.
+- **1c. Example venues.** Belgrade Fair on a fair day and a concert, in `packages/examples`, as schema-valid venue and scenario JSON.
+- **1d. Worker protocol, renderer and simulation view.** Messages between the page and the engine Web Worker, snapshots as Transferable Float32Arrays, a PixiJS renderer, and the simulation view with play, pause and speed.
+- **1e. Replay, heatmap, performance overlay and the browser hash test.** Replay with a scrubber, a density heatmap, the `?perf=1` overlay, and the Playwright test that compares the metrics hash in Node and in Chrome's Web Worker.
+- *Risks:*
+  - **Performance at 10,000 agents:** frame p95 under 33 ms and worker tick p95 under 12 ms is a target, not a gate (review A8). Mitigation: structure-of-arrays data, no allocation in the tick, measure early in 1b.
+  - **PixiJS under the strict CSP (D-009):** PixiJS v8 should work without `unsafe-eval`, but this is only known once it runs under the production headers. Check in 1d with `npm run build` and `npm run preview`.
+  - **Replay memory:** storing every snapshot would pass 200 MB, so replay uses adaptive keyframes plus engine checkpoints (review C1). Check memory early in 1e.
+
+**Summary** (milestone 1a)
+- **Built:** the lane queueing core and its validation tests (D/D/1, M/D/1, M/G/1, Little's law, scan retry, lane failure, delayed readiness).
+- **Not yet:** everything in 1b to 1e.
 
 ---
 
@@ -345,6 +385,40 @@ In every tick the loop (1) processes all events due up to the end of the tick, i
 
 5. **What does "generate types from JSON Schema, and fail CI if they're stale" protect against?**
    Drift between the frontend, the backend and the stored data. The schema is the single source of truth. The TypeScript (and later C#) types are derived from it, and the stale check guarantees that nobody edits one side without the other.
+
+### Phase 1 (so far): the lane queueing core
+
+**What a lane is.** A lane (a turnstile, a scanner, a gate) serves one person at a time. Everyone else waits in a line. `lanes.ts` holds that logic: who is in line, who is being served, how long each person waited. It uses exact event times, so a 3.1 s service takes exactly 3.1 s, not "3.25 s because of the tick".
+
+**The names D/D/1, M/D/1, M/G/1** (Kendall notation: arrivals / service / number of servers):
+- **D/D/1:** *D*eterministic arrivals, *D*eterministic service, 1 lane. Example: one person every 1.0 s, each takes 0.8 s. The queue is always empty. If a person arrives every 0.8 s and takes 1.0 s, the queue grows by exactly (λ − μ)·t people, where λ is the arrival rate and μ the service rate. We test both cases.
+- **M/D/1:** *M*arkovian (random, Poisson) arrivals, *D*eterministic service. People arrive at random moments, but every scan takes the same time.
+- **M/G/1:** random arrivals, *G*eneral service times (any distribution). Here the scan time is our default shifted lognormal: never below 2.5 s, 4 s on average, sometimes slow.
+
+**The formulas we test against.** ρ ("rho") is utilisation: arrival rate × average service time. Below 1 the queue is stable.
+- M/D/1: average queue length **Lq = ρ² / (2(1 − ρ))**. At ρ = 0.7 that is 0.49 / 0.6 = 0.817 people waiting (the person being served is not counted).
+- M/G/1, the Pollaczek–Khinchine formula: average wait **Wq = λ·E[S²] / (2(1 − ρ))**, where E[S²] is the average of the *squared* service time. It depends on the spread of service times, not only the average: a lane with the same average but more variation has longer queues. That is why the test uses the exact E[S] and E[S²] of our distribution (D-005, D-007).
+
+**Why the confidence-interval rule has two parts.** We run 20 seeds and compute the mean and a 95% confidence interval (CI): a range that should contain the true value 95% of the time. Rule (review B6):
+1. The CI must **contain** the theoretical value. This catches a *biased* simulation (a systematic error).
+2. The CI half-width must be **under 3%** of the theoretical value. Without this, a very noisy test would have a huge CI that contains anything and would pass by accident.
+
+Both together mean "right on average, and measured precisely enough to notice a small error". The M/G/1 test needs 40 simulated hours per seed to be precise enough (D-012). Each run also skips the first hour (*warm-up*), because the queue starts empty, which is not typical.
+
+**Little's law.** **L = λ·W**: the average number of people in a system equals the arrival rate times the average time each spends in it. It holds for almost any queue, whatever the distributions. Example: 2 people arrive per second and each waits 30 s on average, so about 60 people are in the queue. We use it as a bookkeeping check: the queue length (counted by integrating over time) and the waits (summed per person) are two independent ways of counting the same person-seconds, so they must agree. For people still queuing when the window ends we include their wait so far (D-011).
+
+**Other behaviours** (D-013): the wait starts when a person commits to a lane, even if still walking towards it; a failed lane finishes the person in service and hands the rest back in arrival order; a failed scan keeps the lane busy and retries; a second failure sends the person to the manual lane.
+
+#### Interview questions (Phase 1, so far; the rest come at the end of the phase)
+
+1. **Why test a simulator against M/M/1-style formulas instead of just checking that it "looks right"?**
+   Queueing theory gives exact answers for simple cases (for example Lq = ρ²/(2(1−ρ)) for M/D/1). If the simulator matches them within a stated statistical tolerance, the core logic (event order, service start, waiting time) is right, and later complexity (walking, lane choice) is built on something verified.
+
+2. **What does the Pollaczek–Khinchine formula tell you that "average service time" does not?**
+   The average wait depends on E[S²], so on variability, not just the mean. Two lanes with the same average scan time and the same arrival rate have different queues if one has more spread. Reducing variation (consistent scan times) shortens queues without making anyone faster on average.
+
+3. **Why does the test check that the confidence interval is narrow, not only that it contains the theoretical value?**
+   An interval can contain the true value by being very wide. Requiring the half-width to be under 3% means a bias larger than about 3% would be detected, so "passes" means "measured accurately and correct", not "too noisy to disagree".
 
 ---
 
