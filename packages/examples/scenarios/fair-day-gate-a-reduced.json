@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "fair-day-gate-a-reduced",
+  "venueId": "belgrade-fair-fair-day",
+  "name": "Fair day, gate A reduced to 1 lane",
+  "eventType": "fair",
+  "timeline": { "referenceClock": "10:00", "gatesOpen": 0, "eventStart": null, "eventEnd": 7200, "horizon": 10800 },
+  "attendance": 4000,
+  "carShare": 0,
+  "arrivals": { "preset": "fair" },
+  "seed": 1,
+  "overrides": { "gate-a": { "laneCount": 1 } }
+}

@@ -74,6 +74,12 @@ export const RandomStream = {
   PlateMisread: 12,
   DepartureTime: 13,
   PayTime: 14,
+  /** Personal sideways offset on flow-field paths, so a crowd does not walk in single file. */
+  PathOffset: 15,
+  /** Where around its source an agent appears. */
+  SpawnOffset: 16,
+  /** Service time at a gate group's manual lane (after a second scan failure). */
+  ManualServiceTime: 17,
 } as const;
 export type RandomStream = (typeof RandomStream)[keyof typeof RandomStream];
 

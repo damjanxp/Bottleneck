@@ -65,6 +65,18 @@ export class Simulation<P = unknown> {
     return this.queue.push(time, kind, id, payload);
   }
 
+  /** The clock and the event queue, for run checkpoints (see restoreState). */
+  saveState(): { ticks: number; now: number; events: SimEvent<P>[]; nextSeq: number } {
+    return { ticks: this.ticksDone, now: this.current, ...this.queue.save() };
+  }
+
+  /** Restores a saveState() result: the next step() continues exactly where that state was taken. */
+  restoreState(state: { ticks: number; now: number; events: readonly SimEvent<P>[]; nextSeq: number }): void {
+    this.ticksDone = state.ticks;
+    this.current = state.now;
+    this.queue.restore(state.events, state.nextSeq);
+  }
+
   /** Advances the simulation by exactly one tick. */
   step(): void {
     // Computed from the tick count, not by repeated addition, so the clock cannot drift.

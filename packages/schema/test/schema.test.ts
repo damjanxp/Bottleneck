@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
-import { SCHEMA_FILES, SCHEMA_VERSION, type Scenario, type Venue } from "../src/index.ts";
+import { SCHEMA_FILES, SCHEMA_VERSION, type RunRecord, type Scenario, type Venue } from "../src/index.ts";
 
 // Shared fixtures in /schema/fixtures are also loaded by the .NET tests from Phase 4.
 const schemaDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../schema");
@@ -50,6 +50,9 @@ describe("valid fixtures", () => {
     const scenario = readJson("fixtures/valid/scenario-minimal.json") as Scenario;
     expect(venue.gateGroups[0]?.laneCount).toBe(4);
     expect(scenario.venueId).toBe(venue.id);
+    const run = readJson("fixtures/valid/run-minimal.json") as RunRecord;
+    expect(run.scenario.venueId).toBe(venue.id);
+    expect(run.metrics.lanes.length).toBe(run.parameters.elements.reduce((n, e) => n + e.laneCount + (e.kind === "gate" ? 1 : 0), 0));
   });
 });
 

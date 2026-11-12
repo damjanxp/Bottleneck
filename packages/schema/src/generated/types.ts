@@ -15,9 +15,13 @@ export type Name = string;
  */
 export type Ring = Point[];
 /**
- * A random quantity, such as a service time in seconds or a walking speed in m/s.
+ * A random quantity, such as a service time in seconds or a walking speed in m/s: one of the base kinds, or a mixture of them.
  */
-export type Distribution =
+export type Distribution = BaseDistribution | MixtureDistribution;
+/**
+ * A single (non-mixture) distribution.
+ */
+export type BaseDistribution =
   | FixedDistribution
   | UniformDistribution
   | ExponentialDistribution
@@ -32,6 +36,10 @@ export type EventType = "concert" | "stadium" | "fair" | "conference";
  * Simulated time in seconds. Absolute times are relative to the scenario's t = 0 (see Scenario.timeline).
  */
 export type Seconds = number;
+/**
+ * Bag policy at the screening stages; picks their service time (assumed values): 'none' (walk-through only, mean 2.5 s, at least 1.5 s), 'clearBag' (clear bags only, mean 4 s, at least 2 s), 'fullSearch' (every bag searched, mean 10 s, at least 4 s). Unset: the venue's own screening times. An element override's serviceTime still wins.
+ */
+export type BagPolicy = "none" | "clearBag" | "fullSearch";
 export type TimedEvent = LaneFailEvent | LaneReopenEvent | BusBurstEvent;
 
 /**
@@ -163,7 +171,7 @@ export interface ScreeningStage {
   serviceTime: Distribution;
 }
 /**
- * The line the lanes of a gate group or screening stage stand on. Lanes are spaced evenly along it. People pass from the right-hand side of a→b to the left-hand side (the inside).
+ * The line the lanes of a gate group or screening stage stand on. Lanes are spaced evenly along it. People pass from the outside to the inside. The inside is the side where cross(b − a, p − a) > 0: in the venue's y-down picture, the right-hand side when looking from a towards b.
  */
 export interface LaneLine {
   a: Point;
@@ -203,6 +211,21 @@ export interface ShiftedLognormalDistribution {
   shift: number;
   mu: number;
   sigma: number;
+}
+/**
+ * A weighted mix of base distributions, e.g. turnstile scans that are 50% card (about 3 s) and 50% phone QR code (about 4.5 s). Each draw first picks a component with probability weight / (sum of weights), then draws from it. E[S] and E[S²] are the weighted averages of the components' moments, so they stay exact.
+ */
+export interface MixtureDistribution {
+  kind: "mixture";
+  /**
+   * @minItems 1
+   * @maxItems 8
+   */
+  components: MixtureComponent[];
+}
+export interface MixtureComponent {
+  weight: number;
+  distribution: BaseDistribution;
 }
 /**
  * A group of identical turnstile lanes between outside and inside. screeningStageId names the screening stage people pass before these gates, if any.
@@ -289,11 +312,41 @@ export interface DemandCurve {
   }[];
 }
 /**
- * Scenario-scope assumptions (spec section 5). Missing values use the built-in defaults; the run stores the full resolved set.
+ * Scenario-scope assumptions (spec section 5). Missing values use the built-in defaults (all assumed); the run stores the full resolved set. nearestLaneShare: share of people who take the lane with the shortest walk instead of choosing by expected cost (default 0.3). manualLaneServiceTime: service time at a gate group manual lane, used after a second scan failure (default uniform 20-40 s). shareInsideAt: reference time T of the share-inside-by-T metric, in scenario seconds (default 10 minutes before a fixed start, or 1 hour after the gates open for open-door events).
  */
 export interface ScenarioParameters {
   freeWalkingSpeed?: Distribution;
   nearestLaneShare?: Probability;
+  /**
+   * People choose a lane once the walk to the nearest lane of their stage is at most this many metres (default 20, assumed).
+   */
+  decisionDistance?: number;
+  /**
+   * Logit scale τ of the lane choice in seconds: a lane whose walk plus expected wait costs τ seconds more is e times less likely to be chosen (default 15, assumed).
+   */
+  logitScale?: number;
+  /**
+   * Distance between people standing in a queue line, in metres (default 0.6, assumed).
+   */
+  slotSpacing?: number;
+  /**
+   * A queued person switches lane (at most once per stage) only to a lane with at least this many fewer people (default 3, assumed).
+   */
+  jockeyThreshold?: number;
+  manualLaneServiceTime?: Distribution;
+  /**
+   * Deadlock watchdog: the run stops if nothing changes for this many simulated minutes (default 10).
+   */
+  watchdogMinutes?: number;
+  shareInsideAt?: Seconds;
+  /**
+   * People arrive in groups that walk together and choose the same lane. groupSizes[k] is the relative frequency of groups of k + 1 people (default [0.30, 0.40, 0.15, 0.10, 0.05] for sizes 1-5, assumed). [1] means everyone arrives alone.
+   *
+   * @minItems 1
+   * @maxItems 8
+   */
+  groupSizes?: number[];
+  bagPolicy?: BagPolicy;
 }
 export interface ElementOverride {
   laneCount?: number;
@@ -322,7 +375,7 @@ export interface BusBurstEvent {
   count: number;
 }
 /**
- * The stored result of one seeded run: metrics plus everything needed to reproduce it, not every frame. The metrics shape is filled in during Phase 1. scenario is a full copy of the scenario as it was run (it includes the seed).
+ * The stored result of one seeded run: metrics plus everything needed to reproduce it, not every frame. scenario is a full copy of the scenario as it was run (it includes the seed). Lane windows are engine times (seconds from the start of the run); other times are scenario times (engine time + parameters.timeOffset).
  */
 export interface RunRecord {
   schemaVersion: 1;
@@ -338,20 +391,257 @@ export interface RunRecord {
    * Hash of the venue geometry the run used, so comparisons can tell whether runs share a venue.
    */
   venueHash: string;
-  /**
-   * The full resolved parameter set (defaults plus overrides) the run used.
-   */
-  parameters: {
-    [k: string]: unknown | undefined;
-  };
-  /**
-   * Run metrics (spec section 4.5). Structure defined in Phase 1.
-   */
-  metrics: {
-    [k: string]: unknown | undefined;
-  };
+  parameters: ResolvedParameters;
+  metrics: RecordedMetrics;
   /**
    * Hash of the canonical Float64 dump of the metrics (determinism check).
    */
   metricsHash: string;
+}
+/**
+ * The full parameter set a run used: built-in defaults (assumed) plus the venue's and scenario's values.
+ */
+export interface ResolvedParameters {
+  seed: number;
+  attendance: number;
+  /**
+   * Scenario time of engine time 0.
+   */
+  timeOffset: number;
+  horizon: number;
+  gatesOpen: number;
+  eventStart: number | null;
+  freeWalkingSpeed: Distribution;
+  nearestLaneShare: number;
+  speedDensity: SpeedDensity;
+  decisionDistance: number;
+  logitScale: number;
+  slotSpacing: number;
+  jockeyThreshold: number;
+  manualLaneServiceTime: Distribution;
+  densitySigma: number;
+  watchdogMinutes: number;
+  queueSampleInterval: number;
+  throughputBin: number;
+  /**
+   * Scenario time T of the share-inside-by-T metric.
+   */
+  shareInsideAt: number;
+  /**
+   * Relative frequency of groups of 1, 2, ... people.
+   */
+  groupSizes: number[];
+  /**
+   * Bag policy at the screening stages, or null for the venue's own screening times.
+   */
+  bagPolicy: BagPolicy | null;
+  arrivalCurve: ArrivalCurvePoint[];
+  elements: ResolvedElement[];
+}
+/**
+ * Weidmann speed-density parameters.
+ */
+export interface SpeedDensity {
+  gamma: number;
+  rhoMax: number;
+}
+export interface ArrivalCurvePoint {
+  t: number;
+  weight: number;
+}
+/**
+ * A screening stage or gate group as the run used it (overrides and bag policy applied).
+ */
+export interface ResolvedElement {
+  id: Id;
+  kind: "screening" | "gate";
+  laneCount: number;
+  queueLength: number;
+  serviceTime: Distribution;
+  scanFailureRate: number;
+  retryTime: Distribution | null;
+  /**
+   * Expected time a lane is busy per person, including scan retries (s).
+   */
+  meanBusyTime: number;
+}
+/**
+ * Run metrics (spec section 4.5).
+ */
+export interface RecordedMetrics {
+  agentCount: number;
+  drained: boolean;
+  deadlock: boolean;
+  /**
+   * Scenario time the metrics were taken at.
+   */
+  time: number;
+  /**
+   * Agents per AgentState (Pending, Walking, Queuing, InService, Inside, Driving, Parked, Departed, TurnedAway, Diverted).
+   */
+  countsByState: number[];
+  unreachable: number;
+  lanes: LaneReport[];
+  elements: ElementReport[];
+  peakHour: PeakHour;
+  meanWait: number;
+  p95Wait: number;
+  shareInside: ShareInside;
+  /**
+   * Fixed-start events: people whose gate service starts after the event start, or never (spec 4.5). Null for open-door events.
+   */
+  stillOutsideAtStart: number | null;
+  /**
+   * The part of stillOutsideAtStart that had already arrived on site by the event start.
+   */
+  arrivedButOutsideAtStart: number | null;
+  /**
+   * The part of stillOutsideAtStart that arrived after the event start.
+   */
+  notYetArrivedAtStart: number | null;
+  density: DensitySummary;
+}
+/**
+ * One lane: a regular lane of a screening stage or gate group, or a gate group's manual lane.
+ */
+export interface LaneReport {
+  laneId: number;
+  elementId: Id;
+  elementKind: "screening" | "gate";
+  laneIndex: number;
+  /**
+   * True for a gate group's manual lane: people whose scan failed twice are sent there, nobody chooses it.
+   */
+  manual: boolean;
+  /**
+   * 'manual' for a gate group's manual lane, otherwise 'regular'.
+   */
+  laneType: "regular" | "manual";
+  metrics: LaneMetrics;
+  queueWait: WaitStats;
+  /**
+   * Services that started before the event start; null for open-door events.
+   */
+  beforeStart: LanePeriod | null;
+  /**
+   * Services that started at or after the event start; null for open-door events.
+   */
+  afterStart: LanePeriod | null;
+  /**
+   * People served per throughputBin seconds, bins from engine time 0.
+   */
+  throughput: number[];
+  /**
+   * Queue length (excluding the one in service) every queueSampleInterval seconds from engine time one interval.
+   */
+  queueLength: number[];
+}
+/**
+ * Queueing statistics of one lane over its reporting window (first commitment to last service start, engine time). Waits (Wq) run from commitment to the lane to service start.
+ */
+export interface LaneMetrics {
+  arrivals: number;
+  started: number;
+  served: number;
+  windowStart: number;
+  windowEnd: number;
+  meanWait: number;
+  p95Wait: number;
+  maxWait: number;
+  meanQueue: number;
+  maxQueue: number;
+  arrivalRate: number;
+  utilisation: number;
+  failedTime: number;
+  queuedAtWindowEnd: number;
+  littleLawError: number;
+}
+/**
+ * Waits measured from physically joining the line (reaching the queue area, or the spill-back behind it) to service start, in seconds.
+ */
+export interface WaitStats {
+  count: number;
+  mean: number;
+  p95: number;
+  max: number;
+}
+/**
+ * A lane's services on one side of the event start (spec 4.5).
+ */
+export interface LanePeriod {
+  started: number;
+  meanWait: number;
+  p95Wait: number;
+  maxWait: number;
+  queueWait: WaitStats;
+  /**
+   * Busy time / open time of the lane within its reporting window on this side of the event start.
+   */
+  utilisation: number;
+}
+/**
+ * Capacity against demand for one screening stage or gate group (review E1).
+ */
+export interface ElementReport {
+  elementId: Id;
+  kind: "screening" | "gate";
+  laneCount: number;
+  /**
+   * Expected time a lane is busy per person, including scan retries (s).
+   */
+  meanBusyTime: number;
+  /**
+   * laneCount × 3600 / meanBusyTime: people per hour the regular lanes can serve.
+   */
+  capacityPerHour: number;
+  /**
+   * Most people choosing this element within any 60-minute window (1-minute steps).
+   */
+  peakDemandPerHour: number;
+  /**
+   * Scenario time at which that window starts; null if nobody came.
+   */
+  peakDemandStart: number | null;
+  /**
+   * Busy time / open time of the regular lanes per throughputBin, bins from engine time 0.
+   */
+  utilisation: number[];
+  /**
+   * Highest utilisation over a 5-bin window.
+   */
+  peakUtilisation: number;
+  /**
+   * Scenario time at the end of that window; null if the lanes were never busy.
+   */
+  peakUtilisationAt: number | null;
+  /**
+   * Scenario time at the end of the first 5-bin window after the peak with utilisation below 85%: when the crunch is over. Null if the peak stayed under 85% or utilisation did not fall below it before the run ended.
+   */
+  below85At: number | null;
+}
+/**
+ * The 60-minute window (scenario time, 1-minute steps) with the most arrivals, and the nearest-rank p95 total wait of the people who arrived in it.
+ */
+export interface PeakHour {
+  start: number;
+  end: number;
+  arrivals: number;
+  p95Wait: number;
+}
+/**
+ * Share of all agents inside (at a destination) by scenario time `time`.
+ */
+export interface ShareInside {
+  time: number;
+  share: number;
+}
+/**
+ * Time-aggregated density (people/m²) on the 2 m density grid, row-major cols × rows.
+ */
+export interface DensitySummary {
+  cols: number;
+  rows: number;
+  cellSize: number;
+  mean: number[];
+  max: number[];
 }

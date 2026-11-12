@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "fair-day-baseline",
+  "venueId": "belgrade-fair-fair-day",
+  "name": "Fair day, baseline",
+  "eventType": "fair",
+  "timeline": { "referenceClock": "10:00", "gatesOpen": 0, "eventStart": null, "eventEnd": 7200, "horizon": 10800 },
+  "attendance": 4000,
+  "carShare": 0,
+  "arrivals": { "preset": "fair" },
+  "seed": 1
+}

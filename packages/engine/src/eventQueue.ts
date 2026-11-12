@@ -51,6 +51,21 @@ export class EventQueue<P = unknown> {
     return event;
   }
 
+  /**
+   * Copies of the queued events in internal (heap) order, plus the next insertion number: enough
+   * to rebuild an identical queue with restore() (used by run checkpoints).
+   */
+  save(): { events: SimEvent<P>[]; nextSeq: number } {
+    return { events: this.heap.map((e) => ({ ...e })), nextSeq: this.nextSeq };
+  }
+
+  /** Replaces the queue's contents with a save()d state (events must be in the saved heap order). */
+  restore(events: readonly SimEvent<P>[], nextSeq: number): void {
+    this.heap.length = 0;
+    for (const e of events) this.heap.push({ ...e });
+    this.nextSeq = nextSeq;
+  }
+
   /** The earliest event without removing it. */
   peek(): SimEvent<P> | undefined {
     return this.heap[0];

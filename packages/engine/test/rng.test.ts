@@ -56,10 +56,12 @@ describe("uniform", () => {
   });
 
   it("stays strictly inside (0, 1)", () => {
+    let outside = 0;
     for (let i = 0; i < 100_000; i++) {
       const u = uniform(42, 1, i, 0);
-      expect(u > 0 && u < 1).toBe(true);
+      if (!(u > 0 && u < 1)) outside++;
     }
+    expect(outside).toBe(0);
   });
 
   it("has the moments of U(0, 1)", () => {

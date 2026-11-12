@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "venueId": "fixture-minimal",
+  "name": "Every scenario parameter set explicitly",
+  "eventType": "concert",
+  "timeline": { "referenceClock": "20:00", "gatesOpen": -5400, "eventStart": 0, "eventEnd": 9000, "horizon": 14400 },
+  "attendance": 3000,
+  "carShare": 0,
+  "arrivals": { "preset": "concert" },
+  "seed": 42,
+  "parameters": {
+    "freeWalkingSpeed": { "kind": "truncatedNormal", "mean": 1.3, "sd": 0.25, "min": 0.5, "max": 2.2 },
+    "nearestLaneShare": 0.3,
+    "decisionDistance": 20,
+    "logitScale": 15,
+    "slotSpacing": 0.6,
+    "jockeyThreshold": 3,
+    "manualLaneServiceTime": { "kind": "uniform", "min": 20, "max": 40 },
+    "watchdogMinutes": 10,
+    "shareInsideAt": -600,
+    "groupSizes": [0.3, 0.4, 0.15, 0.1, 0.05],
+    "bagPolicy": "fullSearch"
+  },
+  "overrides": {
+    "gate-a": {
+      "serviceTime": {
+        "kind": "mixture",
+        "components": [
+          { "weight": 0.5, "distribution": { "kind": "shiftedLognormal", "shift": 2, "mu": -0.125, "sigma": 0.5 } },
+          { "weight": 0.5, "distribution": { "kind": "shiftedLognormal", "shift": 2.5, "mu": 0.568147, "sigma": 0.5 } }
+        ]
+      }
+    }
+  }
+}

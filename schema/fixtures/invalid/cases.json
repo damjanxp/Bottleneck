@@ -38,5 +38,20 @@
     "why": "the reference clock is a 24-hour HH:MM time",
     "schema": "scenario.schema.json",
     "patch": { "timeline": { "referenceClock": "8pm", "gatesOpen": -5400, "eventStart": 0, "eventEnd": 9000, "horizon": 14400 } }
+  },
+  {
+    "why": "a mixture component cannot itself be a mixture",
+    "schema": "scenario.schema.json",
+    "patch": { "parameters": { "manualLaneServiceTime": { "kind": "mixture", "components": [{ "weight": 1, "distribution": { "kind": "mixture", "components": [{ "weight": 1, "distribution": { "kind": "fixed", "value": 3 } }] } }] } } }
+  },
+  {
+    "why": "the bag policy must be one of the known policies",
+    "schema": "scenario.schema.json",
+    "patch": { "parameters": { "bagPolicy": "pockets" } }
+  },
+  {
+    "why": "group sizes are non-negative weights",
+    "schema": "scenario.schema.json",
+    "patch": { "parameters": { "groupSizes": [1, -0.5] } }
   }
 ]

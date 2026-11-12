@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "fair-day-bus-burst",
+  "venueId": "belgrade-fair-fair-day",
+  "name": "Fair day, tram and bus bursts",
+  "eventType": "fair",
+  "timeline": { "referenceClock": "10:00", "gatesOpen": 0, "eventStart": null, "eventEnd": 7200, "horizon": 10800 },
+  "attendance": 4000,
+  "carShare": 0,
+  "arrivals": { "preset": "fair" },
+  "seed": 1,
+  "timedEvents": [
+    { "kind": "busBurst", "at": 1800, "sourceId": "tram-stop", "count": 1800 },
+    { "kind": "busBurst", "at": 1860, "sourceId": "bus-stop", "count": 1200 }
+  ]
+}

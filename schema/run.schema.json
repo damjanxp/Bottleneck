@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "run.schema.json",
   "title": "RunRecord",
-  "description": "The stored result of one seeded run: metrics plus everything needed to reproduce it, not every frame. The metrics shape is filled in during Phase 1. scenario is a full copy of the scenario as it was run (it includes the seed).",
+  "description": "The stored result of one seeded run: metrics plus everything needed to reproduce it, not every frame. scenario is a full copy of the scenario as it was run (it includes the seed). Lane windows are engine times (seconds from the start of the run); other times are scenario times (engine time + parameters.timeOffset).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -48,19 +48,788 @@
       "pattern": "^[0-9a-f]{16}$"
     },
     "parameters": {
-      "description": "The full resolved parameter set (defaults plus overrides) the run used.",
-      "type": "object",
-      "additionalProperties": true
+      "$ref": "#/definitions/ResolvedParameters"
     },
     "metrics": {
-      "description": "Run metrics (spec section 4.5). Structure defined in Phase 1.",
-      "type": "object",
-      "additionalProperties": true
+      "$ref": "#/definitions/RecordedMetrics"
     },
     "metricsHash": {
       "description": "Hash of the canonical Float64 dump of the metrics (determinism check).",
       "type": "string",
       "pattern": "^[0-9a-f]{16}$"
+    }
+  },
+  "definitions": {
+    "ResolvedParameters": {
+      "title": "ResolvedParameters",
+      "description": "The full parameter set a run used: built-in defaults (assumed) plus the venue's and scenario's values.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seed",
+        "attendance",
+        "timeOffset",
+        "horizon",
+        "gatesOpen",
+        "eventStart",
+        "freeWalkingSpeed",
+        "nearestLaneShare",
+        "speedDensity",
+        "decisionDistance",
+        "logitScale",
+        "slotSpacing",
+        "jockeyThreshold",
+        "manualLaneServiceTime",
+        "densitySigma",
+        "watchdogMinutes",
+        "queueSampleInterval",
+        "throughputBin",
+        "shareInsideAt",
+        "groupSizes",
+        "bagPolicy",
+        "arrivalCurve",
+        "elements"
+      ],
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "attendance": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeOffset": {
+          "description": "Scenario time of engine time 0.",
+          "type": "number"
+        },
+        "horizon": {
+          "type": "number"
+        },
+        "gatesOpen": {
+          "type": "number"
+        },
+        "eventStart": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "freeWalkingSpeed": {
+          "$ref": "common.schema.json#/definitions/Distribution"
+        },
+        "nearestLaneShare": {
+          "type": "number",
+          "minimum": 0
+        },
+        "speedDensity": {
+          "title": "SpeedDensity",
+          "description": "Weidmann speed-density parameters.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gamma",
+            "rhoMax"
+          ],
+          "properties": {
+            "gamma": {
+              "type": "number"
+            },
+            "rhoMax": {
+              "type": "number"
+            }
+          }
+        },
+        "decisionDistance": {
+          "type": "number",
+          "minimum": 0
+        },
+        "logitScale": {
+          "type": "number",
+          "minimum": 0
+        },
+        "slotSpacing": {
+          "type": "number",
+          "minimum": 0
+        },
+        "jockeyThreshold": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "manualLaneServiceTime": {
+          "$ref": "common.schema.json#/definitions/Distribution"
+        },
+        "densitySigma": {
+          "type": "number",
+          "minimum": 0
+        },
+        "watchdogMinutes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "queueSampleInterval": {
+          "type": "number",
+          "minimum": 0
+        },
+        "throughputBin": {
+          "type": "number",
+          "minimum": 0
+        },
+        "shareInsideAt": {
+          "description": "Scenario time T of the share-inside-by-T metric.",
+          "type": "number"
+        },
+        "groupSizes": {
+          "description": "Relative frequency of groups of 1, 2, ... people.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "bagPolicy": {
+          "description": "Bag policy at the screening stages, or null for the venue's own screening times.",
+          "oneOf": [
+            {
+              "$ref": "scenario.schema.json#/definitions/BagPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "arrivalCurve": {
+          "type": "array",
+          "items": {
+            "title": "ArrivalCurvePoint",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "t",
+              "weight"
+            ],
+            "properties": {
+              "t": {
+                "type": "number"
+              },
+              "weight": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ResolvedElement"
+          }
+        }
+      }
+    },
+    "ResolvedElement": {
+      "title": "ResolvedElement",
+      "description": "A screening stage or gate group as the run used it (overrides and bag policy applied).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "laneCount",
+        "queueLength",
+        "serviceTime",
+        "scanFailureRate",
+        "retryTime",
+        "meanBusyTime"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "screening",
+            "gate"
+          ]
+        },
+        "laneCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "queueLength": {
+          "type": "number",
+          "minimum": 0
+        },
+        "serviceTime": {
+          "$ref": "common.schema.json#/definitions/Distribution"
+        },
+        "scanFailureRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "retryTime": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/definitions/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meanBusyTime": {
+          "description": "Expected time a lane is busy per person, including scan retries (s).",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "RecordedMetrics": {
+      "title": "RecordedMetrics",
+      "description": "Run metrics (spec section 4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentCount",
+        "drained",
+        "deadlock",
+        "time",
+        "countsByState",
+        "unreachable",
+        "lanes",
+        "elements",
+        "peakHour",
+        "meanWait",
+        "p95Wait",
+        "shareInside",
+        "stillOutsideAtStart",
+        "arrivedButOutsideAtStart",
+        "notYetArrivedAtStart",
+        "density"
+      ],
+      "properties": {
+        "agentCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "drained": {
+          "type": "boolean"
+        },
+        "deadlock": {
+          "type": "boolean"
+        },
+        "time": {
+          "description": "Scenario time the metrics were taken at.",
+          "type": "number"
+        },
+        "countsByState": {
+          "description": "Agents per AgentState (Pending, Walking, Queuing, InService, Inside, Driving, Parked, Departed, TurnedAway, Diverted).",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "unreachable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lanes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LaneReport"
+          }
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ElementReport"
+          }
+        },
+        "peakHour": {
+          "title": "PeakHour",
+          "description": "The 60-minute window (scenario time, 1-minute steps) with the most arrivals, and the nearest-rank p95 total wait of the people who arrived in it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end",
+            "arrivals",
+            "p95Wait"
+          ],
+          "properties": {
+            "start": {
+              "type": "number"
+            },
+            "end": {
+              "type": "number"
+            },
+            "arrivals": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "p95Wait": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "meanWait": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95Wait": {
+          "type": "number",
+          "minimum": 0
+        },
+        "shareInside": {
+          "title": "ShareInside",
+          "description": "Share of all agents inside (at a destination) by scenario time `time`.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "time",
+            "share"
+          ],
+          "properties": {
+            "time": {
+              "type": "number"
+            },
+            "share": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "stillOutsideAtStart": {
+          "description": "Fixed-start events: people whose gate service starts after the event start, or never (spec 4.5). Null for open-door events.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "arrivedButOutsideAtStart": {
+          "description": "The part of stillOutsideAtStart that had already arrived on site by the event start.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notYetArrivedAtStart": {
+          "description": "The part of stillOutsideAtStart that arrived after the event start.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "density": {
+          "title": "DensitySummary",
+          "description": "Time-aggregated density (people/m²) on the 2 m density grid, row-major cols × rows.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cols",
+            "rows",
+            "cellSize",
+            "mean",
+            "max"
+          ],
+          "properties": {
+            "cols": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cellSize": {
+              "type": "number",
+              "minimum": 0
+            },
+            "mean": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "max": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "LaneReport": {
+      "title": "LaneReport",
+      "description": "One lane: a regular lane of a screening stage or gate group, or a gate group's manual lane.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "laneId",
+        "elementId",
+        "elementKind",
+        "laneIndex",
+        "manual",
+        "laneType",
+        "metrics",
+        "queueWait",
+        "beforeStart",
+        "afterStart",
+        "throughput",
+        "queueLength"
+      ],
+      "properties": {
+        "laneId": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "elementId": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "elementKind": {
+          "type": "string",
+          "enum": [
+            "screening",
+            "gate"
+          ]
+        },
+        "laneIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "manual": {
+          "description": "True for a gate group's manual lane: people whose scan failed twice are sent there, nobody chooses it.",
+          "type": "boolean"
+        },
+        "laneType": {
+          "description": "'manual' for a gate group's manual lane, otherwise 'regular'.",
+          "type": "string",
+          "enum": [
+            "regular",
+            "manual"
+          ]
+        },
+        "metrics": {
+          "$ref": "#/definitions/LaneMetrics"
+        },
+        "queueWait": {
+          "$ref": "#/definitions/WaitStats"
+        },
+        "beforeStart": {
+          "description": "Services that started before the event start; null for open-door events.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/LanePeriod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "afterStart": {
+          "description": "Services that started at or after the event start; null for open-door events.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/LanePeriod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "throughput": {
+          "description": "People served per throughputBin seconds, bins from engine time 0.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "queueLength": {
+          "description": "Queue length (excluding the one in service) every queueSampleInterval seconds from engine time one interval.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "LaneMetrics": {
+      "title": "LaneMetrics",
+      "description": "Queueing statistics of one lane over its reporting window (first commitment to last service start, engine time). Waits (Wq) run from commitment to the lane to service start.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arrivals",
+        "started",
+        "served",
+        "windowStart",
+        "windowEnd",
+        "meanWait",
+        "p95Wait",
+        "maxWait",
+        "meanQueue",
+        "maxQueue",
+        "arrivalRate",
+        "utilisation",
+        "failedTime",
+        "queuedAtWindowEnd",
+        "littleLawError"
+      ],
+      "properties": {
+        "arrivals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "served": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "windowStart": {
+          "type": "number"
+        },
+        "windowEnd": {
+          "type": "number"
+        },
+        "meanWait": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95Wait": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxWait": {
+          "type": "number",
+          "minimum": 0
+        },
+        "meanQueue": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxQueue": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "arrivalRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "utilisation": {
+          "type": "number",
+          "minimum": 0
+        },
+        "failedTime": {
+          "type": "number",
+          "minimum": 0
+        },
+        "queuedAtWindowEnd": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "littleLawError": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "WaitStats": {
+      "title": "WaitStats",
+      "description": "Waits measured from physically joining the line (reaching the queue area, or the spill-back behind it) to service start, in seconds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "mean",
+        "p95",
+        "max"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "LanePeriod": {
+      "title": "LanePeriod",
+      "description": "A lane's services on one side of the event start (spec 4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started",
+        "meanWait",
+        "p95Wait",
+        "maxWait",
+        "queueWait",
+        "utilisation"
+      ],
+      "properties": {
+        "started": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "meanWait": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95Wait": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxWait": {
+          "type": "number",
+          "minimum": 0
+        },
+        "queueWait": {
+          "$ref": "#/definitions/WaitStats"
+        },
+        "utilisation": {
+          "description": "Busy time / open time of the lane within its reporting window on this side of the event start.",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "ElementReport": {
+      "title": "ElementReport",
+      "description": "Capacity against demand for one screening stage or gate group (review E1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "elementId",
+        "kind",
+        "laneCount",
+        "meanBusyTime",
+        "capacityPerHour",
+        "peakDemandPerHour",
+        "peakDemandStart",
+        "utilisation",
+        "peakUtilisation",
+        "peakUtilisationAt",
+        "below85At"
+      ],
+      "properties": {
+        "elementId": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "screening",
+            "gate"
+          ]
+        },
+        "laneCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "meanBusyTime": {
+          "description": "Expected time a lane is busy per person, including scan retries (s).",
+          "type": "number",
+          "minimum": 0
+        },
+        "capacityPerHour": {
+          "description": "laneCount × 3600 / meanBusyTime: people per hour the regular lanes can serve.",
+          "type": "number",
+          "minimum": 0
+        },
+        "peakDemandPerHour": {
+          "description": "Most people choosing this element within any 60-minute window (1-minute steps).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "peakDemandStart": {
+          "description": "Scenario time at which that window starts; null if nobody came.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "utilisation": {
+          "description": "Busy time / open time of the regular lanes per throughputBin, bins from engine time 0.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "peakUtilisation": {
+          "description": "Highest utilisation over a 5-bin window.",
+          "type": "number",
+          "minimum": 0
+        },
+        "peakUtilisationAt": {
+          "description": "Scenario time at the end of that window; null if the lanes were never busy.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "below85At": {
+          "description": "Scenario time at the end of the first 5-bin window after the peak with utilisation below 85%: when the crunch is over. Null if the peak stayed under 85% or utilisation did not fall below it before the run ended.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   }
 }
