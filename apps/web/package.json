@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json"
   },
   "dependencies": {
+    "@bottleneck/analysis": "0.0.1",
     "@bottleneck/engine": "0.0.1",
     "@bottleneck/examples": "0.0.1",
     "@bottleneck/schema": "0.0.1",

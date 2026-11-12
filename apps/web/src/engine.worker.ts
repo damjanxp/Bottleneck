@@ -5,6 +5,7 @@
  */
 
 import { ENGINE_VERSION, EXPECTED_SELF_CHECK_HASH, PlaybackPacer, TICK_SECONDS, createRun, restoreRun, runSelfCheck, snapshotLength, type Run, type RunCheckpoint } from "@bottleneck/engine";
+import { scanLogFromRun, toScanLogCsv } from "@bottleneck/analysis";
 import type { Scenario, Venue } from "@bottleneck/schema";
 import { tinyScenario, tinyVenue } from "./determinism/tinyScenario.ts";
 import { CheckpointStore, checkpointBytes, chooseInterval, planSeek } from "./sim/checkpoints.ts";
@@ -213,6 +214,28 @@ function restart(): void {
   postAll();
 }
 
+/** Interactive lane events (review B8): swap in the working copy and replay exactly up to `target`. */
+function replaceScenario(s: Scenario, target: number, id: number): void {
+  if (!venue || !run) return;
+  const wasPlaying = seek ? seek.resumePlaying : playing;
+  stopTimer();
+  seek = null;
+  playing = false;
+  pacer.reset();
+  const before = run.agentCount;
+  scenario = s;
+  run = newRun();
+  if (run.agentCount !== before) {
+    // Only bus bursts change the head count; lane events never do. Reload properly to resize buffers.
+    load(venue, s, pacer.speed);
+    return;
+  }
+  // Checkpoints of the old scenario do not hold the new timed event: start over from 0.
+  checkpoints.clear(chooseInterval(run.toEngineTime(run.parameters.horizon), checkpointBytes(run.saveCheckpoint())));
+  playing = wasPlaying; // startSeek resumes playing afterwards if it was playing
+  startSeek(target, id);
+}
+
 function startSeek(target: number, id: number): void {
   if (!run || !venue || !scenario) return;
   const startedAt = performance.now();
@@ -314,6 +337,15 @@ scope.onmessage = (event) => {
         densityOn = msg.enabled;
         postStats();
         break;
+      case "replaceScenario":
+        replaceScenario(msg.scenario, msg.time, msg.seekId);
+        break;
+      case "scanLog": {
+        if (!run || !scenario) break;
+        const rows = scanLogFromRun(run.serviceLog(), run.lanes, run.timeOffset, scenario.timeline.referenceClock);
+        post({ type: "scanLog", requestId: msg.requestId, csv: toScanLogCsv(rows), rows: rows.length });
+        break;
+      }
     }
   } catch (error) {
     playing = false;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AgentState, type LaneLayout, type LaneLive, type LaneReport } from "@bottleneck/engine";
 import type { ElementReport, LanePeriod } from "@bottleneck/schema";
 import { formatCount, formatDuration, formatPercent, formatRelativeClock, formatWallClock } from "../sim/format.ts";
-import type { Headline, HeadlineComparison, HeadlineKind } from "../sim/headline.ts";
+import type { Headline, HeadlineKind } from "../sim/headline.ts";
 import type { ParameterRow } from "../sim/parameters.ts";
 import { strings } from "../strings.ts";
 import { ShapeIcon, stateShape } from "./Legend.tsx";
@@ -278,78 +278,6 @@ export function CapacityTable({ elements, names, clock, onAddLane, addDisabled }
           </tbody>
         </table>
       </div>
-    </section>
-  );
-}
-
-/** Small before/after table for the "+1 lane" fix (review A9; the full comparison view is Phase 2). */
-export function Comparison({
-  rows,
-  title,
-  beforeLanes,
-  afterLanes,
-  finished,
-  onRunToEnd,
-  onClose,
-  busy,
-}: {
-  rows: HeadlineComparison[];
-  title: string;
-  beforeLanes: number;
-  afterLanes: number;
-  finished: boolean;
-  onRunToEnd: () => void;
-  onClose: () => void;
-  busy: boolean;
-}) {
-  const C = strings.comparison;
-  return (
-    <section className="rounded-xl border border-sky-300 bg-sky-50 p-4 text-sm dark:border-sky-500/40 dark:bg-sky-500/10" aria-labelledby="comparison-heading">
-      <div className="flex items-center justify-between gap-2">
-        <h2 id="comparison-heading" className="text-sm font-semibold text-sky-900 dark:text-sky-200">
-          {C.heading}: {title}
-        </h2>
-        <button type="button" onClick={onClose} className="text-xs underline">
-          {C.close}
-        </button>
-      </div>
-      <table className="mt-2 w-full text-left text-xs">
-        <thead className="text-slate-600 dark:text-slate-400">
-          <tr>
-            <th className="py-1 pr-2 font-normal">{C.measure}</th>
-            <th className="py-1 pr-2 text-right font-normal">
-              {C.before} ({beforeLanes} {C.lanes})
-            </th>
-            <th className="py-1 pr-2 text-right font-normal">
-              {C.after} ({afterLanes} {C.lanes})
-            </th>
-            <th className="py-1 font-normal">
-              <span className="sr-only">{C.better}</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.kind} className="border-t border-sky-200/60 dark:border-sky-500/20">
-              <td className="py-1 pr-2">{C[r.kind]}</td>
-              <td className="py-1 pr-2 text-right font-mono tabular-nums">{formatHeadlineValue(r.kind, r.before.value)}</td>
-              <td className="py-1 pr-2 text-right font-mono tabular-nums">
-                {r.after ? formatHeadlineValue(r.kind, r.after.value) : "–"}
-                {r.after && !r.after.final && <span className="font-sans text-slate-500"> ({C.soFar})</span>}
-              </td>
-              <td className={`py-1 text-right font-semibold ${r.improved === true ? "text-emerald-700 dark:text-emerald-400" : r.improved === false ? "text-orange-700 dark:text-orange-400" : "text-slate-500"}`}>
-                {r.improved === true ? `▼ ${C.better}` : r.improved === false ? `▲ ${C.worse}` : r.after?.final && r.before.final ? C.same : ""}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">{C.note}</p>
-      {!finished && (
-        <button type="button" className={`${btnSmall} mt-2`} onClick={onRunToEnd} disabled={busy}>
-          {C.runToEnd}
-        </button>
-      )}
     </section>
   );
 }

@@ -1,0 +1,19 @@
+{
+  "name": "@bottleneck/analysis",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Statistics helpers, synthetic scan-log generator, and a scan-log importer that fits the arrival curve and service times.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@bottleneck/engine": "0.0.1"
+  },
+  "devDependencies": {
+    "@bottleneck/examples": "*"
+  }
+}

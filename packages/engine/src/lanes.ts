@@ -64,8 +64,21 @@ export interface LaneBankOptions {
   splitAt?: number;
 }
 
+/** One completed service attempt (a retry is one record per attempt), in engine seconds. */
+export interface ServiceRecord {
+  readonly laneId: number;
+  readonly agent: number;
+  readonly start: number;
+  readonly end: number;
+  readonly outcome: "pass" | "retry" | "reject";
+}
+
+const OUTCOME_CODES = ["pass", "retry", "reject"] as const;
+
 class Lane {
   open = true;
+  /** Start of the attempt in progress (service start, or the end of the previous failed attempt). */
+  attemptStart = 0;
   // FIFO stored as parallel arrays with a moving head, so dequeuing is O(1).
   readonly agents: number[] = [];
   readonly commitTimes: number[] = [];
@@ -142,6 +155,7 @@ class Lane {
 const LANE_SCALARS = [
   "busyAgent",
   "attempt",
+  "attemptStart",
   "lastChange",
   "queueIntegral",
   "busyIntegral",
@@ -181,6 +195,13 @@ export interface LaneBankState {
   readonly busyBinOffsets: Int32Array;
   readonly openBins: Float64Array;
   readonly openBinOffsets: Int32Array;
+  /** The service log (see LaneBank.serviceLog), one entry per completed attempt, in time order. */
+  readonly logLane: Int32Array;
+  readonly logAgent: Int32Array;
+  readonly logStart: Float64Array;
+  readonly logEnd: Float64Array;
+  /** Index into OUTCOME_CODES. */
+  readonly logOutcome: Uint8Array;
 }
 
 /** Concatenates lists into one typed array plus offsets (list k is data[offsets[k] .. offsets[k + 1])). */
@@ -234,6 +255,7 @@ export class LaneBank {
   private readonly lanes: Lane[] = [];
   private readonly binSeconds: number;
   private readonly splitAt: number;
+  private readonly log: ServiceRecord[] = [];
 
   constructor(
     private readonly sim: Simulation<number>,
@@ -257,8 +279,10 @@ export class LaneBank {
     const agent = event.payload;
     const now = this.sim.now;
     const outcome = this.callbacks.outcome?.(agent, laneId, lane.attempt) ?? { kind: "done" };
+    this.log.push({ laneId, agent, start: lane.attemptStart, end: now, outcome: outcome.kind === "done" ? "pass" : outcome.kind });
     if (outcome.kind === "retry") {
       lane.attempt++;
+      lane.attemptStart = now;
       this.sim.schedule(now + outcome.extra, EventKind.ServiceComplete, laneId, agent);
       return;
     }
@@ -269,6 +293,11 @@ export class LaneBank {
     this.callbacks.onLeave(agent, laneId, now, served);
     this.tryStart(laneId);
   };
+
+  /** Every completed service attempt so far, in time order (a copy). Not part of any hash. */
+  serviceLog(): ServiceRecord[] {
+    return this.log.slice();
+  }
 
   get laneCount(): number {
     return this.lanes.length;
@@ -523,6 +552,11 @@ export class LaneBank {
       busyBinOffsets: busy.offsets,
       openBins: open.data,
       openBinOffsets: open.offsets,
+      logLane: Int32Array.from(this.log, (r) => r.laneId),
+      logAgent: Int32Array.from(this.log, (r) => r.agent),
+      logStart: Float64Array.from(this.log, (r) => r.start),
+      logEnd: Float64Array.from(this.log, (r) => r.end),
+      logOutcome: Uint8Array.from(this.log, (r) => OUTCOME_CODES.indexOf(r.outcome)),
     };
   }
 
@@ -543,6 +577,20 @@ export class LaneBank {
       replace(lane.busyBins, unpack(state.busyBins, state.busyBinOffsets, k));
       replace(lane.openBins, unpack(state.openBins, state.openBinOffsets, k));
     });
+    this.restoreLog(state);
+  }
+
+  private restoreLog(state: LaneBankState): void {
+    this.log.length = 0;
+    for (let i = 0; i < state.logLane.length; i++) {
+      this.log.push({
+        laneId: state.logLane[i] as number,
+        agent: state.logAgent[i] as number,
+        start: state.logStart[i] as number,
+        end: state.logEnd[i] as number,
+        outcome: OUTCOME_CODES[state.logOutcome[i] as number] ?? "pass",
+      });
+    }
   }
 
   private lane(laneId: number): Lane {
@@ -568,6 +616,7 @@ export class LaneBank {
     }
     lane.busyAgent = agent;
     lane.attempt = 0;
+    lane.attemptStart = now;
     lane.started++;
     lane.waits.push(wait);
     lane.starts.push(now);

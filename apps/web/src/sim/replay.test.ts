@@ -7,7 +7,7 @@ import { INSIDE_FADE_SECONDS, insideFade } from "../render/palette.ts";
 import { summariseMetrics } from "../workerProtocol.ts";
 import { clampLabel } from "./camera.ts";
 import { CHECKPOINT_BUDGET_BYTES, CheckpointStore, FORWARD_RESTORE_GAIN, MIN_CHECKPOINT_INTERVAL, checkpointBytes, chooseInterval, planSeek } from "./checkpoints.ts";
-import { compareHeadlines, headlines, withExtraLane, type Headline } from "./headline.ts";
+import { headlines, withExtraLane } from "./headline.ts";
 import { describeParameters, formatGroupSizes } from "./parameters.ts";
 
 describe("checkpoint selection (review C1)", () => {
@@ -132,14 +132,6 @@ describe("headlines and the +1 lane fix", () => {
     expect(next.overrides?.["screening-main"]).toEqual(scenario.overrides?.["screening-main"]);
     expect(scenario.overrides?.["gate-main"]?.laneCount).toBe(3); // unchanged
     expect(withExtraLane({ ...scenario, overrides: undefined }, "gate-x", 64).overrides?.["gate-x"]?.laneCount).toBe(64);
-  });
-
-  it("compares headline numbers, judging only final ones", () => {
-    const h = (kind: Headline["kind"], value: number, final = true): Headline => ({ kind, value, final, at: null });
-    const rows = compareHeadlines([h("stillOutside", 900), h("p95PeakWait", 1200), h("shareInside", 0.5)], [h("stillOutside", 300), h("p95PeakWait", 1300), h("shareInside", 0.6, false)]);
-    expect(rows.map((r) => r.improved)).toEqual([true, false, null]);
-    expect(rows[0]?.delta).toBe(-600);
-    expect(compareHeadlines([h("p95PeakWait", 10)], [])[0]?.after).toBeNull();
   });
 });
 
