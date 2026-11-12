@@ -63,7 +63,7 @@ import { exp } from "./detmath.ts";
 import { sampleCategorical } from "./distributions.ts";
 import type { FlowField } from "./flowField.ts";
 import { Float64Hasher } from "./hash.ts";
-import { EventKind as EventKindEnum, LaneBank, percentileNearestRank, type LaneBankState } from "./lanes.ts";
+import { EventKind as EventKindEnum, LaneBank, percentileNearestRank, type LaneBankState, type ServiceRecord } from "./lanes.ts";
 import { RandomStream as RandomStreamEnum, toSeed, uniform } from "./rng.ts";
 import { SERVICE_TIME_PRESETS, makeSampler, type Sampler } from "./sampling.ts";
 import { Simulation, TICK_SECONDS as TICK, type EventHandler } from "./simulation.ts";
@@ -207,6 +207,8 @@ export interface Run {
   laneStates(): LaneLive[];
   metrics(): RunMetrics;
   metricsHash(): string;
+  /** Every completed service attempt so far in time order, in engine seconds (a retry is one record per attempt). Not part of metricsHash. */
+  serviceLog(): ServiceRecord[];
   /** The complete dynamic state, for restoreRun() (review C1: replay seeks restore the nearest checkpoint). */
   saveCheckpoint(): RunCheckpoint;
   /** Internal state for tests and tools; not a stable API. */
@@ -1337,6 +1339,10 @@ class PedestrianRun implements Run {
    */
   metricsHash(): string {
     return hashMetrics(this.metrics());
+  }
+
+  serviceLog(): ServiceRecord[] {
+    return this.bank.serviceLog();
   }
 
   // --- Checkpoints (review C1) ---

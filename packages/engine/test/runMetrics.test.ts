@@ -285,3 +285,35 @@ describe("checkpoints", () => {
     expect(() => restoreRun(venueMinimal, { ...scenario, seed: 1 }, a.saveCheckpoint())).toThrow(RangeError);
   }, 60_000);
 });
+
+describe("service log", () => {
+  it("records every attempt in time order, is restored exactly, and does not change the metrics", () => {
+    const a = createRun(venueMinimal, scenario);
+    for (let k = 0; k < 6000; k++) a.step();
+    const mid = a.serviceLog();
+    expect(mid.length).toBeGreaterThan(20);
+    const restored = restoreRun(venueMinimal, scenario, structuredClone(a.saveCheckpoint()));
+    expect(restored.serviceLog()).toEqual(mid);
+    runToEnd(a);
+    runToEnd(restored);
+    const log = a.serviceLog();
+    expect(restored.serviceLog()).toEqual(log);
+    expect(restored.metricsHash()).toBe(a.metricsHash());
+    for (let i = 0; i < log.length; i++) {
+      const r = log[i]!;
+      expect(r.end).toBeGreaterThan(r.start);
+      if (i > 0) expect(r.end).toBeGreaterThanOrEqual(log[i - 1]!.end);
+    }
+    // Passes equal the metrics' served counts; scan retries exist because scanFailure.rate > 0.
+    const passes = log.filter((r) => r.outcome === "pass").length;
+    const served = a.metrics().lanes.reduce((n, l) => n + l.metrics.served, 0);
+    expect(passes).toBe(served);
+    expect(log.some((r) => r.outcome === "retry")).toBe(true);
+    // A lane serves one attempt at a time.
+    const lastEnd = new Map<number, number>();
+    for (const r of log) {
+      expect(r.start).toBeGreaterThanOrEqual(lastEnd.get(r.laneId) ?? 0);
+      lastEnd.set(r.laneId, r.end);
+    }
+  }, 60_000);
+});
