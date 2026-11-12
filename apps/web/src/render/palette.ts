@@ -83,3 +83,12 @@ export function heatColor(density: number, out: Uint8ClampedArray, offset: numbe
   out[offset + 2] = a[2] + (b[2] - a[2]) * f;
   out[offset + 3] = 90 + 130 * t;
 }
+
+/** People who reached the destination fade out over this many simulated seconds, then are hidden. */
+export const INSIDE_FADE_SECONDS = 30;
+
+/** Opacity factor for someone Inside for `age` simulated seconds (1 on arrival, 0 after the fade). */
+export function insideFade(age: number): number {
+  if (Number.isNaN(age)) return 0;
+  return Math.min(1, Math.max(0, 1 - age / INSIDE_FADE_SECONDS));
+}

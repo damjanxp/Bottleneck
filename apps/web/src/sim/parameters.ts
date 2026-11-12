@@ -28,14 +28,17 @@ export function describeParameters(p: ResolvedParameters, venue: Venue, scenario
       assumed: venue.parameters?.speedDensity === undefined,
     },
     { key: "arrivalCurve", label: L.arrivalCurve, value: scenario.arrivals.points && scenario.arrivals.points.length >= 2 ? strings.parameters.customCurve : `${scenario.arrivals.preset} ${strings.parameters.preset}`, assumed: !(scenario.arrivals.points && scenario.arrivals.points.length >= 2) },
-    { key: "decisionDistance", label: L.decisionDistance, value: `${p.decisionDistance} m`, assumed: true },
-    { key: "logitScale", label: L.logitScale, value: `${p.logitScale} s`, assumed: true },
-    { key: "slotSpacing", label: L.slotSpacing, value: `${p.slotSpacing} m`, assumed: true },
-    { key: "jockeyThreshold", label: L.jockeyThreshold, value: String(p.jockeyThreshold), assumed: true },
-    { key: "manualServiceTime", label: L.manualServiceTime, value: formatDistribution(p.manualLaneServiceTime, "s"), assumed: true },
+    // Scenario-settable assumptions: "assumed" only when the scenario leaves them at the default.
+    { key: "decisionDistance", label: L.decisionDistance, value: `${p.decisionDistance} m`, assumed: sp.decisionDistance === undefined },
+    { key: "logitScale", label: L.logitScale, value: `${p.logitScale} s`, assumed: sp.logitScale === undefined },
+    { key: "slotSpacing", label: L.slotSpacing, value: `${p.slotSpacing} m`, assumed: sp.slotSpacing === undefined },
+    { key: "jockeyThreshold", label: L.jockeyThreshold, value: String(p.jockeyThreshold), assumed: sp.jockeyThreshold === undefined },
+    { key: "manualServiceTime", label: L.manualServiceTime, value: formatDistribution(p.manualLaneServiceTime, "s"), assumed: sp.manualLaneServiceTime === undefined },
+    { key: "groupSizes", label: L.groupSizes, value: formatGroupSizes(p.groupSizes), assumed: sp.groupSizes === undefined },
+    { key: "bagPolicy", label: L.bagPolicy, value: p.bagPolicy === null ? strings.parameters.bagPolicyNone : strings.parameters.bagPolicies[p.bagPolicy], assumed: sp.bagPolicy === undefined },
     { key: "densitySigma", label: L.densitySigma, value: `${p.densitySigma} m`, assumed: true },
-    { key: "watchdog", label: L.watchdog, value: `${p.watchdogMinutes} min`, assumed: true },
-    { key: "shareInsideLead", label: L.shareInsideAt, value: scenario.timeline.eventStart === null ? strings.parameters.oneHourAfterOpening : formatDuration(scenario.timeline.eventStart - p.shareInsideAt) + strings.parameters.beforeStart, assumed: true },
+    { key: "watchdog", label: L.watchdog, value: `${p.watchdogMinutes} min`, assumed: sp.watchdogMinutes === undefined },
+    { key: "shareInsideLead", label: L.shareInsideAt, value: shareInsideText(p, scenario), assumed: sp.shareInsideAt === undefined },
   ];
   for (const el of p.elements) {
     const name = elementName(venue, el.id);
@@ -46,6 +49,21 @@ export function describeParameters(p: ResolvedParameters, venue: Venue, scenario
     }
   }
   return rows;
+}
+
+/** "30% alone, 40% in 2s, …": relative frequencies of group sizes 1, 2, 3, … */
+export function formatGroupSizes(sizes: readonly number[]): string {
+  const total = sizes.reduce((s, w) => s + w, 0);
+  if (!(total > 0) || sizes.length <= 1) return strings.parameters.everyoneAlone;
+  return sizes.map((w, k) => `${Math.round((100 * w) / total)}% ${k === 0 ? strings.parameters.alone : `${strings.parameters.groupOf} ${k + 1}`}`).join(", ");
+}
+
+function shareInsideText(p: ResolvedParameters, scenario: Scenario): string {
+  const start = scenario.timeline.eventStart;
+  if (scenario.parameters?.shareInsideAt === undefined && start === null) return strings.parameters.oneHourAfterOpening;
+  if (start !== null && p.shareInsideAt <= start) return formatDuration(start - p.shareInsideAt) + strings.parameters.beforeStart;
+  const ref = start ?? scenario.timeline.gatesOpen;
+  return formatDuration(p.shareInsideAt - ref) + (start !== null ? strings.parameters.afterStart : strings.parameters.afterOpening);
 }
 
 /** Display name of a gate group or screening stage. */

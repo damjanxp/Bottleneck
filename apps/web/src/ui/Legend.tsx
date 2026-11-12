@@ -46,6 +46,7 @@ export function Legend({ heatmap }: { heatmap: boolean }) {
         <span key={s.state} className="inline-flex items-center gap-1">
           <ShapeIcon shape={s.shape} color={s.css} />
           {strings.states[s.key]}
+          {s.key === "Inside" && ` ${L.insideFades}`}
         </span>
       ))}
       <span className="inline-flex items-center gap-1">

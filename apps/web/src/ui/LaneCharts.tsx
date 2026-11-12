@@ -5,6 +5,7 @@ import type { LaneReport } from "@bottleneck/engine";
 import { formatRelativeClock } from "../sim/format.ts";
 import { laneSeries, type ChartSeries } from "../sim/series.ts";
 import { strings } from "../strings.ts";
+import { LaneWaits, ManualBadge } from "./Panels.tsx";
 
 function Chart({ title, series, anchor, fixedStart, color, bars, unit }: { title: string; series: ChartSeries; anchor: number; fixedStart: boolean; color: string; bars?: boolean; unit: string }) {
   const host = useRef<HTMLDivElement>(null);
@@ -74,11 +75,15 @@ export function LaneCharts({ name, report, startTime, queueInterval, binSeconds,
   return (
     <section aria-label={name} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">{name}</h3>
+        <h3 className="text-sm font-semibold">
+          {name}
+          {report.laneType === "manual" && <ManualBadge />}
+        </h3>
         <button type="button" onClick={onClose} className="rounded px-2 py-0.5 text-xs text-slate-600 underline hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100">
           {C.close}
         </button>
       </div>
+      <LaneWaits report={report} />
       <Chart title={C.queueTitle} series={queue} anchor={anchor} fixedStart={fixedStart} color="#E69F00" unit={C.people} />
       <Chart title={C.throughputTitle} series={throughput} anchor={anchor} fixedStart={fixedStart} color="#0072B2" bars unit={C.perMinute} />
       <details className="mt-2 text-xs">

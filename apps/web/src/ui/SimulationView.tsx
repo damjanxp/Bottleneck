@@ -1,20 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { exampleVenues } from "@bottleneck/examples";
-import { MAX_SPEED, MIN_SPEED } from "@bottleneck/engine";
-import { VenueRenderer, type FrameStats } from "../render/VenueRenderer.ts";
-import { formatBytesPerSecond, formatCount, formatRelativeClock } from "../sim/format.ts";
-import { headlines, laneLabel, worstLane } from "../sim/headline.ts";
+import { MAX_SPEED, MIN_SPEED, TICK_SECONDS } from "@bottleneck/engine";
+import type { Scenario } from "@bottleneck/schema";
+// Type-only: PixiJS and uPlot are loaded on demand, so they stay out of the main chunk.
+import type { FrameStats, VenueRenderer } from "../render/VenueRenderer.ts";
+import { formatBytesPerSecond, formatCount, formatDuration, formatRelativeClock } from "../sim/format.ts";
+import { MAX_LANES, compareHeadlines, headlines, laneLabel, withExtraLane, worstLane, type Headline } from "../sim/headline.ts";
 import { describeParameters, elementName } from "../sim/parameters.ts";
 import { SimController, type SeekState } from "../sim/SimController.ts";
 import { strings } from "../strings.ts";
 import type { LoadedInfo, MetricsSummary, StatsMessage } from "../workerProtocol.ts";
-import { LaneCharts } from "./LaneCharts.tsx";
 import { Legend } from "./Legend.tsx";
-import { ClockDisplay, Headlines, LaneTable, ParametersList, StateCounts, WorstLane, type ClockInfo } from "./Panels.tsx";
+import { CapacityTable, ClockDisplay, Comparison, Headlines, LaneTable, ParametersList, StateCounts, WorstLane, type ClockInfo } from "./Panels.tsx";
+
+const LaneCharts = lazy(() => import("./LaneCharts.tsx").then((m) => ({ default: m.LaneCharts })));
 
 const SPEEDS = [1, 2, 5, 10, 30, 60].filter((s) => s >= MIN_SPEED && s <= MAX_SPEED);
 const DEFAULT_SPEED = 30;
-const STEP_TICKS = 4;
+/** "Step" advances one tick; "+1 min" one simulated minute. */
+const STEP_TICKS = 1;
+const MINUTE_TICKS = Math.round(60 / TICK_SECONDS);
 const NARROW_PX = 768;
 
 const DEFAULT_VENUE = Math.max(0, exampleVenues.findIndex((v) => v.id === "belgrade-fair-concert"));
@@ -31,6 +36,23 @@ const btn =
   "rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800";
 const btnPrimary = "rounded-md bg-amber-500 px-4 py-1.5 text-sm font-semibold text-slate-950 shadow-sm hover:bg-amber-400 disabled:opacity-50";
 
+/** The "+1 lane" fix (review A9): the finished previous run's headline numbers and what changed. */
+interface LaneFix {
+  elementId: string;
+  elementName: string;
+  beforeLanes: number;
+  afterLanes: number;
+  before: Headline[];
+}
+
+/** A "+1 lane" waiting for the current run to finish (a seek to the end) before reloading. */
+interface PendingFix {
+  elementId: string;
+  laneCount: number;
+  seekId: number | null;
+  awaitingMetrics: boolean;
+}
+
 export function SimulationView() {
   const [venueIndex, setVenueIndex] = useState(DEFAULT_VENUE);
   const [scenarioIndex, setScenarioIndex] = useState(0);
@@ -44,6 +66,10 @@ export function SimulationView() {
   const [showMap, setShowMap] = useState(() => typeof window === "undefined" || window.innerWidth >= NARROW_PX);
   const [error, setError] = useState<string | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
+  /** A modified copy of the example scenario ("+1 lane"); null means the example as shipped. */
+  const [scenarioOverride, setScenarioOverride] = useState<Scenario | null>(null);
+  const [laneFix, setLaneFix] = useState<LaneFix | null>(null);
+  const [finishing, setFinishing] = useState(false);
   const [reducedMotion] = useState(prefersReducedMotion);
   const [perf] = useState(perfEnabled);
 
@@ -52,11 +78,36 @@ export function SimulationView() {
   const hostRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef<LoadedInfo | null>(null);
   const scrubTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingFix = useRef<PendingFix | null>(null);
 
   const example = exampleVenues[venueIndex] ?? exampleVenues[0];
   const scenarioInfo = example?.scenarioInfo[scenarioIndex] ?? example?.scenarioInfo[0];
   const venue = example?.venue;
-  const scenario = scenarioInfo?.scenario;
+  const scenario = scenarioOverride ?? scenarioInfo?.scenario;
+  const scenarioRef = useRef<Scenario | undefined>(scenario);
+  const venueRef = useRef(venue);
+  useEffect(() => {
+    scenarioRef.current = scenario;
+    venueRef.current = venue;
+  }, [scenario, venue]);
+
+  /** Second half of "+1 lane": keep the finished run's numbers, reload with one more lane. */
+  const applyFix = useCallback((fix: PendingFix, finalMetrics: MetricsSummary) => {
+    const sc = scenarioRef.current;
+    const v = venueRef.current;
+    pendingFix.current = null;
+    setFinishing(false);
+    if (!sc || !v) return;
+    setLaneFix({
+      elementId: fix.elementId,
+      elementName: elementName(v, fix.elementId),
+      beforeLanes: fix.laneCount,
+      afterLanes: Math.min(MAX_LANES, fix.laneCount + 1),
+      // The previous run is finished, so every number is final.
+      before: headlines(finalMetrics, sc.timeline.eventStart, Infinity),
+    });
+    setScenarioOverride(withExtraLane(sc, fix.elementId, fix.laneCount));
+  }, []);
 
   // Crossing the narrow-screen breakpoint shows or hides the map (review C6); the button overrides.
   useEffect(() => {
@@ -92,8 +143,28 @@ export function SimulationView() {
           if (s.density && info) r.setDensity({ data: s.density, ...info.density });
         }
       },
-      onMetrics: (m) => setMetrics(m),
-      onSeek: (s) => setSeek(s),
+      onMetrics: (m) => {
+        setMetrics(m);
+        const fix = pendingFix.current;
+        if (fix?.awaitingMetrics) applyFix(fix, m);
+      },
+      onSeek: (s) => {
+        setSeek(s);
+        // Another seek replaced the one finishing the run for "+1 lane": give up on the fix.
+        const fix = pendingFix.current;
+        if (fix && s !== null && fix.seekId !== null && s.seekId !== fix.seekId) {
+          pendingFix.current = null;
+          setFinishing(false);
+        }
+      },
+      onSeekDone: (d) => {
+        const fix = pendingFix.current;
+        if (!fix || fix.seekId !== d.seekId) return;
+        if (d.cancelled) {
+          pendingFix.current = null;
+          setFinishing(false);
+        } else fix.awaitingMetrics = true; // the worker sends the final metrics right after
+      },
       onError: (m) => setError(m),
     });
     return () => {
@@ -101,7 +172,7 @@ export function SimulationView() {
       c.dispose();
       controllerRef.current = null;
     };
-  }, []);
+  }, [applyFix]);
 
   // Load the chosen example.
   useEffect(() => {
@@ -119,7 +190,8 @@ export function SimulationView() {
     if (!showMap || !host) return;
     let cancelled = false;
     let renderer: VenueRenderer | null = null;
-    VenueRenderer.create(host)
+    import("../render/VenueRenderer.ts")
+      .then(({ VenueRenderer: Renderer }) => Renderer.create(host))
       .then((r) => {
         if (cancelled) {
           r.destroy();
@@ -189,6 +261,22 @@ export function SimulationView() {
     controllerRef.current?.setSpeed(s);
   };
 
+  /** "+1 lane" (review A9): finish the current run (exact seek to the end), then reload with one more lane. */
+  const onAddLane = (elementId: string) => {
+    const c = controllerRef.current;
+    if (!c || !loaded || seek || pendingFix.current) return;
+    const el = loaded.parameters.elements.find((e) => e.id === elementId);
+    if (!el || el.laneCount >= MAX_LANES) return;
+    const fix: PendingFix = { elementId, laneCount: el.laneCount, seekId: null, awaitingMetrics: false };
+    pendingFix.current = fix;
+    if (stats?.done && metrics) {
+      applyFix(fix, metrics);
+      return;
+    }
+    setFinishing(true);
+    fix.seekId = c.seek(loaded.endTime);
+  };
+
   const onScrub = (value: number) => {
     setScrub(value);
     if (scrubTimer.current) clearTimeout(scrubTimer.current);
@@ -199,7 +287,10 @@ export function SimulationView() {
   };
 
   const worst = stats ? worstLane(stats.lanes) : null;
-  const heads = metrics && scenario ? headlines(metrics, scenario.timeline.eventStart, time) : [];
+  const worstElement = worst && loaded ? loaded.lanes.find((l) => l.laneId === worst.laneId)?.elementId : undefined;
+  const heads = metrics && scenario ? headlines(metrics, scenario.timeline.eventStart, done ? Infinity : time) : [];
+  const busy = !loaded || seek !== null || finishing;
+  const names = (id: string) => (venue ? elementName(venue, id) : id);
   const selectedReport = selectedLane !== null ? metrics?.lanes.find((l) => l.laneId === selectedLane) : undefined;
 
   const statusNote = stats?.done ? (stats.deadlock ? strings.controls.deadlock : stats.drained ? strings.controls.drained : strings.controls.horizon) : null;
@@ -216,6 +307,8 @@ export function SimulationView() {
             onChange={(e) => {
               setVenueIndex(Number(e.target.value));
               setScenarioIndex(0);
+              setScenarioOverride(null);
+              setLaneFix(null);
             }}
           >
             {exampleVenues.map((v, i) => (
@@ -230,7 +323,11 @@ export function SimulationView() {
           <select
             className="mt-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             value={scenarioIndex}
-            onChange={(e) => setScenarioIndex(Number(e.target.value))}
+            onChange={(e) => {
+              setScenarioIndex(Number(e.target.value));
+              setScenarioOverride(null);
+              setLaneFix(null);
+            }}
           >
             {example?.scenarioInfo.map((s, i) => (
               <option key={s.id} value={i}>
@@ -239,7 +336,16 @@ export function SimulationView() {
             ))}
           </select>
         </label>
-        {scenarioInfo && <p className="max-w-md flex-1 text-sm text-slate-600 dark:text-slate-400">{scenarioInfo.description}</p>}
+        {scenarioInfo && (
+          <p className="max-w-md flex-1 text-sm text-slate-600 dark:text-slate-400">
+            {scenarioInfo.description}
+            {scenarioOverride && laneFix && (
+              <span className="mt-1 block font-medium text-sky-800 dark:text-sky-300">
+                {strings.picker.modified} {laneFix.elementName}: {laneFix.afterLanes} {strings.comparison.lanes}
+              </span>
+            )}
+          </p>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
@@ -252,7 +358,19 @@ export function SimulationView() {
             <button type="button" className={btn} onClick={() => controllerRef.current?.step(STEP_TICKS)} disabled={!loaded || playing || done || seek !== null} title={strings.controls.stepHint}>
               {strings.controls.step}
             </button>
-            <button type="button" className={btn} onClick={() => controllerRef.current?.restart()} disabled={!loaded}>
+            <button type="button" className={btn} onClick={() => controllerRef.current?.step(MINUTE_TICKS)} disabled={!loaded || playing || done || seek !== null} title={strings.controls.plusMinuteHint}>
+              {strings.controls.plusMinute}
+            </button>
+            <button
+              type="button"
+              className={btn}
+              onClick={() => {
+                pendingFix.current = null;
+                setFinishing(false);
+                controllerRef.current?.restart();
+              }}
+              disabled={!loaded}
+            >
               {strings.controls.restart}
             </button>
             <button type="button" className={btn} onClick={() => loaded && controllerRef.current?.seek(loaded.peakStart)} disabled={!loaded || seek !== null} title={strings.controls.jumpToPeakHint}>
@@ -301,7 +419,7 @@ export function SimulationView() {
               {seek && (
                 <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400" role="status">
                   <progress className="h-2 flex-1 accent-amber-500" max={1} value={seek.fraction} />
-                  <span>{strings.controls.seeking}</span>
+                  <span>{finishing ? strings.controls.finishing : strings.controls.seeking}</span>
                   <button type="button" className="underline" onClick={() => controllerRef.current?.cancelSeek()}>
                     {strings.controls.cancel}
                   </button>
@@ -337,21 +455,36 @@ export function SimulationView() {
 
         <aside className="flex min-w-0 flex-col gap-3">
           {clock && heads.length > 0 && <Headlines items={heads} clock={clock} />}
-          <WorstLane name={worst ? (laneNames.get(worst.laneId) ?? null) : null} queue={worst?.queueLength ?? 0} />
-          {selectedReport && loaded && clock && (
-            <LaneCharts
-              name={laneNames.get(selectedReport.laneId) ?? ""}
-              report={selectedReport}
-              startTime={loaded.startTime}
-              queueInterval={loaded.parameters.queueSampleInterval}
-              binSeconds={loaded.parameters.throughputBin}
-              anchor={clock.anchor}
-              fixedStart={clock.fixedStart}
-              onClose={() => setSelectedLane(null)}
+          {laneFix && (
+            <Comparison
+              rows={compareHeadlines(laneFix.before, heads)}
+              title={laneFix.elementName}
+              beforeLanes={laneFix.beforeLanes}
+              afterLanes={laneFix.afterLanes}
+              finished={done}
+              busy={busy}
+              onRunToEnd={() => loaded && controllerRef.current?.seek(loaded.endTime)}
+              onClose={() => setLaneFix(null)}
             />
           )}
+          <WorstLane name={worst ? (laneNames.get(worst.laneId) ?? null) : null} queue={worst?.queueLength ?? 0} onAddLane={worstElement ? () => onAddLane(worstElement) : undefined} addDisabled={busy} />
+          {selectedReport && loaded && clock && (
+            <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts.loading}</p>}>
+              <LaneCharts
+                name={laneNames.get(selectedReport.laneId) ?? ""}
+                report={selectedReport}
+                startTime={loaded.startTime}
+                queueInterval={loaded.parameters.queueSampleInterval}
+                binSeconds={loaded.parameters.throughputBin}
+                anchor={clock.anchor}
+                fixedStart={clock.fixedStart}
+                onClose={() => setSelectedLane(null)}
+              />
+            </Suspense>
+          )}
+          {metrics && clock && metrics.elements.length > 0 && <CapacityTable elements={metrics.elements} names={names} clock={clock} onAddLane={onAddLane} addDisabled={busy} />}
           {loaded && stats && <LaneTable lanes={loaded.lanes} states={stats.lanes} names={laneNames} selected={selectedLane} onSelect={(id) => setSelectedLane((cur) => (cur === id ? null : id))} />}
-          {stats && <StateCounts counts={stats.countsByState} />}
+          {stats && <StateCounts counts={stats.countsByState} time={stats.time} />}
           {paramRows.length > 0 && <ParametersList rows={paramRows} />}
           {!showMap && perf && <PerfOverlay controller={controllerRef} renderer={rendererRef} stats={stats} agentCount={loaded?.agentCount ?? 0} />}
         </aside>
@@ -361,12 +494,12 @@ export function SimulationView() {
 }
 
 function PerfOverlay({ controller, renderer, stats, agentCount }: { controller: React.RefObject<SimController | null>; renderer: React.RefObject<VenueRenderer | null>; stats: StatsMessage | null; agentCount: number }) {
-  const [sample, setSample] = useState<{ f: FrameStats | undefined; bytes: number }>({ f: undefined, bytes: 0 });
+  const [sample, setSample] = useState<{ f: FrameStats | undefined; bytes: number; seekMs: number | null }>({ f: undefined, bytes: 0, seekMs: null });
   useEffect(() => {
-    const id = setInterval(() => setSample({ f: renderer.current?.frameStats(), bytes: controller.current?.snapshotBytesPerSecond() ?? 0 }), 500);
+    const id = setInterval(() => setSample({ f: renderer.current?.frameStats(), bytes: controller.current?.snapshotBytesPerSecond() ?? 0, seekMs: controller.current?.lastSeekMs ?? null }), 500);
     return () => clearInterval(id);
   }, [controller, renderer]);
-  const { f, bytes } = sample;
+  const { f, bytes, seekMs } = sample;
   const P = strings.perf;
   const ms = (v: number | undefined) => (v === undefined ? "–" : v.toFixed(1));
   return (
@@ -385,6 +518,14 @@ function PerfOverlay({ controller, renderer, stats, agentCount }: { controller: 
       </div>
       <div>
         {P.bytes}: {formatBytesPerSecond(bytes)}
+      </div>
+      {stats && (
+        <div>
+          {P.checkpoints}: {stats.checkpoints.count} · {(stats.checkpoints.bytes / 1048576).toFixed(1)} MB · {P.every} {formatDuration(stats.checkpoints.interval)}
+        </div>
+      )}
+      <div>
+        {P.lastSeek}: {seekMs === null ? "–" : `${seekMs.toFixed(0)} ms`}
       </div>
     </div>
   );

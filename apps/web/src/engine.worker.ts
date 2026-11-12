@@ -4,9 +4,10 @@
  * owns the timer and turns wall-clock time into ticks with PlaybackPacer.
  */
 
-import { ENGINE_VERSION, EXPECTED_SELF_CHECK_HASH, PlaybackPacer, TICK_SECONDS, createRun, runSelfCheck, snapshotLength, type Run } from "@bottleneck/engine";
+import { ENGINE_VERSION, EXPECTED_SELF_CHECK_HASH, PlaybackPacer, TICK_SECONDS, createRun, restoreRun, runSelfCheck, snapshotLength, type Run, type RunCheckpoint } from "@bottleneck/engine";
 import type { Scenario, Venue } from "@bottleneck/schema";
 import { tinyScenario, tinyVenue } from "./determinism/tinyScenario.ts";
+import { CheckpointStore, checkpointBytes, chooseInterval, planSeek } from "./sim/checkpoints.ts";
 import { peakWindowStart } from "./sim/peak.ts";
 import { RollingSamples } from "./sim/rolling.ts";
 import { seekFraction, summariseMetrics, type StatsMessage, type WorkerRequest, type WorkerResponse } from "./workerProtocol.ts";
@@ -40,7 +41,9 @@ let loopCount = 0;
 let lastSnapshotTime = Number.NaN;
 let freeBuffers: Float32Array[] = [];
 const tickTimes = new RollingSamples(600);
-let seek: { id: number; target: number; from: number; resumePlaying: boolean; cancelled: boolean } | null = null;
+let seek: { id: number; target: number; from: number; resumePlaying: boolean; cancelled: boolean; startedAt: number } | null = null;
+/** Engine checkpoints of the loaded scenario (review C1); kept across restarts, cleared on load. */
+const checkpoints = new CheckpointStore<RunCheckpoint>();
 
 function post(message: WorkerResponse, transfer?: Transferable[]): void {
   scope.postMessage(message, transfer);
@@ -59,6 +62,11 @@ function stepTimed(r: Run): void {
   const t0 = performance.now();
   r.step();
   tickTimes.add(performance.now() - t0);
+  // Checkpoints are saved wherever the run passes the interval grid: playing, stepping or seeking.
+  if (checkpoints.isDue(r.time)) {
+    const cp = r.saveCheckpoint();
+    checkpoints.add(r.time, cp, checkpointBytes(cp));
+  }
 }
 
 function postSnapshot(force = false): void {
@@ -86,6 +94,7 @@ function postStats(): void {
     countsByState: run.countsByState(),
     lanes: run.laneStates(),
     tick: { p50: tickTimes.percentile(0.5), p95: tickTimes.percentile(0.95), samples: tickTimes.size },
+    checkpoints: { count: checkpoints.size, bytes: checkpoints.totalBytes, interval: checkpoints.interval },
   };
   if (densityOn) {
     const copy = run.density.data.slice();
@@ -172,6 +181,8 @@ function load(v: Venue, s: Scenario, speed: number): void {
   pacer.speed = speed;
   pacer.reset();
   run = newRun();
+  // Size the checkpoint interval from a checkpoint of the fresh run (review C1, see checkpoints.ts).
+  checkpoints.clear(chooseInterval(run.toEngineTime(run.parameters.horizon), checkpointBytes(run.saveCheckpoint())));
   const len = snapshotLength(run.agentCount);
   freeBuffers = [new Float32Array(len), new Float32Array(len)];
   lastSnapshotTime = Number.NaN;
@@ -204,14 +215,21 @@ function restart(): void {
 
 function startSeek(target: number, id: number): void {
   if (!run || !venue || !scenario) return;
+  const startedAt = performance.now();
   const resumePlaying = seek ? seek.resumePlaying : playing;
   stopTimer();
   playing = false;
   pacer.reset();
-  const clamped = Math.min(target, run.parameters.horizon);
-  // Backwards: re-run the seeded simulation from 0 (keyframes come later).
-  if (run.toScenarioTime(run.time) > clamped) run = newRun();
-  const s = { id, target: run.toEngineTime(clamped), from: run.time, resumePlaying, cancelled: false };
+  const engineTarget = run.toEngineTime(Math.min(Math.max(target, run.toScenarioTime(0)), run.parameters.horizon));
+  // Start from the best checkpoint: backwards always (or from 0 if there is none before the
+  // target), forwards only if a checkpoint skips enough stepping. Exact either way (determinism).
+  const plan = planSeek(run.time, engineTarget, checkpoints.times());
+  if (plan.kind === "fresh") run = newRun();
+  else if (plan.kind === "restore") {
+    const cp = checkpoints.get(plan.time);
+    run = cp ? restoreRun(venue, scenario, cp) : newRun();
+  }
+  const s = { id, target: engineTarget, from: run.time, resumePlaying, cancelled: false, startedAt };
   seek = s;
   seekChunk(s);
 }
@@ -231,7 +249,7 @@ function seekChunk(s: NonNullable<typeof seek>): void {
     return;
   }
   seek = null;
-  post({ type: "seekDone", generation, seekId: s.id, cancelled: s.cancelled, time: run.toScenarioTime(run.time) });
+  post({ type: "seekDone", generation, seekId: s.id, cancelled: s.cancelled, time: run.toScenarioTime(run.time), durationMs: performance.now() - s.startedAt });
   postAll();
   if (s.resumePlaying && !run.done) play();
 }

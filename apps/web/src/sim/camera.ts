@@ -68,3 +68,12 @@ export function distanceToSegment(px: number, py: number, ax: number, ay: number
   const cy = ay + t * dy - py;
   return Math.sqrt(cx * cx + cy * cy);
 }
+
+/**
+ * Keeps a label of half-size (halfW, halfH) centred at (x, y) fully inside a width × height
+ * viewport with `pad` pixels to spare; centred if the viewport is too small for it.
+ */
+export function clampLabel(x: number, y: number, halfW: number, halfH: number, width: number, height: number, pad = 4): { x: number; y: number } {
+  const fit = (v: number, half: number, size: number) => (size < 2 * (half + pad) ? size / 2 : Math.min(size - half - pad, Math.max(half + pad, v)));
+  return { x: fit(x, halfW, width), y: fit(y, halfH, height) };
+}

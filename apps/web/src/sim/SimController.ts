@@ -27,6 +27,8 @@ export interface ControllerListener {
   onStats?(stats: StatsMessage): void;
   onMetrics?(metrics: MetricsSummary): void;
   onSeek?(seek: SeekState | null): void;
+  /** A seek finished (or was cancelled); durationMs is the worker's wall time for it. */
+  onSeekDone?(done: { seekId: number; cancelled: boolean; time: number; durationMs: number }): void;
   onError?(message: string): void;
 }
 
@@ -37,6 +39,8 @@ export class SimController {
   private nextSeekId = 1;
   private seekState: SeekState | null = null;
   latest: Snapshot | null = null;
+  /** Wall time of the last completed seek (ms), for the perf overlay. */
+  lastSeekMs: number | null = null;
   loaded: LoadedInfo | null = null;
   /** Snapshot bytes received, for the perf overlay. */
   private bytesWindow: { at: number; bytes: number }[] = [];
@@ -85,10 +89,12 @@ export class SimController {
   setDensity(enabled: boolean): void {
     this.send({ type: "setDensity", enabled });
   }
-  seek(time: number): void {
+  /** Starts a seek and returns its id. */
+  seek(time: number): number {
     const seekId = this.nextSeekId++;
     this.setSeek({ seekId, target: time, fraction: 0 });
     this.send({ type: "seek", time, seekId });
+    return seekId;
   }
   cancelSeek(): void {
     this.send({ type: "cancelSeek" });
@@ -142,7 +148,10 @@ export class SimController {
         if (this.seekState && msg.seekId === this.seekState.seekId) this.setSeek({ ...this.seekState, fraction: msg.fraction });
         break;
       case "seekDone":
+        if (msg.generation !== this.generation) return;
+        if (!msg.cancelled) this.lastSeekMs = msg.durationMs;
         if (this.seekState && msg.seekId === this.seekState.seekId) this.setSeek(null);
+        this.emit((l) => l.onSeekDone?.({ seekId: msg.seekId, cancelled: msg.cancelled, time: msg.time, durationMs: msg.durationMs }));
         break;
       case "error":
         this.emit((l) => l.onError?.(msg.message));

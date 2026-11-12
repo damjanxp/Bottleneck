@@ -16,11 +16,12 @@ import "pixi.js/unsafe-eval";
 import { Application, Container, Graphics, Particle, ParticleContainer, Rectangle, Sprite, Text, Texture } from "pixi.js";
 import type { LaneLayout, LaneLive } from "@bottleneck/engine";
 import type { Point, Polygon, Venue } from "@bottleneck/schema";
-import { distanceToSegment, fitCamera, pan, screenToWorld, worldToScreen, zoomAt, type Bounds, type Camera } from "../sim/camera.ts";
+import { AgentState } from "@bottleneck/engine";
+import { clampLabel, distanceToSegment, fitCamera, pan, screenToWorld, worldToScreen, zoomAt, type Bounds, type Camera } from "../sim/camera.ts";
 import { EXTRAPOLATE_BELOW_SPEED, extrapolationSeconds } from "../sim/extrapolate.ts";
 import { RollingSamples } from "../sim/rolling.ts";
 import type { Snapshot } from "../sim/SimController.ts";
-import { HEATMAP_MAX, LANE_COLORS, STATE_STYLES, heatColor, styleIndex, type Shape } from "./palette.ts";
+import { HEATMAP_MAX, LANE_COLORS, STATE_STYLES, heatColor, insideFade, styleIndex, type Shape } from "./palette.ts";
 
 const ATLAS_CELL = 32;
 /** Agent marker size: at least this many metres, and at least MIN_PX screen pixels. */
@@ -28,6 +29,10 @@ const AGENT_METRES = 0.6;
 const MIN_PX = 5;
 const CLICK_SLOP_PX = 5;
 const LANE_HIT_PX = 14;
+/** Labels keep this many pixels from the edge of the view. */
+const LABEL_PAD = 6;
+/** Snapshots closer than this (simulated s) count as continuous playback, for the Inside fade-out. */
+const CONTINUITY_SECONDS = 60;
 
 export interface DensityFrame {
   data: Float32Array;
@@ -122,6 +127,9 @@ export class VenueRenderer {
   private laneStates: LaneLive[] = [];
   private selectedLane: number | null = null;
   private snapshot: Snapshot | null = null;
+  /** Per agent: snapshot time at which it was first seen Inside (NaN: not inside; −∞: inside since before a jump). */
+  private insideSince = new Float64Array(0);
+  private insideTime = Number.NaN;
   private playing = false;
   private speed = 1;
   private particleScale = 0;
@@ -203,6 +211,8 @@ export class VenueRenderer {
     this.laneStates = [];
     this.selectedLane = null;
     this.snapshot = null;
+    this.insideSince = new Float64Array(0);
+    this.insideTime = Number.NaN;
     const g = this.venueLayer;
     g.clear();
     const walk = this.dark ? 0x1e293b : 0xffffff;
@@ -273,7 +283,27 @@ export class VenueRenderer {
 
   setSnapshot(snapshot: Snapshot | null): void {
     this.snapshot = snapshot;
+    if (snapshot) this.trackInside(snapshot);
     this.markDirty();
+  }
+
+  /**
+   * People who reached the destination fade out (they would otherwise pile up as markers where
+   * they arrived). Fading is in simulated time; after a seek, everyone already inside is hidden.
+   */
+  private trackInside(snap: Snapshot): void {
+    const n = snap.agentCount;
+    const continuous = this.insideSince.length === n && snap.time >= this.insideTime && snap.time - this.insideTime <= CONTINUITY_SECONDS;
+    if (this.insideSince.length !== n) this.insideSince = new Float64Array(n).fill(Number.NaN);
+    const since = this.insideSince;
+    const b = snap.buffer;
+    for (let i = 0; i < n; i++) {
+      if (b[4 * n + i] === AgentState.Inside) {
+        if (!continuous) since[i] = -Infinity;
+        else if (Number.isNaN(since[i] as number)) since[i] = snap.time;
+      } else since[i] = Number.NaN;
+    }
+    this.insideTime = snap.time;
   }
 
   setPlayback(playing: boolean, speed: number): void {
@@ -406,8 +436,16 @@ export class VenueRenderer {
         continue;
       }
       const style = STATE_STYLES[si] as (typeof STATE_STYLES)[number];
+      let alpha = style.alpha;
+      if (style.state === AgentState.Inside) {
+        alpha *= insideFade(snap.time - (this.insideSince[i] ?? Number.NaN));
+        if (alpha <= 0) {
+          p.alpha = 0;
+          continue;
+        }
+      }
       p.texture = textures[si] as Texture;
-      p.alpha = style.alpha;
+      p.alpha = alpha;
       if (rescale || p.scaleX !== baseScale * style.size) {
         p.scaleX = baseScale * style.size;
         p.scaleY = baseScale * style.size;
@@ -426,9 +464,13 @@ export class VenueRenderer {
     const c = this.camera;
     this.world.position.set(c.x, c.y);
     this.world.scale.set(c.scale);
+    const w = this.host.clientWidth;
+    const h = this.host.clientHeight;
     for (const l of this.labels) {
       const s = worldToScreen(c, l.x, l.y);
-      l.text.position.set(s.x, s.y + l.dy);
+      // Labels near the venue's edge stay inside the view instead of being clipped.
+      const p = clampLabel(s.x, s.y + l.dy, l.text.width / 2, l.text.height / 2, w, h, LABEL_PAD);
+      l.text.position.set(p.x, p.y);
     }
     this.drawLanes();
     this.markDirty();

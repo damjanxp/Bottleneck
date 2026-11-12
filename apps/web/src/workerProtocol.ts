@@ -20,7 +20,10 @@ export type WorkerRequest =
   | { type: "step"; ticks: number }
   | { type: "restart" }
   | { type: "setSpeed"; speed: number }
-  /** Seek to a scenario time by re-running the seeded simulation (exact, thanks to determinism). */
+  /**
+   * Seek to a scenario time: restore the nearest engine checkpoint at or before it (or start from
+   * 0) and re-run the seeded simulation from there (exact, thanks to determinism; review C1).
+   */
   | { type: "seek"; time: number; seekId: number }
   | { type: "cancelSeek" }
   | { type: "returnBuffer"; buffer: Float32Array; generation: number }
@@ -63,6 +66,8 @@ export interface StatsMessage {
   countsByState: number[];
   lanes: LaneLive[];
   tick: TickTiming;
+  /** Engine checkpoints held for seeking: how many, their total size, the interval (simulated s). */
+  checkpoints: { count: number; bytes: number; interval: number };
   /** People per m², present only while the heatmap is on. */
   density?: Float32Array;
 }
@@ -84,7 +89,7 @@ export type WorkerResponse =
   | StatsMessage
   | { type: "metrics"; generation: number; metrics: MetricsSummary }
   | { type: "seekProgress"; generation: number; seekId: number; fraction: number }
-  | { type: "seekDone"; generation: number; seekId: number; cancelled: boolean; time: number };
+  | { type: "seekDone"; generation: number; seekId: number; cancelled: boolean; time: number; durationMs: number };
 
 /** Strips the parts of RunMetrics that the UI does not need every second. */
 export function summariseMetrics(m: RunMetrics): MetricsSummary {
