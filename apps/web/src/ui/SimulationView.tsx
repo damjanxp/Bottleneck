@@ -1,17 +1,21 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { exampleVenues } from "@bottleneck/examples";
 import { MAX_SPEED, MIN_SPEED, TICK_SECONDS } from "@bottleneck/engine";
-import type { Scenario } from "@bottleneck/schema";
+import type { Scenario, Venue } from "@bottleneck/schema";
+import type { CompareEntry } from "../compare/plan.ts";
+import { exportFileName } from "../library/files.ts";
+import { withTimedEvent } from "../library/scenarios.ts";
 // Type-only: PixiJS and uPlot are loaded on demand, so they stay out of the main chunk.
 import type { FrameStats, VenueRenderer } from "../render/VenueRenderer.ts";
 import { formatBytesPerSecond, formatCount, formatDuration, formatRelativeClock } from "../sim/format.ts";
-import { MAX_LANES, compareHeadlines, headlines, laneLabel, withExtraLane, worstLane, type Headline } from "../sim/headline.ts";
+import { MAX_LANES, headlines, laneLabel, withExtraLane, worstLane } from "../sim/headline.ts";
 import { describeParameters, elementName } from "../sim/parameters.ts";
 import { SimController, type SeekState } from "../sim/SimController.ts";
 import { strings } from "../strings.ts";
 import type { LoadedInfo, MetricsSummary, StatsMessage } from "../workerProtocol.ts";
+import { downloadText } from "./browserFiles.ts";
 import { Legend } from "./Legend.tsx";
-import { CapacityTable, ClockDisplay, Comparison, Headlines, LaneTable, ParametersList, StateCounts, WorstLane, type ClockInfo } from "./Panels.tsx";
+import { CapacityTable, ClockDisplay, Headlines, LaneTable, ParametersList, StateCounts, WorstLane, type ClockInfo } from "./Panels.tsx";
+import { btn, btnPrimary, btnSmall } from "./styles.ts";
 
 const LaneCharts = lazy(() => import("./LaneCharts.tsx").then((m) => ({ default: m.LaneCharts })));
 
@@ -22,8 +26,6 @@ const STEP_TICKS = 1;
 const MINUTE_TICKS = Math.round(60 / TICK_SECONDS);
 const NARROW_PX = 768;
 
-const DEFAULT_VENUE = Math.max(0, exampleVenues.findIndex((v) => v.id === "belgrade-fair-concert"));
-
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
 }
@@ -32,30 +34,31 @@ function perfEnabled(): boolean {
   return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("perf") === "1";
 }
 
-const btn =
-  "rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800";
-const btnPrimary = "rounded-md bg-amber-500 px-4 py-1.5 text-sm font-semibold text-slate-950 shadow-sm hover:bg-amber-400 disabled:opacity-50";
-
-/** The "+1 lane" fix (review A9): the finished previous run's headline numbers and what changed. */
-interface LaneFix {
-  elementId: string;
-  elementName: string;
-  beforeLanes: number;
-  afterLanes: number;
-  before: Headline[];
+export interface SimulationViewProps {
+  venue: Venue;
+  /** The selected scenario as saved (built-in or the user's). */
+  scenario: Scenario;
+  label: string;
+  /** The selected scenario is the user's own, so changes may be saved into it. */
+  ownScenario: boolean;
+  /** False while another section is shown: playback pauses. */
+  active: boolean;
+  onCompare(entries: CompareEntry[], seeds: number): void;
+  /** Save the working copy (lane events recorded during playback), into the selected scenario or as a new one. */
+  onSaveWorking(scenario: Scenario, intoSelected: boolean): void;
 }
 
-/** A "+1 lane" waiting for the current run to finish (a seek to the end) before reloading. */
-interface PendingFix {
-  elementId: string;
-  laneCount: number;
-  seekId: number | null;
-  awaitingMetrics: boolean;
+/**
+ * Lane events recorded during playback (review B8) live in a working copy of the scenario, tied to
+ * the scenario object they were made on: selecting another scenario forgets them.
+ */
+interface WorkingCopy {
+  base: Scenario;
+  scenario: Scenario;
+  added: number;
 }
 
-export function SimulationView() {
-  const [venueIndex, setVenueIndex] = useState(DEFAULT_VENUE);
-  const [scenarioIndex, setScenarioIndex] = useState(0);
+export function SimulationView({ venue, scenario, label, ownScenario, active, onCompare, onSaveWorking }: SimulationViewProps) {
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [loaded, setLoaded] = useState<LoadedInfo | null>(null);
   const [stats, setStats] = useState<StatsMessage | null>(null);
@@ -66,48 +69,20 @@ export function SimulationView() {
   const [showMap, setShowMap] = useState(() => typeof window === "undefined" || window.innerWidth >= NARROW_PX);
   const [error, setError] = useState<string | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
-  /** A modified copy of the example scenario ("+1 lane"); null means the example as shipped. */
-  const [scenarioOverride, setScenarioOverride] = useState<Scenario | null>(null);
-  const [laneFix, setLaneFix] = useState<LaneFix | null>(null);
-  const [finishing, setFinishing] = useState(false);
+  const [workingState, setWorkingState] = useState<WorkingCopy | null>(null);
+  const [applyingSeek, setApplyingSeek] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [reducedMotion] = useState(prefersReducedMotion);
   const [perf] = useState(perfEnabled);
+
+  const working = workingState?.base === scenario ? workingState : null;
+  const effective = working?.scenario ?? scenario;
 
   const controllerRef = useRef<SimController | null>(null);
   const rendererRef = useRef<VenueRenderer | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef<LoadedInfo | null>(null);
   const scrubTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingFix = useRef<PendingFix | null>(null);
-
-  const example = exampleVenues[venueIndex] ?? exampleVenues[0];
-  const scenarioInfo = example?.scenarioInfo[scenarioIndex] ?? example?.scenarioInfo[0];
-  const venue = example?.venue;
-  const scenario = scenarioOverride ?? scenarioInfo?.scenario;
-  const scenarioRef = useRef<Scenario | undefined>(scenario);
-  const venueRef = useRef(venue);
-  useEffect(() => {
-    scenarioRef.current = scenario;
-    venueRef.current = venue;
-  }, [scenario, venue]);
-
-  /** Second half of "+1 lane": keep the finished run's numbers, reload with one more lane. */
-  const applyFix = useCallback((fix: PendingFix, finalMetrics: MetricsSummary) => {
-    const sc = scenarioRef.current;
-    const v = venueRef.current;
-    pendingFix.current = null;
-    setFinishing(false);
-    if (!sc || !v) return;
-    setLaneFix({
-      elementId: fix.elementId,
-      elementName: elementName(v, fix.elementId),
-      beforeLanes: fix.laneCount,
-      afterLanes: Math.min(MAX_LANES, fix.laneCount + 1),
-      // The previous run is finished, so every number is final.
-      before: headlines(finalMetrics, sc.timeline.eventStart, Infinity),
-    });
-    setScenarioOverride(withExtraLane(sc, fix.elementId, fix.laneCount));
-  }, []);
 
   // Crossing the narrow-screen breakpoint shows or hides the map (review C6); the button overrides.
   useEffect(() => {
@@ -143,28 +118,9 @@ export function SimulationView() {
           if (s.density && info) r.setDensity({ data: s.density, ...info.density });
         }
       },
-      onMetrics: (m) => {
-        setMetrics(m);
-        const fix = pendingFix.current;
-        if (fix?.awaitingMetrics) applyFix(fix, m);
-      },
-      onSeek: (s) => {
-        setSeek(s);
-        // Another seek replaced the one finishing the run for "+1 lane": give up on the fix.
-        const fix = pendingFix.current;
-        if (fix && s !== null && fix.seekId !== null && s.seekId !== fix.seekId) {
-          pendingFix.current = null;
-          setFinishing(false);
-        }
-      },
-      onSeekDone: (d) => {
-        const fix = pendingFix.current;
-        if (!fix || fix.seekId !== d.seekId) return;
-        if (d.cancelled) {
-          pendingFix.current = null;
-          setFinishing(false);
-        } else fix.awaitingMetrics = true; // the worker sends the final metrics right after
-      },
+      onMetrics: (m) => setMetrics(m),
+      onSeek: (s) => setSeek(s),
+      onSeekDone: (d) => setApplyingSeek((cur) => (cur === d.seekId ? null : cur)),
       onError: (m) => setError(m),
     });
     return () => {
@@ -172,17 +128,22 @@ export function SimulationView() {
       c.dispose();
       controllerRef.current = null;
     };
-  }, [applyFix]);
+  }, []);
 
-  // Load the chosen example.
+  // Load the selected scenario (lane events recorded here go through replaceScenario instead).
   useEffect(() => {
-    if (!venue || !scenario) return;
     loadedRef.current = null;
     controllerRef.current?.load(venue, scenario, DEFAULT_SPEED);
     // Speed resets to the examples' default on every load (review A9).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSpeed(DEFAULT_SPEED);
   }, [venue, scenario]);
+
+  // Leaving the section pauses playback.
+  const playingNow = stats?.playing ?? false;
+  useEffect(() => {
+    if (!active && playingNow) controllerRef.current?.pause();
+  }, [active, playingNow]);
 
   // Renderer: created while the map is shown.
   useEffect(() => {
@@ -202,7 +163,7 @@ export function SimulationView() {
         r.onLaneClick = (id) => setSelectedLane(id);
         const info = loadedRef.current;
         const c = controllerRef.current;
-        if (info && venue) r.setVenue(venue, info.lanes);
+        if (info) r.setVenue(venue, info.lanes);
         if (c?.latest) r.setSnapshot(c.latest);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
@@ -218,7 +179,7 @@ export function SimulationView() {
   // New venue geometry for the renderer.
   useEffect(() => {
     const r = rendererRef.current;
-    if (r && loaded && venue) r.setVenue(venue, loaded.lanes);
+    if (r && loaded) r.setVenue(venue, loaded.lanes);
   }, [loaded, venue]);
 
   useEffect(() => {
@@ -230,24 +191,23 @@ export function SimulationView() {
     if (!heatmap) rendererRef.current?.setDensity(null);
   }, [heatmap, loaded]);
 
-  const playing = stats?.playing ?? false;
+  const playing = playingNow;
   const time = stats?.time ?? loaded?.startTime ?? 0;
   const done = stats?.done ?? false;
 
-  const clock: ClockInfo | null = useMemo(() => {
-    if (!scenario) return null;
+  const clock: ClockInfo = useMemo(() => {
     const tl = scenario.timeline;
     return { anchor: tl.eventStart ?? tl.gatesOpen, fixedStart: tl.eventStart !== null, referenceClock: tl.referenceClock };
   }, [scenario]);
 
   const laneNames = useMemo(() => {
     const m = new Map<number, string>();
-    if (!loaded || !venue) return m;
+    if (!loaded) return m;
     for (const l of loaded.lanes) m.set(l.laneId, laneLabel(l, elementName(venue, l.elementId), strings.lanes.lane, strings.lanes.manual));
     return m;
   }, [loaded, venue]);
 
-  const paramRows = useMemo(() => (loaded && venue && scenario ? describeParameters(loaded.parameters, venue, scenario) : []), [loaded, venue, scenario]);
+  const paramRows = useMemo(() => (loaded ? describeParameters(loaded.parameters, venue, effective) : []), [loaded, venue, effective]);
 
   const onPlayPause = useCallback(() => {
     const c = controllerRef.current;
@@ -261,20 +221,50 @@ export function SimulationView() {
     controllerRef.current?.setSpeed(s);
   };
 
-  /** "+1 lane" (review A9): finish the current run (exact seek to the end), then reload with one more lane. */
+  const effectiveLabel = working ? `${label} (${strings.working.heading.toLowerCase()})` : label;
+
+  /** "+1 lane" (review A9): opens the comparison of this scenario against the same with one more lane. */
   const onAddLane = (elementId: string) => {
-    const c = controllerRef.current;
-    if (!c || !loaded || seek || pendingFix.current) return;
+    if (!loaded) return;
     const el = loaded.parameters.elements.find((e) => e.id === elementId);
     if (!el || el.laneCount >= MAX_LANES) return;
-    const fix: PendingFix = { elementId, laneCount: el.laneCount, seekId: null, awaitingMetrics: false };
-    pendingFix.current = fix;
-    if (stats?.done && metrics) {
-      applyFix(fix, metrics);
-      return;
+    const name = elementName(venue, elementId);
+    onCompare(
+      [
+        { key: "adhoc:current", label: `${effectiveLabel}: ${name} ${el.laneCount} ${strings.library.lanes}`, scenario: effective },
+        { key: `adhoc:plus-${elementId}-${el.laneCount + 1}`, label: `${effectiveLabel}: ${name} ${el.laneCount + 1} ${strings.library.lanes}`, scenario: withExtraLane(effective, elementId, el.laneCount) },
+      ],
+      1,
+    );
+  };
+
+  /** Interactive lane failure / reopening (review B8): a timed event at the current time in the working copy. */
+  const onLaneEvent = (kind: "laneFail" | "laneReopen", laneId: number) => {
+    const c = controllerRef.current;
+    const layout = loaded?.lanes.find((l) => l.laneId === laneId);
+    if (!c || !layout || layout.manual || seek) return;
+    const at = time;
+    const next = withTimedEvent(effective, { kind, at, groupId: layout.elementId, laneIndex: layout.laneIndex });
+    setWorkingState({ base: scenario, scenario: next, added: (working?.added ?? 0) + 1 });
+    setApplyingSeek(c.replaceScenario(next, at));
+  };
+
+  const discardWorking = () => {
+    const c = controllerRef.current;
+    setWorkingState(null);
+    if (c) setApplyingSeek(c.replaceScenario(scenario, time));
+  };
+
+  const onExportScanLog = async () => {
+    const c = controllerRef.current;
+    if (!c) return;
+    setExporting(true);
+    try {
+      const { csv } = await c.scanLog();
+      downloadText(exportFileName(effective).replace(/\.scenario\.json$/, ".scan-log.csv"), csv, "text/csv");
+    } finally {
+      setExporting(false);
     }
-    setFinishing(true);
-    fix.seekId = c.seek(loaded.endTime);
   };
 
   const onScrub = (value: number) => {
@@ -288,66 +278,17 @@ export function SimulationView() {
 
   const worst = stats ? worstLane(stats.lanes) : null;
   const worstElement = worst && loaded ? loaded.lanes.find((l) => l.laneId === worst.laneId)?.elementId : undefined;
-  const heads = metrics && scenario ? headlines(metrics, scenario.timeline.eventStart, done ? Infinity : time) : [];
-  const busy = !loaded || seek !== null || finishing;
-  const names = (id: string) => (venue ? elementName(venue, id) : id);
+  const heads = metrics ? headlines(metrics, scenario.timeline.eventStart, done ? Infinity : time) : [];
+  const busy = !loaded || seek !== null;
+  const names = (id: string) => elementName(venue, id);
   const selectedReport = selectedLane !== null ? metrics?.lanes.find((l) => l.laneId === selectedLane) : undefined;
+  const selectedLayout = selectedLane !== null ? loaded?.lanes.find((l) => l.laneId === selectedLane) : undefined;
+  const selectedLive = selectedLane !== null ? stats?.lanes[selectedLane] : undefined;
 
   const statusNote = stats?.done ? (stats.deadlock ? strings.controls.deadlock : stats.drained ? strings.controls.drained : strings.controls.horizon) : null;
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Example picker */}
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col text-xs text-slate-600 dark:text-slate-400">
-          {strings.picker.venue}
-          <select
-            className="mt-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            value={venueIndex}
-            onChange={(e) => {
-              setVenueIndex(Number(e.target.value));
-              setScenarioIndex(0);
-              setScenarioOverride(null);
-              setLaneFix(null);
-            }}
-          >
-            {exampleVenues.map((v, i) => (
-              <option key={v.id} value={i}>
-                {v.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col text-xs text-slate-600 dark:text-slate-400">
-          {strings.picker.scenario}
-          <select
-            className="mt-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            value={scenarioIndex}
-            onChange={(e) => {
-              setScenarioIndex(Number(e.target.value));
-              setScenarioOverride(null);
-              setLaneFix(null);
-            }}
-          >
-            {example?.scenarioInfo.map((s, i) => (
-              <option key={s.id} value={i}>
-                {s.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        {scenarioInfo && (
-          <p className="max-w-md flex-1 text-sm text-slate-600 dark:text-slate-400">
-            {scenarioInfo.description}
-            {scenarioOverride && laneFix && (
-              <span className="mt-1 block font-medium text-sky-800 dark:text-sky-300">
-                {strings.picker.modified} {laneFix.elementName}: {laneFix.afterLanes} {strings.comparison.lanes}
-              </span>
-            )}
-          </p>
-        )}
-      </div>
-
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <section className="flex min-w-0 flex-col gap-3">
           {/* Controls */}
@@ -361,16 +302,7 @@ export function SimulationView() {
             <button type="button" className={btn} onClick={() => controllerRef.current?.step(MINUTE_TICKS)} disabled={!loaded || playing || done || seek !== null} title={strings.controls.plusMinuteHint}>
               {strings.controls.plusMinute}
             </button>
-            <button
-              type="button"
-              className={btn}
-              onClick={() => {
-                pendingFix.current = null;
-                setFinishing(false);
-                controllerRef.current?.restart();
-              }}
-              disabled={!loaded}
-            >
+            <button type="button" className={btn} onClick={() => controllerRef.current?.restart()} disabled={!loaded}>
               {strings.controls.restart}
             </button>
             <button type="button" className={btn} onClick={() => loaded && controllerRef.current?.seek(loaded.peakStart)} disabled={!loaded || seek !== null} title={strings.controls.jumpToPeakHint}>
@@ -400,10 +332,28 @@ export function SimulationView() {
             </button>
           </div>
 
-          {clock && <ClockDisplay time={scrub ?? time} clock={clock} />}
+          {/* Run-level actions: batch over seeds, scan-log export */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className={btn} onClick={() => onCompare([{ key: "adhoc:current", label: effectiveLabel, scenario: effective }], 5)} title={strings.runActions.batchHint}>
+              {strings.runActions.batch}
+            </button>
+            <button type="button" className={btn} onClick={() => void onExportScanLog()} disabled={!done || exporting || seek !== null} title={strings.runActions.exportScanLogHint}>
+              {strings.runActions.exportScanLog}
+            </button>
+            {!done && loaded && (
+              <span className="text-xs text-slate-500">
+                {strings.runActions.runToEndFirst}{" "}
+                <button type="button" className="underline" onClick={() => controllerRef.current?.seek(loaded.endTime)} disabled={seek !== null}>
+                  {strings.runActions.runToEnd}
+                </button>
+              </span>
+            )}
+          </div>
+
+          <ClockDisplay time={scrub ?? time} clock={clock} />
 
           {/* Scrubber */}
-          {loaded && clock && (
+          {loaded && (
             <div className="flex flex-col gap-1">
               <input
                 type="range"
@@ -419,12 +369,46 @@ export function SimulationView() {
               {seek && (
                 <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400" role="status">
                   <progress className="h-2 flex-1 accent-amber-500" max={1} value={seek.fraction} />
-                  <span>{finishing ? strings.controls.finishing : strings.controls.seeking}</span>
+                  <span>{applyingSeek === seek.seekId ? strings.laneActions.applying : strings.controls.seeking}</span>
                   <button type="button" className="underline" onClick={() => controllerRef.current?.cancelSeek()}>
                     {strings.controls.cancel}
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {working && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-300 bg-sky-50 p-2 text-sm dark:border-sky-500/40 dark:bg-sky-500/10" role="status">
+              <span className="font-medium text-sky-900 dark:text-sky-200">
+                {strings.working.heading}: {strings.working.events(working.added)}
+              </span>
+              {ownScenario && (
+                <button type="button" className={btnSmall} onClick={() => onSaveWorking(working.scenario, true)}>
+                  {strings.working.saveOver}
+                </button>
+              )}
+              <button type="button" className={btnSmall} onClick={() => onSaveWorking(working.scenario, false)}>
+                {strings.working.saveNew}
+              </button>
+              <button
+                type="button"
+                className={btnSmall}
+                onClick={() =>
+                  onCompare(
+                    [
+                      { key: "adhoc:original", label, scenario },
+                      { key: "adhoc:current", label: effectiveLabel, scenario: working.scenario },
+                    ],
+                    1,
+                  )
+                }
+              >
+                {strings.working.compare}
+              </button>
+              <button type="button" className={btnSmall} onClick={discardWorking} disabled={seek !== null}>
+                {strings.working.discard}
+              </button>
             </div>
           )}
 
@@ -450,25 +434,38 @@ export function SimulationView() {
             <p className="text-sm text-slate-500">{strings.controls.mapHiddenNote}</p>
           )}
           <Legend heatmap={heatmap} />
-          {venue?.attribution && <p className="text-xs text-slate-500">{venue.attribution}</p>}
+          {venue.attribution && <p className="text-xs text-slate-500">{venue.attribution}</p>}
         </section>
 
         <aside className="flex min-w-0 flex-col gap-3">
-          {clock && heads.length > 0 && <Headlines items={heads} clock={clock} />}
-          {laneFix && (
-            <Comparison
-              rows={compareHeadlines(laneFix.before, heads)}
-              title={laneFix.elementName}
-              beforeLanes={laneFix.beforeLanes}
-              afterLanes={laneFix.afterLanes}
-              finished={done}
-              busy={busy}
-              onRunToEnd={() => loaded && controllerRef.current?.seek(loaded.endTime)}
-              onClose={() => setLaneFix(null)}
-            />
-          )}
+          {heads.length > 0 && <Headlines items={heads} clock={clock} />}
           <WorstLane name={worst ? (laneNames.get(worst.laneId) ?? null) : null} queue={worst?.queueLength ?? 0} onAddLane={worstElement ? () => onAddLane(worstElement) : undefined} addDisabled={busy} />
-          {selectedReport && loaded && clock && (
+          {selectedLayout && (
+            <section className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm dark:border-sky-500/40 dark:bg-sky-500/10" aria-labelledby="lane-actions-heading">
+              <h2 id="lane-actions-heading" className="text-xs font-semibold text-sky-900 dark:text-sky-200">
+                {strings.laneActions.heading}: {laneNames.get(selectedLayout.laneId)}
+              </h2>
+              {selectedLayout.manual ? (
+                <p className="mt-1 text-xs">{strings.laneActions.manual}</p>
+              ) : (
+                <>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {selectedLive?.failed ? (
+                      <button type="button" className={btnSmall} onClick={() => onLaneEvent("laneReopen", selectedLayout.laneId)} disabled={busy || done}>
+                        {strings.laneActions.reopen}
+                      </button>
+                    ) : (
+                      <button type="button" className={btnSmall} onClick={() => onLaneEvent("laneFail", selectedLayout.laneId)} disabled={busy || done}>
+                        {strings.laneActions.fail}
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">{strings.laneActions.intro}</p>
+                </>
+              )}
+            </section>
+          )}
+          {selectedReport && loaded && (
             <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts.loading}</p>}>
               <LaneCharts
                 name={laneNames.get(selectedReport.laneId) ?? ""}
@@ -482,7 +479,7 @@ export function SimulationView() {
               />
             </Suspense>
           )}
-          {metrics && clock && metrics.elements.length > 0 && <CapacityTable elements={metrics.elements} names={names} clock={clock} onAddLane={onAddLane} addDisabled={busy} />}
+          {metrics && metrics.elements.length > 0 && <CapacityTable elements={metrics.elements} names={names} clock={clock} onAddLane={onAddLane} addDisabled={busy} />}
           {loaded && stats && <LaneTable lanes={loaded.lanes} states={stats.lanes} names={laneNames} selected={selectedLane} onSelect={(id) => setSelectedLane((cur) => (cur === id ? null : id))} />}
           {stats && <StateCounts counts={stats.countsByState} time={stats.time} />}
           {paramRows.length > 0 && <ParametersList rows={paramRows} />}

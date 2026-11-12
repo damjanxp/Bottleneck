@@ -47,32 +47,6 @@ export function laneLabel(layout: LaneLayout, elementName: string, laneWord: str
   return layout.manual ? `${elementName} ${manualWord}` : `${elementName} ${laneWord} ${layout.laneIndex + 1}`;
 }
 
-/** Lower is better for waits and people outside; higher is better for the share inside. */
-export function lowerIsBetter(kind: HeadlineKind): boolean {
-  return kind !== "shareInside";
-}
-
-export interface HeadlineComparison {
-  kind: HeadlineKind;
-  before: Headline;
-  after: Headline | null;
-  /** after − before, when both are known. */
-  delta: number | null;
-  /** True if after is better, false if worse, null if equal or not both final yet. */
-  improved: boolean | null;
-}
-
-/** Pairs the headline numbers of two runs by kind (review A9: the "+1 lane" before/after). */
-export function compareHeadlines(before: readonly Headline[], after: readonly Headline[]): HeadlineComparison[] {
-  return before.map((b) => {
-    const a = after.find((x) => x.kind === b.kind) ?? null;
-    const delta = a ? a.value - b.value : null;
-    let improved: boolean | null = null;
-    if (a && delta !== null && a.final && b.final && Math.abs(delta) > 1e-9) improved = lowerIsBetter(b.kind) ? delta < 0 : delta > 0;
-    return { kind: b.kind, before: b, after: a, delta, improved };
-  });
-}
-
 /** Most lanes an element may have (schema: laneCount ≤ 64). */
 export const MAX_LANES = 64;
 

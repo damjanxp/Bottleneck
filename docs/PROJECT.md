@@ -250,6 +250,39 @@ Each record has four short parts: context, decision, alternatives, consequences.
 - **Alternatives:** Running the dev server (a different CSP); waiting for the crowd in real time (slow, flaky); several browsers in parallel.
 - **Consequences:** `npm run check` stays fast and needs no browser; the e2e job is the only place Node and Chromium are compared.
 
+### D-032 Scenario library in localStorage: one versioned key, dropped entries kept as a backup
+- **Context:** Phase 2 needs user scenarios before there is a backend (review A6). localStorage can be disabled, full or hold data from an older build.
+- **Decision:** One key, `bottleneck.scenarios.v1`, holds `{ format: "bottleneck-scenario-library", version: 1, entries: [{ id, schemaVersion, savedAt, scenario }] }` (`apps/web/src/library/storage.ts`). Every entry carries its scenario's `schemaVersion`. On load, entries with another schema version, a broken shape or a duplicate id are dropped; once the validator chunk has loaded, entries that fail the JSON Schema are dropped too. Each drop shows a notice with the name and reason, and the raw entry is first copied to `bottleneck.scenarios.v1.dropped` (last 50), so nothing disappears silently. Every storage access is in try/catch; a failed save says so and the change lives until the page closes. Built-in examples are read-only: "Duplicate" makes an editable copy. Export and import use the plain scenario document (valid against `/schema/scenario.schema.json`) as a `.scenario.json` file; an imported file whose id is taken gets a new id.
+- **Alternatives:** IndexedDB (async API, more code, no need at this size); one key per scenario (no atomic rewrite, harder to version); migrating old entries (D-007: no migrations before Phase 4).
+- **Consequences:** Saved scenarios are per browser and per device until Phase 4. The format version and the schema version are separate, so a schema bump drops only the entries it affects.
+
+### D-033 JSON Schema validation in the browser: Ajv standalone code generated at build time
+- **Context:** Scenarios must be validated against the JSON Schema before saving or importing. Ajv compiles a schema with `new Function`, which the strict CSP (no `unsafe-eval`, D-009) forbids.
+- **Decision:** Ajv's **standalone** mode runs the compilation at build time: a small Vite plugin (`apps/web/vite.config.ts`) serves the virtual module `virtual:scenario-validator`, built by `apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/scenario`. The one runtime helper it needs (`ucs2length`) is inlined, and the build fails if the code still needs `require` or code generation. The app loads it lazily (a 65 kB chunk, 7 kB gzipped) when saving, importing or checking stored entries. On top of the schema, `library/validate.ts` checks what the schema cannot see (element ids, lane numbers against the lane count, sources, timeline order) and turns everything into plain sentences. The editor's own fields are parsed by `library/form.ts` with messages per field.
+- **Tests:** Vitest checks that the generated validator accepts and rejects the same documents as Ajv itself, that every built-in scenario round-trips through the editor form unchanged, and that every kind of editor output is schema-valid (`library.test.ts`).
+- **Alternatives:** Hand-written validation only (drifts from the schema); Ajv at run time with `unsafe-eval` (weakens the CSP); a committed generated file (needs a freshness check; the build-time plugin cannot go stale).
+- **Consequences:** The browser and (from Phase 4) the backend validate against the same schema files. Changing `/schema` changes the validator on the next build with no extra step.
+
+### D-034 Comparisons and batches: background workers, common random numbers, paired confidence intervals
+- **Context:** Spec 6.3 asks for up to four scenarios side by side and client-side batches of up to 5 seeds, with clear differences in words.
+- **Decision:** A separate batch worker (`batch.worker.ts`) runs one scenario to the end in 100 ms chunks (so Cancel gets through) and returns the metrics; a pool of up to 4 workers (cores − 1) runs the jobs (`compare/runPool.ts`), so the simulation on screen is never disturbed. By default every scenario runs with the **first scenario's seeds** (common random numbers, D-003). A batch uses the base seed plus N − 1 seeds derived with `hash4(base, 0x5eed, k, 0)`, so the set is reproducible. Each headline number is shown as mean ± 95% CI (Student t, `summarise` from `@bottleneck/analysis`). With shared seeds the verdict comes from the **paired** per-seed differences: "better"/"worse" only if their 95% CI excludes 0, otherwise "no clear difference". With one seed the verdict is the sign of the difference (a person, half a second or 0.05 points count as "no change"). Verdicts are written out ("✓ better", "✗ worse"), never colour alone. Scenarios of different venues can be compared but get a clear warning.
+- **Alternatives:** Running comparisons in the playback worker (blocks the simulation); independent seeds per scenario (much noisier differences).
+- **Consequences:** On the development machine 2 concert runs take about 2.3 s and a 5-seed batch about 6.3 s in the browser (4 workers). The Playwright test asserts that the numbers on the page equal a Node run.
+
+### D-035 Interactive lane failures are timed events in a working copy (review B8)
+- **Context:** Failing a lane by clicking during playback must keep replays and comparisons exact.
+- **Decision:** "Fail lane now" / "Reopen lane now" (for a lane selected on the map or in the lane table) adds a `laneFail`/`laneReopen` timed event at the current scenario time to a **working copy** of the scenario. The worker swaps in the working copy (`replaceScenario`), drops its checkpoints (they do not contain the new event) and re-runs from 0 to the current time as a normal, cancellable seek; playback resumes if it was playing. The saved scenario changes only if the user saves ("Save into this scenario" for their own, "Save as a new scenario" always); "Compare with the original" opens the comparison.
+- **Alternatives:** Injecting the failure into the live run (the run would no longer be reproducible from its scenario); keeping old checkpoints (they would restore the old event list).
+- **Consequences:** Applying a lane event late in a run costs a re-run up to that moment (a few seconds at the end of the concert). Manual lanes cannot be failed (they are not addressable by timed events).
+
+### D-036 Web app structure for Phase 2: sections, and logic apart from presentation
+- **Context:** The owner will redesign the whole frontend after the last phase.
+- **Decision:** The page has four sections (Simulate, Scenarios, Compare, Scan logs) that stay mounted once visited, so their state survives switching; leaving Simulate pauses playback. All logic is in pure TypeScript modules with Vitest tests: `library/` (storage, form, validation, files, catalogue), `compare/` (seeds and jobs, measures and differences in words, table rows, chart data), `scanlog/` (applying a fit). React components only lay things out; shared class strings are in `ui/styles.ts` and the text in `strings.ts` (sentences built by the pure modules, such as difference sentences and validation messages, live with them). The Phase 1 "+1 lane" mini-comparison is gone: "+1 lane" now opens the comparison of the current scenario against the same with one more lane (review A9).
+- **Consequences:** A redesign can replace the components without touching the tested logic.
+
+### Scan logs (pending)
+_The scan-log decisions (format, fitting method, the 10% recovery test) are added by the orchestrator from the `@bottleneck/analysis` work._
+
 ---
 
 ## 3. Review notes triage
@@ -263,10 +296,10 @@ What happened to each point in [keep-in-mind.md](spec/keep-in-mind.md). "Adopt" 
 | A3 | `Diverted`: state or counter? | **Adopt**: a car may be redirected **once** (counted as an event); if the second lot is also full it becomes `TurnedAway`. `Diverted` stays in the enum as the state of a car driving to its second lot. | Phase 3 |
 | A4 | Occupants created at parking break conservation | **Adopt**: occupants are drawn when the car is created and held as `Pending` until they get out | Phase 3 |
 | A5 | Phase tests listed under the wrong phase | **Adopt**: re-sorted in [section 4](#4-acceptance-checklist) | done |
-| A6 | Scenarios before the backend; timed failures need the timeline; roads before the editor | **Adopt**: localStorage plus JSON export/import (Phase 2); timed lane failure is scenario data from Phase 1; Phase 3 roads are hand-written JSON | Phases 1–3 |
+| A6 | Scenarios before the backend; timed failures need the timeline; roads before the editor | **Adopt**: localStorage plus JSON export/import (Phase 2); timed lane failure is scenario data from Phase 1; Phase 3 roads are hand-written JSON | Phases 1–2 done (D-032, D-033); roads in Phase 3 |
 | A7 | 20k+5k vs 10k+2k agents | **Adopt**: 20,000 pedestrians + 5,000 cars is the **soft cap** (warning in the UI); 10,000 + 2,000 is the **performance reference** scenario | Phase 1 |
 | A8 | Performance target is Expected but gates a [human] check | **Adopt**: the [human] check *reports* the measured numbers; missing the target is recorded with a plan and does not block the phase | Phase 1/3 |
-| A9 | "Jam within 2 minutes" unrealistic at 1× | **Adopt**: examples open at 30×, with a "Jump to peak" button, a callout on the worst lane and a one-click "+1 lane" that opens the comparison | Phases 1–2 |
+| A9 | "Jam within 2 minutes" unrealistic at 1× | **Adopt**: examples open at 30×, with a "Jump to peak" button, a callout on the worst lane and a one-click "+1 lane" that opens the comparison | done: Phase 1 (30×, Jump to peak, worst lane); Phase 2 "+1 lane" opens the comparison (D-036) |
 | B1 | Shared PRNG breaks common random numbers | **Adopt**: D-003 | done |
 | B2 | Lanes idle up to 0.25 s per service | **Adopt**: D-004 | done |
 | B3 | Wq starts only when joining the queue area | **Adopt**: a logical FIFO per lane begins when the agent **commits** to the lane (wherever it is standing); Wq, L and λ are measured per lane-visit, and spilled-back agents count | done in Phase 1 (D-014, D-019; `queueWait` is also reported) |
@@ -274,7 +307,7 @@ What happened to each point in [keep-in-mind.md](spec/keep-in-mind.md). "Adopt" 
 | B5 | Run end and "time until empty" when overloaded | **Adopt**: `timeline.horizon`, a `drained` flag, and a deadlock watchdog; cars reserve road space or a stall before entering | Phase 1 done (`horizon`, `drained`, watchdog: D-023); cars in Phase 3 |
 | B6 | Test criteria that pass for the wrong reason | **Adopt**: M/D/1 and M/G/1 pass only if the 95% CI from 20 seeds contains the theoretical value **and** the CI half-width is under 3% of it; P-K uses the implemented E[S] and E[S²]; seeds pinned; setups stated (lane-failure test: about 85% utilisation before the failure); queue length excludes the person in service | Phase 1 done (`queueing.test.ts`, D-012); cars in Phase 3 |
 | B7 | Rescale check too noisy on one seed | **Adopt**: rescaling is checked on the mean of 20 paired seeds; translation must be bit-identical, with the raster anchored to the venue's bounding box | done in Phase 1 (D-016; `run.test.ts`) |
-| B8 | Hash JSON vs bytes; p95 definition; interactive failures | **Adopt**: D-006 for the hash; p95 by nearest rank; interactive lane failures are recorded as timestamped scenario events, so replay by re-running stays exact | done in Phase 1 (D-006; timed lane events are scenario data) |
+| B8 | Hash JSON vs bytes; p95 definition; interactive failures | **Adopt**: D-006 for the hash; p95 by nearest rank; interactive lane failures are recorded as timestamped scenario events, so replay by re-running stays exact | done: Phase 1 (D-006; timed lane events are scenario data); Phase 2 interactive "fail lane now" (D-035) |
 | C1 | Replay memory blows 200 MB | **Adopt**: adaptive keyframe interval plus engine checkpoints every few simulated minutes; backward seeks restore the nearest checkpoint and re-run, cancellably | done in Phase 1: checkpoint interval adapts to a 64 MB budget, cancellable seeks (D-026) |
 | C2 | Budget the worker tick separately | **Adopt**: worker tick p95 under 12 ms at the reference load, shown in `?perf=1` | done in Phase 1 (worker tick timing in the `?perf=1` overlay; numbers in section 6) |
 | C3 | 20 Hz snapshots too coarse at 8× | **Adopt**: snapshots carry velocity; the renderer extrapolates | done in Phase 1 (D-029) |
@@ -327,7 +360,7 @@ Every check from spec section 9, sorted into the phase where the work actually h
 - [ ] [human] **The live demo loads the concert example and a jam forms within 2 minutes of pressing Play.** *What to look at:* open the Vercel URL. The concert example is loaded and the speed starts at 30× (review A9). Press Play and watch for 2 minutes of real time. People (small shapes) walk towards the gates; orange squares are people in a queue, and the side panel's lane queue numbers should grow, with the worst lane named in the callout. If nothing has formed after 2 minutes, or the page feels stuck, tell me; the "Jump to peak" button should take you to the busiest hour at once.
 
 ### Phase 2: Scenarios and comparison
-- [ ] [test] Comparing 3 vs 5 lanes on the concert example shows highlighted differences (Playwright)
+- [x] [test] Comparing 3 vs 5 lanes on the concert example shows highlighted differences (Playwright, `apps/web/e2e/compare.spec.ts`: both runs in background workers, "better" rows for still-outside-at-start and p95 wait, numbers equal to a Node run, and "worse" when the order is swapped)
 - [ ] [test] A generated scan log, re-imported, recovers the mean scan time within 10%
 - [ ] [human] README with a GIF, the live link and the how-it-works notes. **First CV milestone.**
 
@@ -467,6 +500,24 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
   - Pedestrians do not avoid each other except through the speed-density relation.
   - Lanes are evenly spaced along one line per gate group; the manual lane is a modelling choice (D-015).
   - Headless Chrome renders in software and plays slowly, so the smoke test seeks to the peak instead of waiting; the engine itself is not the limit.
+
+### Phase 2: Scenarios and comparison
+
+**Plan** (2026-11-12), client-side (spec 6.3):
+- Scenario library per venue: built-ins read-only, user scenarios created from a built-in or from defaults, duplicated, renamed, deleted and edited; localStorage with a versioned key and JSON export/import (D-032).
+- Editor for every scenario field the spec lists, validated against the JSON Schema before saving, under the strict CSP (D-033).
+- Interactive "fail lane now" / "reopen" during playback, recorded in a working copy (D-035).
+- Comparison of up to 4 scenarios and batches of up to 5 seeds in background workers, with differences in words, overlaid queue charts, capacity against demand and the outside-at-start split (D-034); "+1 lane" opens it.
+- Scan logs: export a finished run's log as CSV, import a log, fit, apply to a new scenario (with `@bottleneck/analysis`, built in parallel).
+- *Risks:* Ajv under the CSP (solved by build-time code generation); run time of several concert runs in the browser (solved by a worker pool).
+
+**Summary**
+- **Built:** everything in the plan. The web app now has four sections: Simulate, Scenarios, Compare, Scan logs (D-036).
+- **Tests:** Vitest for all new logic (`apps/web/src/library/library.test.ts`, `compare/compare.test.ts`, `scanlog/scanlog.test.ts`: storage, form round trip, schema validity of editor output, the build-time validator against Ajv, import/export, seeds, differences in words, paired CIs, chart alignment, applying a fit). Playwright: `compare.spec.ts` (the Phase 2 acceptance check), `library.spec.ts` (create, save, reload, JSON export and import, scan-log export, import, fit and apply), and the updated `replay.spec.ts` ("+1 lane" opens the comparison).
+- **Measured** (development machine, production build in Chrome): 2 concert runs compared in about 2.3 s (2 workers); a 5-seed batch of the 3-lane concert in about 6.3 s (4 workers). In headless Chromium with the map visible the 2-run comparison took about 10 s.
+- **Example:** 3 vs 5 lanes, seed 1: still outside at the start 1,312 → 177 people; p95 wait in the peak arrival hour 27 min 10 s → 2 min 1 s. Over 5 seeds the 3-lane concert gives 1,295 ± 39 people outside at the start (mean ± 95% CI).
+- **Deferred:** README with a GIF and the live link (the [human] check, after the merge). Undo in the editor (Phase 5, review C4). Editing custom arrival points by hand (only via the JSON box or a fitted scan log).
+- **Known limitations:** scenarios live in one browser until Phase 4; a lane event recorded late in a run costs a re-run up to that moment; the fitted service time includes scan retries, so it slightly overstates the pure scan time when scan failures are on.
 
 ---
 
@@ -632,6 +683,45 @@ A seek to "30 minutes before the start" would take a long time if the engine had
 8. **What is a checkpoint, and why can a replay jump backwards quickly?**
    A checkpoint is a copy of everything that changes during a run. Because the engine is deterministic, restoring a checkpoint and stepping forward gives exactly the state that playing from the start would give. A backward seek restores the nearest earlier checkpoint and steps at most one interval forward, instead of re-running the whole event.
 
+### Phase 2: scenarios and comparison, in plain language
+
+#### Saving in the browser, with versions
+There is no server yet, so scenarios are saved in the browser's **localStorage**: a small key-value store per website that survives a reload. Three things can go wrong, and each is handled:
+1. **Storage is not there or says no** (private mode, a full quota). Every access is wrapped in try/catch; the page then says that saving is off instead of breaking.
+2. **Old data.** Everything sits under one key with a version in its name and inside it (`bottleneck.scenarios.v1`, `version: 1`), and every scenario carries its own `schemaVersion`. A future build that reads version 2 recognises version-1 data instead of misreading it.
+3. **Data that no longer fits.** An entry that is broken or from another schema version is dropped with a visible notice, and a raw copy is kept under a second key, so nothing vanishes silently. Real migrations come with the database in Phase 4.
+
+#### Validating against the schema when `eval` is forbidden
+The JSON Schema in `/schema` is the single definition of a scenario. Ajv, the usual validator, turns a schema into fast JavaScript at run time with `new Function(...)`, which is a form of `eval`. The page's Content-Security-Policy forbids `eval`, because injected text must never become running code. The way out is to do that compilation **at build time**: Ajv's "standalone" mode writes the validator as an ordinary JavaScript file, which the build bundles like any other code. A test checks that this generated code gives the same answers as Ajv itself, and the build fails if the code would still need `eval`. The schema check is followed by checks the schema cannot express (does lane 7 exist in this scenario?), and every error is turned into a sentence a person can act on.
+
+#### Common random numbers: comparing like with like
+A run is random: arrival times, walking speeds, scan times all come from the seed. If "3 lanes" and "5 lanes" ran with different seeds, part of the difference would be luck. Because every random number in Bottleneck belongs to *who* and *what for* (D-003), running both scenarios with the **same seed** gives every person the same arrival time, speed and scan time in both. The only thing that differs is the number of lanes, so the difference is the effect of the lanes. This is called **common random numbers**, and it is why the comparison runs every scenario with the first scenario's seeds by default.
+
+#### Confidence intervals over seeds
+One seed is one possible evening. A **batch** runs the same scenario with several seeds (here up to 5, derived from the scenario's seed by a fixed hash, so the set is reproducible) and reports the mean with a **95% confidence interval**: mean ± t × sd / √n, where sd is the spread between seeds, n the number of seeds and t ≈ 2.78 for 5 seeds (Student t, because n is small). Read it as "if we could run many evenings, the true average would be in this range, with 95% confidence". With only 5 seeds the interval is wide; Phase 4 runs 20 or more on the server.
+
+When two scenarios share their seeds, the comparison looks at the **difference per seed** (5 differences) and its confidence interval. Because both runs of a seed share the same people, much of the noise cancels, and the interval of the difference is much narrower than the two separate intervals. The page says "better" or "worse" only if that interval excludes 0; otherwise it says "no clear difference", which is an honest answer when the change is smaller than the noise.
+
+#### Failing a lane by clicking, without breaking replay
+A click is not part of the scenario, so a run that contains a click cannot be replayed from its scenario. Bottleneck therefore turns the click into data: "lane 2 fails at T−84:12.5" is added to a **working copy** of the scenario as a timed event, and the run is re-done from the start up to that moment. The result is exactly what the edited scenario gives, so it can be replayed, compared and saved like any other scenario.
+
+#### Interview questions (Phase 2)
+
+1. **Why validate with code generated at build time instead of Ajv at run time?**
+   Ajv compiles schemas with `new Function`, which a strict CSP without `unsafe-eval` blocks. Generating the validator at build time keeps the strict CSP and still validates against the one shared schema; a test proves the generated code agrees with Ajv.
+
+2. **What are common random numbers, and why do they matter for "3 vs 5 lanes"?**
+   Running both scenarios with the same random numbers per person means the scenarios differ only in the change being tested. The difference between them then has far less noise than between two independently seeded runs, so a smaller sample gives a clear answer.
+
+3. **Why is the comparison's verdict based on the paired differences, and what does "no clear difference" mean?**
+   With shared seeds each seed gives one difference; their 95% confidence interval measures the effect directly and removes the noise both runs share. If that interval contains 0, the data cannot tell the scenarios apart, and saying "better" would be claiming more than was measured.
+
+4. **How do you version data in localStorage when there is no migration framework?**
+   Put the version in the key and in the stored document, store the schema version with every entry, and on load keep what matches, drop what does not with a visible notice and a backup copy. Never assume what is stored was written by the current build.
+
+5. **How can a click during playback be "replayable"?**
+   By not treating it as an action on the running simulation, but as an edit of its input: the click becomes a timed event in a copy of the scenario, and the run is recomputed from that input. Determinism then guarantees that every replay or comparison of the edited scenario gives the same result.
+
 ---
 
 ## 8. Reference
@@ -640,8 +730,12 @@ A seek to "30 minutes before the start" would take a long time if the engine had
 ```
 .github/workflows/ci.yml   CI: job `check` (schema check, lint, typecheck, test, build) and job `e2e` (Playwright)
 apps/web/                  Vite + React + Tailwind site; engine runs in src/engine.worker.ts
-apps/web/src/render/       PixiJS renderer; src/sim/ holds the controller, checkpoints, camera; src/ui/ the panels
-apps/web/e2e/              Playwright tests (determinism.spec.ts, smoke.spec.ts)
+apps/web/src/render/       PixiJS renderer; src/sim/ holds the controller, checkpoints, camera; src/ui/ the React components
+apps/web/src/library/      scenario library logic: storage, editor form, validation, files, catalogue (pure, tested)
+apps/web/src/compare/      comparison and batch logic: seeds and jobs, measures and differences, table rows, chart data, worker pool
+apps/web/src/scanlog/      applying a fitted scan log to a new scenario
+apps/web/src/validation/   build-time (Ajv standalone) scenario validator, served as virtual:scenario-validator (D-033)
+apps/web/e2e/              Playwright tests (determinism, smoke, replay, compare, library)
 packages/engine/           simulation engine (pure TS) and its tests in test/
 packages/examples/         built-in Belgrade Fair venues (venues/) and scenarios (scenarios/) as JSON, plus their tests in test/
 packages/schema/           generated types (src/generated) and schema tests

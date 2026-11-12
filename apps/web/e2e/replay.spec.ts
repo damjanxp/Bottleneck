@@ -101,16 +101,17 @@ test("seeking back restores a checkpoint and gives exactly the forward state; +1
   expect(await counts(page)).toEqual(afterBackSeek);
   console.log(`[replay] backward seek ${backMs} ms, forward seek after restart ${fwdMs} ms (incl. UI debounce 300 ms)`);
 
-  // "+1 lane" at the turnstiles: finishes this run, reloads with 4 lanes, shows before/after.
-  // The map is hidden first: headless Chrome draws WebGL in software, which competes with the worker.
+  // "+1 lane" at the turnstiles (review A9): opens the comparison of this scenario against the same
+  // with 4 lanes, and runs both to the end in background workers.
+  // The map is hidden first: headless Chrome draws WebGL in software, which competes with the workers.
   await page.getByRole("button", { name: "Hide the map" }).click();
   t0 = Date.now();
   await page.getByRole("button", { name: "Add one lane at Main turnstiles" }).click();
-  await expect(page.getByRole("heading", { name: /Before and after \+1 lane/ })).toBeVisible({ timeout: 180_000 });
-  console.log(`[replay] +1 lane: finishing the run and reloading took ${Date.now() - t0} ms`);
-  await expect(page.getByText("Before (3 lanes)")).toBeVisible();
-  await expect(page.getByText("After (4 lanes)")).toBeVisible();
-  await expect(page.getByText(/Changed here: Main turnstiles: 4 lanes/)).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Compare" })).toHaveAttribute("aria-selected", "true");
+  const words = page.getByRole("list", { name: "Concert, 3 lanes: Main turnstiles 4 lanes against Concert, 3 lanes: Main turnstiles 3 lanes" });
+  await expect(words).toBeVisible({ timeout: 180_000 });
+  console.log(`[replay] +1 lane: comparison of 2 runs took ${Date.now() - t0} ms`);
+  await expect(words.locator('li[data-measure="stillOutside"]')).toHaveAttribute("data-verdict", "better");
 
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(problems).toEqual([]);

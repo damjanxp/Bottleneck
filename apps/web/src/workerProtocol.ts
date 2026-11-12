@@ -27,7 +27,16 @@ export type WorkerRequest =
   | { type: "seek"; time: number; seekId: number }
   | { type: "cancelSeek" }
   | { type: "returnBuffer"; buffer: Float32Array; generation: number }
-  | { type: "setDensity"; enabled: boolean };
+  | { type: "setDensity"; enabled: boolean }
+  /**
+   * Interactive lane failure (review B8): the page recorded a timed event in its working copy of the
+   * scenario. The worker swaps in that scenario, drops its checkpoints (they belong to the old one)
+   * and re-runs from 0 to `time` as a normal seek, so the state is exactly what the new scenario
+   * gives at that moment; playing resumes if it was playing.
+   */
+  | { type: "replaceScenario"; scenario: Scenario; time: number; seekId: number }
+  /** The scan log of the current run so far (normally a finished run), as CSV. */
+  | { type: "scanLog"; requestId: number };
 
 /** Lane metrics for the side panel: everything in RunMetrics except the big density arrays. */
 export type MetricsSummary = Omit<RunMetrics, "density" | "parameters">;
@@ -89,7 +98,8 @@ export type WorkerResponse =
   | StatsMessage
   | { type: "metrics"; generation: number; metrics: MetricsSummary }
   | { type: "seekProgress"; generation: number; seekId: number; fraction: number }
-  | { type: "seekDone"; generation: number; seekId: number; cancelled: boolean; time: number; durationMs: number };
+  | { type: "seekDone"; generation: number; seekId: number; cancelled: boolean; time: number; durationMs: number }
+  | { type: "scanLog"; requestId: number; csv: string; rows: number };
 
 /** Strips the parts of RunMetrics that the UI does not need every second. */
 export function summariseMetrics(m: RunMetrics): MetricsSummary {

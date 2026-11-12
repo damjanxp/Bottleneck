@@ -37,6 +37,8 @@ export class SimController {
   private readonly listeners = new Set<ControllerListener>();
   private generation = -1;
   private nextSeekId = 1;
+  private nextRequestId = 1;
+  private readonly scanLogWaiters = new Map<number, (r: { csv: string; rows: number }) => void>();
   private seekState: SeekState | null = null;
   latest: Snapshot | null = null;
   /** Wall time of the last completed seek (ms), for the perf overlay. */
@@ -95,6 +97,20 @@ export class SimController {
     this.setSeek({ seekId, target: time, fraction: 0 });
     this.send({ type: "seek", time, seekId });
     return seekId;
+  }
+  /** Swaps in an edited scenario (a recorded lane event) and replays exactly to `time`; returns the seek id. */
+  replaceScenario(scenario: Scenario, time: number): number {
+    const seekId = this.nextSeekId++;
+    this.setSeek({ seekId, target: time, fraction: 0 });
+    this.send({ type: "replaceScenario", scenario, time, seekId });
+    return seekId;
+  }
+  /** Asks the worker for the current run's scan log as CSV. */
+  scanLog(): Promise<{ csv: string; rows: number }> {
+    const requestId = this.nextRequestId++;
+    const p = new Promise<{ csv: string; rows: number }>((resolve) => this.scanLogWaiters.set(requestId, resolve));
+    this.send({ type: "scanLog", requestId });
+    return p;
   }
   cancelSeek(): void {
     this.send({ type: "cancelSeek" });
@@ -156,6 +172,12 @@ export class SimController {
       case "error":
         this.emit((l) => l.onError?.(msg.message));
         break;
+      case "scanLog": {
+        const resolve = this.scanLogWaiters.get(msg.requestId);
+        this.scanLogWaiters.delete(msg.requestId);
+        resolve?.({ csv: msg.csv, rows: msg.rows });
+        break;
+      }
       case "selfCheckResult":
         break;
     }
