@@ -23,25 +23,27 @@ _Last updated: 2026-11-12_
 
 | | |
 |---|---|
-| **Current phase** | Phase 1: pedestrian simulation, nearly complete (milestones 1a to 1e built; see [section 6](#phase-1-pedestrian-simulation)). Phase 0 is built and CI is green. |
-| **Next phase** | Phase 2: scenarios and comparison |
+| **Current phase** | Phase 2: scenarios and comparison, complete on the `phase-2` branch, pending merge to `main` (see [section 6](#phase-2-scenarios-and-comparison)). Phases 0 and 1 are merged. |
+| **Next phase** | Phase 3: vehicles and parking |
 | **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys |
 | **CI** | GitHub Actions: schema check, lint, typecheck, unit and validation tests, build on every push; a second job runs the Playwright browser tests (Chromium) |
 | **How the work is done** | Work is orchestrated with subagents: the main agent plans and reviews, and subagents do focused pieces (code, tests, docs). Everything lands on a `phase-N` branch and passes `npm run check` before merging. |
 
-**What exists after Phase 1** (on the `phase-1` branch, not yet merged to `main`):
-- **Pedestrian engine:** walkable grid, flow fields, density and Weidmann speed, lane choice, spillback, jockeying, scan failures with a manual lane, timed lane failures, groups, bag policy, checkpoints, and the run metrics (decisions D-014 to D-031).
-- **Examples** (`packages/examples`): two Belgrade Fair venues and six scenarios, each run headless in a test that checks the qualitative outcome ("3 lanes jam, 5 lanes cope").
-- **Simulation view** (`apps/web`): the page loads the concert example, runs the engine in a Web Worker, draws the crowd with PixiJS, and shows state counts, lane queues, headline numbers, charts and the assumed parameters. Play, pause, speed, "Jump to peak", seeking, density heatmap and the `?perf=1` overlay.
-- **Playwright tests in CI** (`apps/web/e2e`): the Node-versus-Chrome metrics hash test and a smoke test of the real page under the production CSP.
+**What exists after Phase 2** (on the `phase-2` branch, not yet merged to `main`):
+- **Pedestrian engine, examples, simulation view and Playwright tests** from Phase 1 (decisions D-014 to D-031).
+- **Scenario library and editor** in the browser, validated against the JSON Schema (D-032, D-033); interactive lane failures (D-035).
+- **Comparison and batches** in background workers with common random numbers and paired confidence intervals (D-034); `@bottleneck/analysis` (statistics and scan-log fitting).
+- **Scan logs:** the engine's service log, CSV export, import, fit and apply (D-037 to D-039).
+- **README with a GIF** (`docs/media/demo.gif`, `docs/media/screenshot.png`), recorded by `apps/web/e2e/record-demo.spec.ts` (skipped unless `RECORD_DEMO=1`).
 
-**Remaining before Phase 1 is closed:** the two [human] checks in [section 4](#phase-1-pedestrian-simulation-on-a-built-in-venue) (measured performance on the reference machine, and the "jam within 2 minutes" look at the live demo), the merge of `phase-1` into `main`, and a final review pass of the web UI by the owner.
+**Remaining before Phase 2 is closed:** the owner's review of the README and GIF, then the merge of `phase-2` into `main`. Phase 1's two [human] checks (see [section 4](#phase-1-pedestrian-simulation-on-a-built-in-venue)) are also still open.
 
 ### What the owner needs to do now
 
-1. **Phase 0's [human] check, and again after the Phase 1 merge:** once `phase-1` is merged to `main`, open the Vercel URL, confirm that the page loads the concert example and that the "Engine self-check" line says **✓ Match: bit-identical to Node**. Send me the URL and I'll add it here and to the README.
-2. **Phase 1's two [human] checks** are described in [section 4](#phase-1-pedestrian-simulation-on-a-built-in-venue). In short: press Play on the live page and see a queue form; run with `?perf=1` and send me the numbers.
-3. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026). Everything works on 20.19 for now, but some newer tools, such as Vitest 5, already require 22 or later.
+1. **Live jam check** (Phase 1 [human]): after the merge, open the Vercel URL, press Play on the concert example and see a queue form within 2 minutes; confirm that the "Engine self-check" line says **✓ Match: bit-identical to Node**. Send me the URL and I will put it in the README (it currently says "link added after deployment check").
+2. **`?perf=1` numbers** (Phase 1 [human]): on the machine you consider the reference machine, run with `?perf=1`, 8×, the concert example for about a minute, and send me frame p95, worker tick p95, CPU, browser and agent count.
+3. **Confirm the README and the GIF** (Phase 2 [human]): look at `README.md` on GitHub and at `docs/media/demo.gif`; tell me if anything is unclear or wrong.
+4. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026). Everything works on 20.19 for now, but some newer tools, such as Vitest 5, already require 22 or later.
 
 ---
 
@@ -280,8 +282,30 @@ Each record has four short parts: context, decision, alternatives, consequences.
 - **Decision:** The page has four sections (Simulate, Scenarios, Compare, Scan logs) that stay mounted once visited, so their state survives switching; leaving Simulate pauses playback. All logic is in pure TypeScript modules with Vitest tests: `library/` (storage, form, validation, files, catalogue), `compare/` (seeds and jobs, measures and differences in words, table rows, chart data), `scanlog/` (applying a fit). React components only lay things out; shared class strings are in `ui/styles.ts` and the text in `strings.ts` (sentences built by the pure modules, such as difference sentences and validation messages, live with them). The Phase 1 "+1 lane" mini-comparison is gone: "+1 lane" now opens the comparison of the current scenario against the same with one more lane (review A9).
 - **Consequences:** A redesign can replace the components without touching the tested logic.
 
-### Scan logs (pending)
-_The scan-log decisions (format, fitting method, the 10% recovery test) are added by the orchestrator from the `@bottleneck/analysis` work._
+### D-037 The engine's service log: every attempt, outside the metrics hash
+- **Context:** Scan-log tools (Phase 2) need what a real system would record: one row per scan attempt. The engine already knows every attempt, but adding them to the metrics would change `metricsHash`.
+- **Decision:** `run.serviceLog()` returns every service attempt (including failed scans, manual-lane services and rejections) in time order. It is **not part of `metricsHash`** (so no existing hash changes) and **is included in checkpoints**, so a restored run reports the same log as an uninterrupted one.
+- **Alternatives:** Reconstructing the log from lane metrics (loses individual attempts); hashing it (changes every pinned hash for no benefit).
+- **Consequences:** The log grows with the run (one row per attempt); it is read only when exported.
+
+### D-038 Scan-log format: CSV with `time,seconds,lane,event`
+- **Context:** Real scan logs are tabular and usually carry a clock time; the importer must accept what the generator writes, and the format should open in a spreadsheet.
+- **Decision:** CSV with the header `time,seconds,lane,event`. `seconds` is **scenario time** (relative to the start, as in the schema); `time` is **HH:MM:SS.sss** from the scenario's `referenceClock`, wrapped at 24 h. `lane` is 1-based and named `gate-main#2`, and the manual lane of an element is `<element>#manual`. `event` is one of `scan_ok`, `scan_fail`, `manual_ok`, `rejected`.
+- **Alternatives:** JSON (harder to open in a spreadsheet); one row per visit (hides retries, which are exactly what real logs show).
+- **Consequences:** A log from a real system only needs these four columns to be imported.
+
+### D-039 Fitting a scan log: busy-period inter-departure intervals
+- **Context:** A log gives only the moments of events, not how long each scan took. The service time must be estimated from the gaps between consecutive events on a lane, but a gap is a service time only if the lane was busy during it.
+- **Decision:**
+  - **Departures** are the rows that end a visit: `scan_ok`, `manual_ok` and `rejected`. A failed scan and its retry are therefore one visit, and the fitted service time is the **busy time per visit** (it includes the retry).
+  - **Idle-gap rule:** within a group of lanes, a gap between two departures of the same lane counts as **busy** if it is at most **3 × the group's pooled median inter-departure gap**. The first departure after an idle gap gives no interval, and neither does each lane's first departure.
+  - **Groups:** the lanes of one element form a group; manual lanes are **their own group**.
+  - **Arrivals** are estimated from the first attempts per time bin, with weights relative to the busiest bin, at most 200 points.
+  - **Bias:** a slight underestimate for long services (a gap longer than 3 × median is treated as idle), and biased high for groups that are never busy (every gap is then an inter-arrival time).
+  - **Result:** on `concert-5-lanes` the fitted mean is **4.42 s against the true 4.31 s (+2.7%)**. The acceptance test requires recovery within 10% (`packages/analysis/test`).
+  - `summarise` (mean and 95% CI) uses an **exact Student-t table for df 1 to 30** and 1.96 beyond.
+- **Alternatives:** Using all gaps (dominated by idle time at quiet lanes); assuming a distribution family up front (the fit would then test the assumption instead of the data).
+- **Consequences:** The fit needs busy lanes; on a quiet lane it overstates the service time. The test uses the busy 5-lane concert, which is the intended use.
 
 ---
 
@@ -361,8 +385,8 @@ Every check from spec section 9, sorted into the phase where the work actually h
 
 ### Phase 2: Scenarios and comparison
 - [x] [test] Comparing 3 vs 5 lanes on the concert example shows highlighted differences (Playwright, `apps/web/e2e/compare.spec.ts`: both runs in background workers, "better" rows for still-outside-at-start and p95 wait, numbers equal to a Node run, and "worse" when the order is swapped)
-- [ ] [test] A generated scan log, re-imported, recovers the mean scan time within 10%
-- [ ] [human] README with a GIF, the live link and the how-it-works notes. **First CV milestone.**
+- [x] [test] A generated scan log, re-imported, recovers the mean scan time within 10% (`packages/analysis/test`; `concert-5-lanes`: fitted 4.42 s against true 4.31 s, +2.7%, D-039)
+- [ ] [human] README with a GIF, the live link and the how-it-works notes. **First CV milestone.** *Ready for owner review:* `README.md` has the GIF (`docs/media/demo.gif`) and the status; the live link reads "link added after deployment check" until the Vercel URL is confirmed; the how-it-works notes are in [section 7](#7-how-it-works-learning-notes).
 
 ### Phase 3: Vehicles and parking
 - [ ] [test] A parked car produces exactly its occupant count as pedestrians
@@ -512,11 +536,12 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
 - *Risks:* Ajv under the CSP (solved by build-time code generation); run time of several concert runs in the browser (solved by a worker pool).
 
 **Summary**
-- **Built:** everything in the plan. The web app now has four sections: Simulate, Scenarios, Compare, Scan logs (D-036).
+- **Built:** everything in the plan. The web app now has four sections: Simulate, Scenarios, Compare, Scan logs (D-036). The package `packages/analysis` holds `summarise` (mean and 95% CI, exact t table), paired differences, and the scan-log generator, importer and fitter (D-037 to D-039); the engine got `run.serviceLog()`.
 - **Tests:** Vitest for all new logic (`apps/web/src/library/library.test.ts`, `compare/compare.test.ts`, `scanlog/scanlog.test.ts`: storage, form round trip, schema validity of editor output, the build-time validator against Ajv, import/export, seeds, differences in words, paired CIs, chart alignment, applying a fit). Playwright: `compare.spec.ts` (the Phase 2 acceptance check), `library.spec.ts` (create, save, reload, JSON export and import, scan-log export, import, fit and apply), and the updated `replay.spec.ts` ("+1 lane" opens the comparison).
 - **Measured** (development machine, production build in Chrome): 2 concert runs compared in about 2.3 s (2 workers); a 5-seed batch of the 3-lane concert in about 6.3 s (4 workers). In headless Chromium with the map visible the 2-run comparison took about 10 s.
 - **Example:** 3 vs 5 lanes, seed 1: still outside at the start 1,312 → 177 people; p95 wait in the peak arrival hour 27 min 10 s → 2 min 1 s. Over 5 seeds the 3-lane concert gives 1,295 ± 39 people outside at the start (mean ± 95% CI).
-- **Deferred:** README with a GIF and the live link (the [human] check, after the merge). Undo in the editor (Phase 5, review C4). Editing custom arrival points by hand (only via the JSON box or a fitted scan log).
+- **README:** a GIF (15 s, 960 px wide, about 4 MB) and a screenshot in `docs/media/`, recorded against the production build by `apps/web/e2e/record-demo.spec.ts` (skipped unless `RECORD_DEMO=1`). The live link is added after the deployment check (owner).
+- **Deferred:** the live link in the README (the [human] check, after the merge). Undo in the editor (Phase 5, review C4). Editing custom arrival points by hand (only via the JSON box or a fitted scan log).
 - **Known limitations:** scenarios live in one browser until Phase 4; a lane event recorded late in a run costs a re-run up to that moment; the fitted service time includes scan retries, so it slightly overstates the pure scan time when scan failures are on.
 
 ---
@@ -722,6 +747,14 @@ A click is not part of the scenario, so a run that contains a click cannot be re
 5. **How can a click during playback be "replayable"?**
    By not treating it as an action on the running simulation, but as an edit of its input: the click becomes a timed event in a copy of the scenario, and the run is recomputed from that input. Determinism then guarantees that every replay or comparison of the edited scenario gives the same result.
 
+#### Estimating a scan time from a log
+A scan log says *when* things happened, not how long a scan took. The idea: on a lane that is always busy, the time between two people leaving is exactly one service time, because the next person starts the moment the previous one is done. So the **inter-departure intervals of a busy lane are service times**. The trouble is idle time: when the lane waits for someone to arrive, the gap is an inter-arrival time and would inflate the estimate. The fitter therefore keeps only gaps up to 3 times the median gap of the whole group of lanes (the median is robust against a few long idle gaps), and skips the first departure after an idle gap and each lane's first one, which have no busy predecessor. A failed scan and its retry are one visit, so the result is the time the lane was busy per person. Long services are slightly underestimated (a gap that long may be thrown out as "idle"), and a group that is never busy gives inter-arrival times, so the estimate is biased high; on the busy 5-lane concert the fit is 4.42 s against a true 4.31 s (+2.7%). The test generates the log from the engine itself, so it checks the whole round trip: export, parse, fit, apply.
+
+#### Interview question (scan logs)
+
+6. **You only have timestamps of people leaving a gate. How do you estimate the service time, and when does it go wrong?**
+   Use the intervals between consecutive departures on the same lane, but only while the lane was busy, because then each interval is one service time. Idle gaps are filtered out with a threshold relative to the median gap (here 3 times). It goes wrong on quiet lanes (the intervals are inter-arrival times, so the estimate is too high) and for very long services (they look like idle gaps and are dropped, so the estimate is slightly too low). The round-trip test (generate a log from the simulator, fit it, compare with the true mean, within 10%) shows the method is sound where it is meant to be used.
+
 ---
 
 ## 8. Reference
@@ -735,14 +768,16 @@ apps/web/src/library/      scenario library logic: storage, editor form, validat
 apps/web/src/compare/      comparison and batch logic: seeds and jobs, measures and differences, table rows, chart data, worker pool
 apps/web/src/scanlog/      applying a fitted scan log to a new scenario
 apps/web/src/validation/   build-time (Ajv standalone) scenario validator, served as virtual:scenario-validator (D-033)
-apps/web/e2e/              Playwright tests (determinism, smoke, replay, compare, library)
+apps/web/e2e/              Playwright tests (determinism, smoke, replay, compare, library) and record-demo (media recording, skipped unless RECORD_DEMO=1)
 packages/engine/           simulation engine (pure TS) and its tests in test/
+packages/analysis/         statistics (mean and 95% CI, paired differences) and scan-log generation, import and fitting, with tests
 packages/examples/         built-in Belgrade Fair venues (venues/) and scenarios (scenarios/) as JSON, plus their tests in test/
 packages/schema/           generated types (src/generated) and schema tests
 schema/                    JSON Schema source files and shared fixtures
 tools/                     scripts (schema type generator)
 docs/PROJECT.md            this document
 docs/spec/                 the specification and review notes
+docs/media/                README demo GIF and screenshot (recorded by apps/web/e2e/record-demo.spec.ts)
 vercel.json                Vercel build settings and security headers
 playwright.config.ts       Playwright setup (production build under the production CSP, one worker)
 ```
@@ -755,6 +790,7 @@ playwright.config.ts       Playwright setup (production build under the producti
 | `npm run build` then `npm run preview` | production build, served with the production security headers on http://localhost:4173 |
 | `npm test` | all unit and validation tests (Vitest), including the example runs |
 | `npm run test:e2e` | Playwright browser tests (Chromium; builds the app and serves it with `vite preview`). Run `npx playwright install chromium` once first. Not part of `npm run check`; CI runs it as a separate job |
+| `RECORD_DEMO=1 npx playwright test record-demo` | records the README demo video and screenshots into `RECORD_DEMO_DIR` (default `./demo-out`); convert to a GIF with ffmpeg. Skipped without `RECORD_DEMO=1` |
 | `npx vitest run packages/examples` | only the example scenarios; set `EXAMPLE_RUNS_VERBOSE=1` to print their numbers and `EXAMPLE_RUNS_ONLY=concert` to run a subset |
 | `npm run lint` / `npm run typecheck` | ESLint / TypeScript |
 | `npm run schema:gen` | regenerate types after editing `/schema` |
