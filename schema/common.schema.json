@@ -73,7 +73,15 @@
     },
     "Distribution": {
       "title": "Distribution",
-      "description": "A random quantity, such as a service time in seconds or a walking speed in m/s.",
+      "description": "A random quantity, such as a service time in seconds or a walking speed in m/s: one of the base kinds, or a mixture of them.",
+      "oneOf": [
+        { "$ref": "common.schema.json#/definitions/BaseDistribution" },
+        { "$ref": "common.schema.json#/definitions/MixtureDistribution" }
+      ]
+    },
+    "BaseDistribution": {
+      "title": "BaseDistribution",
+      "description": "A single (non-mixture) distribution.",
       "oneOf": [
         { "$ref": "common.schema.json#/definitions/FixedDistribution" },
         { "$ref": "common.schema.json#/definitions/UniformDistribution" },
@@ -139,6 +147,32 @@
         "shift": { "type": "number", "minimum": 0 },
         "mu": { "type": "number" },
         "sigma": { "type": "number", "minimum": 0 }
+      }
+    },
+    "MixtureDistribution": {
+      "title": "MixtureDistribution",
+      "description": "A weighted mix of base distributions, e.g. turnstile scans that are 50% card (about 3 s) and 50% phone QR code (about 4.5 s). Each draw first picks a component with probability weight / (sum of weights), then draws from it. E[S] and E[S²] are the weighted averages of the components' moments, so they stay exact.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "components"],
+      "properties": {
+        "kind": { "const": "mixture" },
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "$ref": "common.schema.json#/definitions/MixtureComponent" }
+        }
+      }
+    },
+    "MixtureComponent": {
+      "title": "MixtureComponent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["weight", "distribution"],
+      "properties": {
+        "weight": { "type": "number", "exclusiveMinimum": 0 },
+        "distribution": { "$ref": "common.schema.json#/definitions/BaseDistribution" }
       }
     }
   }

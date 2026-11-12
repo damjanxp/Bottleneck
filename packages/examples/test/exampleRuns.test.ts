@@ -2,12 +2,20 @@
  * Runs every built-in example scenario headless to completion and checks the qualitative outcomes
  * the examples are meant to show. Margins are generous: the point is "jams" versus "copes", not exact numbers.
  */
-import { createRun, type RunMetrics } from "@bottleneck/engine";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Ajv } from "ajv";
+import addFormats from "ajv-formats";
+import { ENGINE_VERSION, createRun, type RunMetrics } from "@bottleneck/engine";
+import { SCHEMA_FILES, type RunRecord, type Scenario } from "@bottleneck/schema";
 import { beforeAll, describe, expect, it } from "vitest";
 import { exampleVenues } from "../src/index.ts";
 
 interface Result {
   m: RunMetrics;
+  hash: string;
+  scenario: Scenario;
   ms: number;
   /** Max queue of the busiest lane of an element. */
   maxQueue: (elementId: string) => number;
@@ -26,6 +34,8 @@ function simulate(venueIndex: number, scenarioId: string): Result {
   expect(run.countsByState().reduce((a, b) => a + b, 0)).toBe(run.agentCount);
   return {
     m,
+    hash: run.metricsHash(),
+    scenario: sc,
     ms,
     maxQueue: (id) => Math.max(0, ...m.lanes.filter((l) => l.elementId === id).map((l) => l.metrics.maxQueue)),
   };
@@ -59,6 +69,30 @@ describe("example scenarios, simulated", () => {
       expect(m.drained, id).toBe(true);
       expect(m.countsByState.reduce((a, b) => a + b, 0), id).toBe(m.agentCount);
     }
+  });
+
+  it("every run's record is valid against run.schema.json", () => {
+    const schemaDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../schema");
+    const ajv = new Ajv({ allErrors: true, strict: true, strictTuples: false });
+    addFormats.default(ajv);
+    for (const file of SCHEMA_FILES) ajv.addSchema(JSON.parse(readFileSync(path.join(schemaDir, file), "utf8")) as object, file);
+    const validate = ajv.getSchema("run.schema.json")!;
+    for (const { id } of ids) {
+      const { m, hash, scenario } = r(id);
+      const { parameters, ...metrics } = m;
+      const record: RunRecord = { schemaVersion: 1, engineVersion: ENGINE_VERSION, createdAt: "2026-11-12T00:00:00Z", origin: "job", scenario, venueHash: "0000000000000000", parameters, metrics, metricsHash: hash };
+      expect(validate(record), `${id}: ${JSON.stringify(validate.errors?.slice(0, 3))}`).toBe(true);
+    }
+  });
+
+  it("reports capacity against demand and the outside-at-start breakdown", () => {
+    const m3 = r("concert-3-lanes").m;
+    const gate = m3.elements.find((e) => e.elementId === "gate-main")!;
+    // 3 lanes cannot serve the peak hour: demand above capacity, utilisation pinned near 100%.
+    expect(gate.peakDemandPerHour).toBeGreaterThan(gate.capacityPerHour);
+    expect(gate.peakUtilisation).toBeGreaterThan(0.95);
+    expect((m3.arrivedButOutsideAtStart ?? 0) + (m3.notYetArrivedAtStart ?? 0)).toBe(m3.stillOutsideAtStart);
+    expect(m3.arrivedButOutsideAtStart).toBeGreaterThan(m3.notYetArrivedAtStart ?? 0);
   });
 
   it("concert with 3 lanes jams badly", () => {

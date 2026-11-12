@@ -57,6 +57,35 @@ export const Stage = {
   Inside: 2,
 } as const;
 
+/** Every per-agent array of AgentStore, in a fixed order (run checkpoints copy them by name). */
+export const AGENT_ARRAYS = [
+  "x",
+  "y",
+  "vx",
+  "vy",
+  "arrivalTime",
+  "freeSpeed",
+  "source",
+  "offsetX",
+  "offsetY",
+  "state",
+  "mode",
+  "stage",
+  "stageSet",
+  "lane",
+  "queuePos",
+  "ready",
+  "jockeyed",
+  "waitStart",
+  "totalWait",
+  "gateStart",
+  "insideTime",
+  "group",
+  "lineJoin",
+  "demandCounted",
+] as const;
+export type AgentArrayName = (typeof AGENT_ARRAYS)[number];
+
 export class AgentStore {
   readonly count: number;
   // Kinematics (Float64 for exact, platform-independent arithmetic; snapshots convert to Float32).
@@ -91,6 +120,12 @@ export class AgentStore {
   readonly gateStart: Float64Array;
   /** Time the agent reached a destination (engine time), NaN if not yet. */
   readonly insideTime: Float64Array;
+  /** Group: the id of the group's first member (its leader); the agent's own id when alone. */
+  readonly group: Int32Array;
+  /** When the agent physically joined its current lane's line (queue area or spill-back), NaN if not (yet). */
+  readonly lineJoin: Float64Array;
+  /** Stage + 1 of the last stage at which the agent was counted as demand for an element, 0 if none. */
+  readonly demandCounted: Uint8Array;
 
   constructor(count: number) {
     this.count = count;
@@ -115,5 +150,8 @@ export class AgentStore {
     this.totalWait = new Float64Array(count);
     this.gateStart = new Float64Array(count).fill(NaN);
     this.insideTime = new Float64Array(count).fill(NaN);
+    this.group = Int32Array.from({ length: count }, (_, i) => i);
+    this.lineJoin = new Float64Array(count).fill(NaN);
+    this.demandCounted = new Uint8Array(count);
   }
 }

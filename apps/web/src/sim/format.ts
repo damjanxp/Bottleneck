@@ -80,6 +80,10 @@ export function formatDistribution(d: Distribution, unit = ""): string {
       return `normal, mean ${num(d.mean)}, sd ${num(d.sd)}, limited to ${num(d.min)}–${num(d.max)}${u}`;
     case "shiftedLognormal":
       return `${num(d.shift)}${u} + lognormal (μ ${num(d.mu)}, σ ${num(d.sigma)})`;
+    case "mixture": {
+      const total = d.components.reduce((s, c) => s + c.weight, 0);
+      return d.components.map((c) => `${Math.round((100 * c.weight) / total)}% ${formatDistribution(c.distribution, unit)}`).join(" / ");
+    }
   }
 }
 

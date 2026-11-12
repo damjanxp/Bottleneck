@@ -15,7 +15,10 @@
  * for the metrics in spec 4.5 and for Little's law (L = λ·W).
  */
 
+import type { LaneMetrics } from "@bottleneck/schema";
 import type { Simulation } from "./simulation.ts";
+
+export type { LaneMetrics };
 
 /** Event kinds, in tie-break order at equal times: a lane frees up before the next arrival. */
 export const EventKind = {
@@ -43,37 +46,22 @@ export interface LaneCallbacks {
   onLeave(agent: number, lane: number, time: number, served: boolean): void;
 }
 
-export interface LaneMetrics {
-  /** Agents that committed to the lane (and were not moved away by a lane failure). */
-  arrivals: number;
-  /** Agents whose service started. */
-  started: number;
-  /** Agents that passed. */
-  served: number;
-  /** Reporting window: first arrival to last service start. */
-  windowStart: number;
-  windowEnd: number;
-  meanWait: number;
-  /** 95th percentile wait, nearest-rank definition. */
-  p95Wait: number;
-  maxWait: number;
-  /** Time-averaged queue length over the window, excluding the agent in service. */
-  meanQueue: number;
-  maxQueue: number;
-  /** Agents entering service per second over the window. */
-  arrivalRate: number;
-  /** Busy time / open time over the window. */
-  utilisation: number;
-  /** Seconds the lane was failed inside the window. */
-  failedTime: number;
-  /** Agents still waiting when the window ended (non-zero only if the run ended with a queue). */
-  queuedAtWindowEnd: number;
-  /**
-   * Little's law check, as a relative error: the time-integral of the queue length against the sum
-   * of all waiting times in the window (including the wait-so-far of agents still queuing at its end).
-   * These are two independent ways of counting the same person-seconds, so this must be ~0.
-   */
-  littleLawError: number;
+/**
+ * LaneMetrics (generated from /schema/run.schema.json) holds, per lane, over the reporting window
+ * from the first commitment to the last service start: arrivals (commitments not moved away by a
+ * lane failure or jockeying), started and served services, mean/p95 (nearest rank)/max wait, the
+ * time-averaged queue length excluding the person in service, the service-start rate, busy time /
+ * open time, failed time, people still queuing at the window end, and the Little's law check: the
+ * time-integral of the queue length against the sum of all waits (including the wait-so-far of
+ * people still queuing at the window end), as a relative error that must be ~0.
+ */
+
+/** Optional per-lane bookkeeping a run asks for (all off by default, so the core tests stay minimal). */
+export interface LaneBankOptions {
+  /** Busy and open time are also collected per bin of this many seconds (from time 0). */
+  binSeconds?: number;
+  /** Busy and failed time are also recorded at this instant (e.g. the event start). */
+  splitAt?: number;
 }
 
 class Lane {
@@ -111,17 +99,33 @@ class Lane {
   waitSum = 0;
   queuedAtWindowEnd = 0;
   residualWaitAtWindowEnd = 0;
+  /** Service start time of each entry in `waits`. */
+  readonly starts: number[] = [];
+  // Optional bins and split (LaneBankOptions).
+  readonly busyBins: number[] = [];
+  readonly openBins: number[] = [];
+  splitDone = false;
+  busyAtSplit = 0;
+  failedAtSplit = 0;
 
   get queueLength(): number {
     return this.agents.length - this.head;
   }
 
-  accumulate(now: number): void {
+  accumulate(now: number, binSeconds: number, splitAt: number): void {
     const dt = now - this.lastChange;
+    if (!this.splitDone && now >= splitAt) {
+      // Recorded on the side; the main integrals are added up exactly as without a split.
+      const before = Math.max(0, splitAt - this.lastChange);
+      this.busyAtSplit = this.busyIntegral + (this.busyAgent >= 0 ? before : 0);
+      this.failedAtSplit = this.failedIntegral + (!this.open ? before : 0);
+      this.splitDone = true;
+    }
     if (dt > 0) {
       this.queueIntegral += this.queueLength * dt;
       if (this.busyAgent >= 0) this.busyIntegral += dt;
       if (!this.open) this.failedIntegral += dt;
+      if (binSeconds > 0) addToBins(this.lastChange, now, binSeconds, this.busyAgent >= 0 ? this.busyBins : null, this.open ? this.openBins : null);
       this.lastChange = now;
     }
   }
@@ -131,6 +135,85 @@ class Lane {
     this.commitTimes.length = 0;
     this.ready.length = 0;
     this.head = 0;
+  }
+}
+
+/** Scalar fields of a lane, in checkpoint order. */
+const LANE_SCALARS = [
+  "busyAgent",
+  "attempt",
+  "lastChange",
+  "queueIntegral",
+  "busyIntegral",
+  "failedIntegral",
+  "arrivals",
+  "started",
+  "served",
+  "maxQueue",
+  "firstArrival",
+  "lastServiceStart",
+  "queueIntegralAtWindowEnd",
+  "busyIntegralAtWindowEnd",
+  "failedIntegralAtWindowEnd",
+  "busyIntegralAtWindowStart",
+  "failedIntegralAtWindowStart",
+  "queuedCommitSum",
+  "waitSum",
+  "queuedAtWindowEnd",
+  "residualWaitAtWindowEnd",
+  "busyAtSplit",
+  "failedAtSplit",
+] as const;
+
+/** A LaneBank's complete state as typed arrays (structured-clone friendly), for run checkpoints. */
+export interface LaneBankState {
+  /** LANE_SCALARS per lane, then open and splitDone as 0/1. */
+  readonly scalars: Float64Array;
+  /** Queued agents of all lanes, head first, with their commit times and readiness. */
+  readonly queueAgents: Int32Array;
+  readonly queueCommitTimes: Float64Array;
+  readonly queueReady: Uint8Array;
+  readonly queueOffsets: Int32Array;
+  readonly waits: Float64Array;
+  readonly starts: Float64Array;
+  readonly waitOffsets: Int32Array;
+  readonly busyBins: Float64Array;
+  readonly busyBinOffsets: Int32Array;
+  readonly openBins: Float64Array;
+  readonly openBinOffsets: Int32Array;
+}
+
+/** Concatenates lists into one typed array plus offsets (list k is data[offsets[k] .. offsets[k + 1])). */
+function pack<T extends Float64Array | Int32Array | Uint8Array>(lists: readonly (readonly number[])[], make: (n: number) => T): { data: T; offsets: Int32Array } {
+  const offsets = new Int32Array(lists.length + 1);
+  for (let k = 0; k < lists.length; k++) offsets[k + 1] = (offsets[k] as number) + (lists[k] as readonly number[]).length;
+  const data = make(offsets[lists.length] as number);
+  for (let k = 0; k < lists.length; k++) data.set(lists[k] as readonly number[], offsets[k] as number);
+  return { data, offsets };
+}
+
+function unpack(data: ArrayLike<number>, offsets: Int32Array, k: number): number[] {
+  const out: number[] = [];
+  for (let i = offsets[k] as number; i < (offsets[k + 1] as number); i++) out.push(data[i] as number);
+  return out;
+}
+
+/** Adds the overlap of [t0, t1) with each bin to the given series (null: skip). */
+export function addToBins(t0: number, t1: number, binSeconds: number, a: number[] | null, b: number[] | null): void {
+  if (a === null && b === null) return;
+  let t = t0;
+  while (t < t1) {
+    const bin = Math.floor(t / binSeconds);
+    const end = Math.min(t1, (bin + 1) * binSeconds);
+    if (a !== null) {
+      while (a.length <= bin) a.push(0);
+      a[bin] = (a[bin] as number) + (end - t);
+    }
+    if (b !== null) {
+      while (b.length <= bin) b.push(0);
+      b[bin] = (b[bin] as number) + (end - t);
+    }
+    t = end;
   }
 }
 
@@ -149,13 +232,22 @@ export function percentileNearestRank(values: readonly number[], p: number): num
  */
 export class LaneBank {
   private readonly lanes: Lane[] = [];
+  private readonly binSeconds: number;
+  private readonly splitAt: number;
 
   constructor(
     private readonly sim: Simulation<number>,
     private readonly callbacks: LaneCallbacks,
     laneCount: number,
+    options: LaneBankOptions = {},
   ) {
     for (let i = 0; i < laneCount; i++) this.lanes.push(new Lane());
+    this.binSeconds = options.binSeconds ?? 0;
+    this.splitAt = options.splitAt ?? Infinity;
+  }
+
+  private touch(lane: Lane, now: number): void {
+    lane.accumulate(now, this.binSeconds, this.splitAt);
   }
 
   /** Handler to register for EventKind.ServiceComplete. */
@@ -170,7 +262,7 @@ export class LaneBank {
       this.sim.schedule(now + outcome.extra, EventKind.ServiceComplete, laneId, agent);
       return;
     }
-    lane.accumulate(now);
+    this.touch(lane, now);
     lane.busyAgent = -1;
     const served = outcome.kind === "done";
     if (served) lane.served++;
@@ -189,7 +281,7 @@ export class LaneBank {
   commit(laneId: number, agent: number, ready = true): void {
     const lane = this.lane(laneId);
     const now = this.sim.now;
-    lane.accumulate(now);
+    this.touch(lane, now);
     lane.agents.push(agent);
     lane.commitTimes.push(now);
     lane.queuedCommitSum += now;
@@ -222,7 +314,7 @@ export class LaneBank {
    */
   fail(laneId: number): number[] {
     const lane = this.lane(laneId);
-    lane.accumulate(this.sim.now);
+    this.touch(lane, this.sim.now);
     lane.open = false;
     const displaced = lane.agents.slice(lane.head);
     // Their wait so far on this lane is dropped from both sides of Little's law.
@@ -245,7 +337,7 @@ export class LaneBank {
     while (i < lane.agents.length && lane.agents[i] !== agent) i++;
     if (i === lane.agents.length) return false;
     const now = this.sim.now;
-    lane.accumulate(now);
+    this.touch(lane, now);
     const commitTime = lane.commitTimes[i] as number;
     lane.queueIntegral -= now - commitTime;
     lane.queuedCommitSum -= commitTime;
@@ -269,7 +361,7 @@ export class LaneBank {
 
   reopen(laneId: number): void {
     const lane = this.lane(laneId);
-    lane.accumulate(this.sim.now);
+    this.touch(lane, this.sim.now);
     lane.open = true;
     this.tryStart(laneId);
   }
@@ -304,13 +396,67 @@ export class LaneBank {
   /** ∫ queue length dt from 0 to now, for time-averaged queue lengths over any window. */
   queueIntegral(laneId: number): number {
     const lane = this.lane(laneId);
-    lane.accumulate(this.sim.now);
+    this.touch(lane, this.sim.now);
     return lane.queueIntegral;
   }
 
   /** Raw waiting times (seconds) of every service that started, in start order. */
   waits(laneId: number): readonly number[] {
     return this.lane(laneId).waits;
+  }
+
+  /** Service start time of every entry of waits(), in start order. */
+  starts(laneId: number): readonly number[] {
+    return this.lane(laneId).starts;
+  }
+
+  /**
+   * Busy and open seconds per bin (LaneBankOptions.binSeconds), up to now. Copies; the time since
+   * the lane's last change is included without touching the lane's own sums.
+   */
+  bins(laneId: number): { busy: number[]; open: number[] } {
+    const lane = this.lane(laneId);
+    const busy = [...lane.busyBins];
+    const open = [...lane.openBins];
+    if (this.binSeconds > 0) addToBins(lane.lastChange, this.sim.now, this.binSeconds, lane.busyAgent >= 0 ? busy : null, lane.open ? open : null);
+    return { busy, open };
+  }
+
+  /**
+   * Utilisation (busy time / open time) within the reporting window on one side of the split time
+   * (LaneBankOptions.splitAt): "before" is [window start, split), "after" is [split, window end].
+   * 0 if that part of the window is empty.
+   */
+  periodUtilisation(laneId: number, side: "before" | "after"): number {
+    const lane = this.lane(laneId);
+    const ws = Math.max(0, lane.firstArrival);
+    const we = Math.max(ws, lane.lastServiceStart);
+    const startBusy = lane.busyIntegralAtWindowStart;
+    const startFailed = lane.failedIntegralAtWindowStart;
+    const endBusy = lane.busyIntegralAtWindowEnd;
+    const endFailed = lane.failedIntegralAtWindowEnd;
+    let from: number, to: number, busy: number, failed: number;
+    if (this.splitAt <= ws || this.splitAt >= we) {
+      // The split is outside the window: one side is all of it, the other empty.
+      const whole = side === "before" ? this.splitAt >= we : this.splitAt <= ws;
+      if (!whole) return 0;
+      from = ws;
+      to = we;
+      busy = endBusy - startBusy;
+      failed = endFailed - startFailed;
+    } else if (side === "before") {
+      from = ws;
+      to = this.splitAt;
+      busy = lane.busyAtSplit - startBusy;
+      failed = lane.failedAtSplit - startFailed;
+    } else {
+      from = this.splitAt;
+      to = we;
+      busy = endBusy - lane.busyAtSplit;
+      failed = endFailed - lane.failedAtSplit;
+    }
+    const open = to - from - failed;
+    return open > 0 ? busy / open : 0;
   }
 
   metrics(laneId: number): LaneMetrics {
@@ -347,6 +493,58 @@ export class LaneBank {
     };
   }
 
+  /** Complete state for a checkpoint; restore() on a bank with the same lane count continues identically. */
+  save(): LaneBankState {
+    const n = this.lanes.length;
+    const per = LANE_SCALARS.length + 2;
+    const scalars = new Float64Array(n * per);
+    this.lanes.forEach((lane, k) => {
+      LANE_SCALARS.forEach((key, j) => (scalars[k * per + j] = lane[key]));
+      scalars[k * per + LANE_SCALARS.length] = lane.open ? 1 : 0;
+      scalars[k * per + LANE_SCALARS.length + 1] = lane.splitDone ? 1 : 0;
+    });
+    const queued = this.lanes.map((l) => l.agents.slice(l.head));
+    const commits = this.lanes.map((l) => l.commitTimes.slice(l.head));
+    const ready = this.lanes.map((l) => l.ready.slice(l.head).map((r) => (r ? 1 : 0)));
+    const q = pack(queued, (m) => new Int32Array(m));
+    const waits = pack(this.lanes.map((l) => l.waits), (m) => new Float64Array(m));
+    const busy = pack(this.lanes.map((l) => l.busyBins), (m) => new Float64Array(m));
+    const open = pack(this.lanes.map((l) => l.openBins), (m) => new Float64Array(m));
+    return {
+      scalars,
+      queueAgents: q.data,
+      queueCommitTimes: pack(commits, (m) => new Float64Array(m)).data,
+      queueReady: pack(ready, (m) => new Uint8Array(m)).data,
+      queueOffsets: q.offsets,
+      waits: waits.data,
+      starts: pack(this.lanes.map((l) => l.starts), (m) => new Float64Array(m)).data,
+      waitOffsets: waits.offsets,
+      busyBins: busy.data,
+      busyBinOffsets: busy.offsets,
+      openBins: open.data,
+      openBinOffsets: open.offsets,
+    };
+  }
+
+  /** Overwrites every lane with a save()d state. */
+  restore(state: LaneBankState): void {
+    const per = LANE_SCALARS.length + 2;
+    if (state.scalars.length !== this.lanes.length * per) throw new RangeError("Lane bank state does not match the number of lanes");
+    this.lanes.forEach((lane, k) => {
+      LANE_SCALARS.forEach((key, j) => (lane[key] = state.scalars[k * per + j] as number));
+      lane.open = state.scalars[k * per + LANE_SCALARS.length] === 1;
+      lane.splitDone = state.scalars[k * per + LANE_SCALARS.length + 1] === 1;
+      lane.clearQueue();
+      for (const a of unpack(state.queueAgents, state.queueOffsets, k)) lane.agents.push(a);
+      for (const t of unpack(state.queueCommitTimes, state.queueOffsets, k)) lane.commitTimes.push(t);
+      for (const r of unpack(state.queueReady, state.queueOffsets, k)) lane.ready.push(r === 1);
+      replace(lane.waits, unpack(state.waits, state.waitOffsets, k));
+      replace(lane.starts, unpack(state.starts, state.waitOffsets, k));
+      replace(lane.busyBins, unpack(state.busyBins, state.busyBinOffsets, k));
+      replace(lane.openBins, unpack(state.openBins, state.openBinOffsets, k));
+    });
+  }
+
   private lane(laneId: number): Lane {
     const lane = this.lanes[laneId];
     if (lane === undefined) throw new RangeError(`Unknown lane ${laneId}`);
@@ -357,7 +555,7 @@ export class LaneBank {
     const lane = this.lane(laneId);
     if (!lane.open || lane.busyAgent >= 0 || lane.queueLength === 0 || !lane.ready[lane.head]) return;
     const now = this.sim.now;
-    lane.accumulate(now);
+    this.touch(lane, now);
     const agent = lane.agents[lane.head] as number;
     const commitTime = lane.commitTimes[lane.head] as number;
     const wait = now - commitTime;
@@ -372,6 +570,7 @@ export class LaneBank {
     lane.attempt = 0;
     lane.started++;
     lane.waits.push(wait);
+    lane.starts.push(now);
     lane.lastServiceStart = now;
     lane.queueIntegralAtWindowEnd = lane.queueIntegral;
     lane.busyIntegralAtWindowEnd = lane.busyIntegral;
@@ -381,4 +580,9 @@ export class LaneBank {
     this.callbacks.onServiceStart?.(agent, laneId, now);
     this.sim.schedule(now + this.callbacks.serviceTime(agent, laneId), EventKind.ServiceComplete, laneId, agent);
   }
+}
+
+function replace(target: number[], values: readonly number[]): void {
+  target.length = 0;
+  for (const v of values) target.push(v);
 }

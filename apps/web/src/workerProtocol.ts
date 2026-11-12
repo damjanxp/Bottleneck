@@ -11,6 +11,8 @@ import type { Scenario, Venue } from "@bottleneck/schema";
 
 export type WorkerRequest =
   | { type: "selfCheck" }
+  /** Test hook: runs the tiny pinned scenario to completion and answers with its metrics hash. */
+  | { type: "determinismCheck" }
   | { type: "load"; venue: Venue; scenario: Scenario; speed: number }
   | { type: "play" }
   | { type: "pause" }
@@ -75,6 +77,7 @@ export type WorkerResponse =
       durationMs: number;
       engineVersion: string;
     }
+  | { type: "determinismResult"; hash: string }
   | { type: "error"; message: string }
   | LoadedInfo
   | { type: "snapshot"; generation: number; buffer: Float32Array; time: number; agentCount: number }

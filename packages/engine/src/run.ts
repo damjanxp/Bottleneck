@@ -31,23 +31,41 @@
  * spilled back behind it), only to a lane of the same element with at least 3 fewer people than are
  * ahead of them, to the back of that lane.
  *
+ * Groups (review E3): people arrive in groups of consecutive ids (sizes from groupSizes). A group
+ * shares its leader's arrival time and source, walks at its slowest member's speed, and the first
+ * member to decide at a stage picks the lane for the others (if it is still open and reachable).
+ *
+ * Checkpoints (review C1): saveCheckpoint() copies every piece of dynamic state into typed arrays;
+ * restoreRun() rebuilds the static parts from the venue and scenario and continues bit-identically.
+ *
  * Lane failure (timed laneFail): the lane finishes its current person and serves nobody else.
  * Its queue is reassigned in arrival order, each person to the open lane of the same element with
  * the lowest walk time + expected wait (or any element of the same stage set if all are failed),
  * keeping their wait clock running.
  */
 
-import type { Distribution, Scenario, Venue } from "@bottleneck/schema";
-import { AGENT_STATE_COUNT, AgentState as AgentStateEnum, AgentStore, Mode as ModeEnum, Stage as StageEnum } from "./agents.ts";
-import { PiecewiseLinearCurve, resolveArrivalPoints, type CurvePoint } from "./arrivals.ts";
+import type {
+  BagPolicy,
+  Distribution,
+  ElementReport,
+  LanePeriod,
+  LaneReport,
+  RecordedMetrics,
+  ResolvedParameters,
+  Scenario,
+  Venue,
+  WaitStats,
+} from "@bottleneck/schema";
+import { AGENT_ARRAYS, AGENT_STATE_COUNT, AgentState as AgentStateEnum, AgentStore, Mode as ModeEnum, Stage as StageEnum } from "./agents.ts";
+import { PiecewiseLinearCurve, resolveArrivalPoints } from "./arrivals.ts";
 import { DensityGrid } from "./density.ts";
 import { exp } from "./detmath.ts";
 import { sampleCategorical } from "./distributions.ts";
 import type { FlowField } from "./flowField.ts";
 import { Float64Hasher } from "./hash.ts";
-import { EventKind as EventKindEnum, LaneBank, percentileNearestRank, type LaneMetrics } from "./lanes.ts";
+import { EventKind as EventKindEnum, LaneBank, percentileNearestRank, type LaneBankState } from "./lanes.ts";
 import { RandomStream as RandomStreamEnum, toSeed, uniform } from "./rng.ts";
-import { makeSampler, type Sampler } from "./sampling.ts";
+import { SERVICE_TIME_PRESETS, makeSampler, type Sampler } from "./sampling.ts";
 import { Simulation, TICK_SECONDS as TICK, type EventHandler } from "./simulation.ts";
 import { buildVenueModel, type LaneElement, type LaneGeometry, type VenueModel } from "./venueModel.ts";
 
@@ -71,7 +89,10 @@ export function snapshotLength(agentCount: number): number {
 // Parameters
 // ---------------------------------------------------------------------------------------------
 
-/** Engine-side defaults that the schema does not (yet) let a scenario set. All are assumptions. */
+/**
+ * Built-in defaults, all assumptions. A scenario's `parameters` override the first group (see
+ * ScenarioParameters in /schema/scenario.schema.json); the rest are engine settings.
+ */
 export const RUN_DEFAULTS = {
   freeWalkingSpeed: { kind: "truncatedNormal", mean: 1.3, sd: 0.25, min: 0.5, max: 2.2 },
   nearestLaneShare: 0.3,
@@ -84,7 +105,9 @@ export const RUN_DEFAULTS = {
   slotSpacing: 0.6,
   /** A queued person jockeys only to a lane with at least this many fewer people. */
   jockeyThreshold: 3,
-  manualServiceTime: { kind: "uniform", min: 20, max: 40 },
+  manualLaneServiceTime: { kind: "uniform", min: 20, max: 40 } as Distribution,
+  /** Relative frequency of groups of 1, 2, 3, 4, 5 people (review E3). */
+  groupSizes: [0.3, 0.4, 0.15, 0.1, 0.05],
   densitySigma: 0.7,
   /** Deadlock watchdog: stop if nothing changes for this many simulated minutes. */
   watchdogMinutes: 10,
@@ -94,43 +117,24 @@ export const RUN_DEFAULTS = {
   throughputBin: 60,
   /** "Share inside by T": T is this many seconds before a fixed start (open door: after opening). */
   shareInsideLead: 600,
+  /** Element utilisation is judged over windows of this many throughput bins (E1). */
+  utilisationWindowBins: 5,
+  /** "The crunch is over" once the element's windowed utilisation falls below this (E1). */
+  reliefUtilisation: 0.85,
 } as const;
 
-export interface ResolvedParameters {
-  seed: number;
-  attendance: number;
-  timeOffset: number;
-  horizon: number;
-  gatesOpen: number;
-  eventStart: number | null;
-  freeWalkingSpeed: Distribution;
-  nearestLaneShare: number;
-  speedDensity: { gamma: number; rhoMax: number };
-  decisionDistance: number;
-  logitScale: number;
-  slotSpacing: number;
-  jockeyThreshold: number;
-  manualServiceTime: Distribution;
-  densitySigma: number;
-  watchdogMinutes: number;
-  queueSampleInterval: number;
-  throughputBin: number;
-  shareInsideAt: number;
-  arrivalCurve: CurvePoint[];
-  elements: {
-    id: string;
-    kind: "screening" | "gate";
-    laneCount: number;
-    queueLength: number;
-    serviceTime: Distribution;
-    scanFailureRate: number;
-    retryTime: Distribution | null;
-  }[];
-}
+/** Screening service times per bag policy (review E4; assumed values, see SERVICE_TIME_PRESETS). */
+export const BAG_POLICY_SERVICE_TIME: Record<BagPolicy, Distribution> = {
+  none: SERVICE_TIME_PRESETS.screeningNone,
+  clearBag: SERVICE_TIME_PRESETS.screeningClearBag,
+  fullSearch: SERVICE_TIME_PRESETS.screeningFullSearch,
+};
+
+export type { ResolvedParameters };
 
 export interface RunOptions {
-  /** Overrides RUN_DEFAULTS for this run (tests, experiments). */
-  defaults?: Partial<{ decisionDistance: number; logitScale: number; slotSpacing: number; jockeyThreshold: number; watchdogMinutes: number }>;
+  /** Replaces RUN_DEFAULTS for this run (tests, experiments); the scenario's own parameters still win. */
+  defaults?: Partial<{ decisionDistance: number; logitScale: number; slotSpacing: number; jockeyThreshold: number; watchdogMinutes: number; groupSizes: number[] }>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -173,40 +177,10 @@ export interface LiveDensity {
   readonly originY: number;
 }
 
-export interface LaneReport {
-  laneId: number;
-  elementId: string;
-  elementKind: "screening" | "gate";
-  laneIndex: number;
-  manual: boolean;
-  /** From lanes.ts; failedTime excludes the time before the gates opened. */
-  metrics: LaneMetrics;
-  /** People served per throughputBin seconds, bins from engine time 0. */
-  throughput: number[];
-  /** Queue length (excluding the one in service) every queueSampleInterval seconds from engine time 1 interval. */
-  queueLength: number[];
-}
+export type { LaneReport };
 
-export interface RunMetrics {
-  agentCount: number;
-  drained: boolean;
-  deadlock: boolean;
-  /** Scenario time the metrics were taken at. */
-  time: number;
-  countsByState: number[];
-  /** Agents that could not reach any lane or destination (TurnedAway). */
-  unreachable: number;
-  lanes: LaneReport[];
-  /** The 60-minute window (scenario time, 1-minute steps) with the most arrivals. */
-  peakHour: { start: number; end: number; arrivals: number; p95Wait: number };
-  /** Mean and nearest-rank p95 of every arrived agent's total wait (all stages), s. */
-  meanWait: number;
-  p95Wait: number;
-  shareInside: { time: number; share: number };
-  /** Fixed-start events: people whose gate service starts after the event start (or never). */
-  stillOutsideAtStart: number | null;
-  /** Time-aggregated density (people/m²) on the live density grid. */
-  density: { cols: number; rows: number; cellSize: number; mean: number[]; max: number[] };
+/** Everything a run reports (spec 4.5): the stored metrics (RecordedMetrics, /schema/run.schema.json) plus the resolved parameters. */
+export interface RunMetrics extends RecordedMetrics {
   parameters: ResolvedParameters;
 }
 
@@ -233,6 +207,8 @@ export interface Run {
   laneStates(): LaneLive[];
   metrics(): RunMetrics;
   metricsHash(): string;
+  /** The complete dynamic state, for restoreRun() (review C1: replay seeks restore the nearest checkpoint). */
+  saveCheckpoint(): RunCheckpoint;
   /** Internal state for tests and tools; not a stable API. */
   readonly debug: RunDebug;
 }
@@ -261,6 +237,8 @@ const ARRIVE_AT_LINE = 0.75;
 const SLOT_REACHED = 1e-6;
 const PATH_OFFSET = 0.15;
 const SPAWN_RADIUS = 1;
+/** Demand (people choosing an element) is counted per minute; peak demand is the best 60 of them. */
+const DEMAND_BIN = 60;
 
 type TimedAction = () => void;
 
@@ -301,6 +279,18 @@ class PedestrianRun implements Run {
   private isDone = false;
   private isDrained = false;
   private isDeadlock = false;
+  /** Agents Walking, Queuing or InService (plus some that finished this tick), in id order. */
+  private readonly active: Int32Array;
+  private activeCount = 0;
+  private activeStale = false;
+  private readonly arrived: number[] = [];
+  /** Per leader and stage (Entry, Gates): the lane the group chose, and the stage set it was chosen in. */
+  private readonly groupLane: Int32Array;
+  private readonly groupLaneSet: Int32Array;
+  /** Per element: people choosing it per DEMAND_BIN seconds (first commitment at that stage). */
+  private readonly demand: number[][];
+  /** Per lane, aligned with the bank's waits(): wait from physically joining the line to service start. */
+  private readonly queueWaits: number[][];
   // Settings
   private readonly decisionDistance: number;
   private readonly logitScale: number;
@@ -312,11 +302,15 @@ class PedestrianRun implements Run {
   private readonly logitLanes: number[] = [];
 
   constructor(venue: Venue, scenario: Scenario, options: RunOptions = {}) {
-    const d = { ...RUN_DEFAULTS, ...(options.defaults ?? {}) };
+    // Precedence: the scenario's parameters, then options.defaults, then RUN_DEFAULTS.
+    const d = { ...RUN_DEFAULTS, ...(options.defaults ?? {}), ...definedOnly(scenario.parameters ?? {}) };
     const params = scenario.parameters ?? {};
     const freeSpeed = params.freeWalkingSpeed ?? RUN_DEFAULTS.freeWalkingSpeed;
     this.nearestShare = params.nearestLaneShare ?? RUN_DEFAULTS.nearestLaneShare;
     const speedDensity = venue.parameters?.speedDensity ?? RUN_DEFAULTS.speedDensity;
+    const manualLaneServiceTime = d.manualLaneServiceTime;
+    const groupSizes = [...d.groupSizes];
+    const bagPolicy = params.bagPolicy ?? null;
     this.decisionDistance = d.decisionDistance;
     this.logitScale = d.logitScale;
     this.jockeyThreshold = d.jockeyThreshold;
@@ -324,7 +318,11 @@ class PedestrianRun implements Run {
     this.sampleTicks = Math.round(RUN_DEFAULTS.queueSampleInterval / TICK_SECONDS);
     this.seed = toSeed(scenario.seed);
 
-    this.model = buildVenueModel(venue, scenario, { slotSpacing: d.slotSpacing, manualServiceTime: RUN_DEFAULTS.manualServiceTime });
+    this.model = buildVenueModel(venue, scenario, {
+      slotSpacing: d.slotSpacing,
+      manualServiceTime: manualLaneServiceTime,
+      screeningServiceTime: bagPolicy === null ? null : BAG_POLICY_SERVICE_TIME[bagPolicy],
+    });
     const model = this.model;
 
     // --- Arrivals: every agent is created now, with its personal draws (D-003). ---
@@ -341,11 +339,20 @@ class PedestrianRun implements Run {
     const speedSampler = makeSampler(freeSpeed, this.seed, RandomStream.FreeSpeed);
     const sourceIndex: Record<string, number> = {};
     venue.sources.forEach((s, i) => (sourceIndex[s.id] = i));
+    // Groups (review E3): consecutive ids, within the attendance and within each bus burst.
+    formGroups(agents.group, 0, attendance, groupSizes, this.seed);
     let earliest = Infinity;
     for (let i = 0; i < n; i++) {
+      const leader = agents.group[i] as number;
       if (i < attendance) {
-        agents.arrivalTime[i] = curve.sample(uniform(this.seed, RandomStream.ArrivalTime, i, 0));
-        agents.source[i] = model.sourceShares.length > 0 ? sampleCategorical(uniform(this.seed, RandomStream.SourceChoice, i, 0), model.sourceShares) : -1;
+        if (leader === i) {
+          agents.arrivalTime[i] = curve.sample(uniform(this.seed, RandomStream.ArrivalTime, i, 0));
+          agents.source[i] = model.sourceShares.length > 0 ? sampleCategorical(uniform(this.seed, RandomStream.SourceChoice, i, 0), model.sourceShares) : -1;
+        } else {
+          // A group arrives together, at its leader's source.
+          agents.arrivalTime[i] = agents.arrivalTime[leader] as number;
+          agents.source[i] = agents.source[leader] as number;
+        }
       }
       agents.freeSpeed[i] = speedSampler(i, 0);
       agents.offsetX[i] = (2 * uniform(this.seed, RandomStream.PathOffset, i, 0) - 1) * PATH_OFFSET;
@@ -355,11 +362,22 @@ class PedestrianRun implements Run {
     for (const b of bursts) {
       if (b.kind !== "busBurst") continue;
       const src = sourceIndex[b.sourceId] ?? -1;
-      for (let k = 0; k < Math.max(0, Math.floor(b.count)); k++, next++) {
+      const count = Math.max(0, Math.floor(b.count));
+      formGroups(agents.group, next, next + count, groupSizes, this.seed);
+      for (let k = 0; k < count; k++, next++) {
         agents.arrivalTime[next] = b.at;
         agents.source[next] = src;
       }
     }
+    // A group walks at the pace of its slowest member.
+    for (let i = n - 1; i >= 0; i--) {
+      const leader = agents.group[i] as number;
+      if ((agents.freeSpeed[i] as number) < (agents.freeSpeed[leader] as number)) agents.freeSpeed[leader] = agents.freeSpeed[i] as number;
+    }
+    for (let i = 0; i < n; i++) agents.freeSpeed[i] = agents.freeSpeed[agents.group[i] as number] as number;
+    this.active = new Int32Array(n);
+    this.groupLane = new Int32Array(2 * n).fill(-1);
+    this.groupLaneSet = new Int32Array(2 * n).fill(-1);
     for (let i = 0; i < n; i++) if ((agents.arrivalTime[i] as number) < earliest) earliest = agents.arrivalTime[i] as number;
     for (const e of scenario.timedEvents ?? []) if (e.at < earliest) earliest = e.at;
 
@@ -370,7 +388,7 @@ class PedestrianRun implements Run {
     this.horizon = tl.horizon - this.timeOffset;
     this.gatesOpenAt = tl.gatesOpen - this.timeOffset;
     this.eventStartAt = tl.eventStart === null ? null : tl.eventStart - this.timeOffset;
-    const shareInsideAt = tl.eventStart === null ? tl.gatesOpen + 3600 : tl.eventStart - RUN_DEFAULTS.shareInsideLead;
+    const shareInsideAt = params.shareInsideAt ?? (tl.eventStart === null ? tl.gatesOpen + 3600 : tl.eventStart - RUN_DEFAULTS.shareInsideLead);
 
     // Arrival order: by (time, id).
     const order = Array.from({ length: n }, (_, i) => i);
@@ -400,7 +418,7 @@ class PedestrianRun implements Run {
     ]);
     this.elementSamplers = model.elements.map((el) => makeSampler(el.serviceTime, this.seed, el.kind === "screening" ? RandomStream.ScreeningTime : RandomStream.ScanTime));
     this.retrySamplers = model.elements.map((el) => (el.retryTime ? makeSampler(el.retryTime, this.seed, RandomStream.ScanRetryTime) : null));
-    this.manualSampler = makeSampler(RUN_DEFAULTS.manualServiceTime, this.seed, RandomStream.ManualServiceTime);
+    this.manualSampler = makeSampler(manualLaneServiceTime, this.seed, RandomStream.ManualServiceTime);
     this.bank = new LaneBank(
       this.sim,
       {
@@ -410,10 +428,13 @@ class PedestrianRun implements Run {
         onLeave: (agent, lane, time, served) => this.onLeave(agent, lane, time, served),
       },
       model.lanes.length,
+      { binSeconds: RUN_DEFAULTS.throughputBin, splitAt: this.eventStartAt ?? Infinity },
     );
     this.laneFailed = new Uint8Array(model.lanes.length);
     this.queueSeries = model.lanes.map(() => []);
     this.throughput = model.lanes.map(() => []);
+    this.queueWaits = model.lanes.map(() => []);
+    this.demand = model.elements.map(() => []);
 
     // Gates closed until gatesOpen: lanes take commitments but serve nobody.
     this.gatesAreOpen = this.gatesOpenAt <= 0;
@@ -469,12 +490,14 @@ class PedestrianRun implements Run {
       logitScale: d.logitScale,
       slotSpacing: d.slotSpacing,
       jockeyThreshold: d.jockeyThreshold,
-      manualServiceTime: RUN_DEFAULTS.manualServiceTime,
+      manualLaneServiceTime,
       densitySigma: RUN_DEFAULTS.densitySigma,
       watchdogMinutes: d.watchdogMinutes,
       queueSampleInterval: RUN_DEFAULTS.queueSampleInterval,
       throughputBin: RUN_DEFAULTS.throughputBin,
       shareInsideAt,
+      groupSizes,
+      bagPolicy,
       arrivalCurve: curve.points.map((p) => ({ t: p.t, weight: p.weight })),
       elements: model.elements.map((el) => ({
         id: el.id,
@@ -484,6 +507,7 @@ class PedestrianRun implements Run {
         serviceTime: el.serviceTime,
         scanFailureRate: el.scanFailureRate,
         retryTime: el.retryTime,
+        meanBusyTime: el.meanService,
       })),
     };
     this.debug = { model, agents, bank: this.bank, laneFailed: this.laneFailed };
@@ -597,6 +621,30 @@ class PedestrianRun implements Run {
     this.counts[s] = (this.counts[s] as number) + 1;
     this.agents.state[i] = s;
     this.lastProgress = this.sim.now;
+    if (s === AgentState.Inside || s === AgentState.TurnedAway) this.activeStale = true;
+  }
+
+  /**
+   * Rebuilds the active list (agents Walking, Queuing or InService, in id order): drops agents that
+   * have finished and merges in the ids in `added`. The tick systems iterate this list instead of
+   * every agent; it is always in id order, so the results are the same as a loop over all agents.
+   */
+  private refreshActive(added: number[]): void {
+    if (added.length === 0 && !this.activeStale) return;
+    const a = this.agents;
+    added.sort((x, y) => x - y);
+    const old = this.active.slice(0, this.activeCount);
+    let n = 0;
+    let j = 0;
+    for (let k = 0; k <= old.length; k++) {
+      const i = k < old.length ? (old[k] as number) : Infinity;
+      while (j < added.length && (added[j] as number) < i) this.active[n++] = added[j++] as number;
+      if (k === old.length) break;
+      const st = a.state[i] as number;
+      if (st === AgentState.Walking || st === AgentState.Queuing || st === AgentState.InService) this.active[n++] = i;
+    }
+    this.activeCount = n;
+    this.activeStale = false;
   }
 
   private commit(i: number, lane: number): void {
@@ -604,7 +652,18 @@ class PedestrianRun implements Run {
     a.lane[i] = lane;
     a.mode[i] = Mode.ToLine;
     a.ready[i] = 0;
+    a.lineJoin[i] = NaN;
     if (Number.isNaN(a.waitStart[i] as number)) a.waitStart[i] = this.sim.now;
+    const geom = this.model.lanes[lane] as LaneGeometry;
+    const stage = (a.stage[i] as number) + 1;
+    if (!geom.manual && a.demandCounted[i] !== stage) {
+      // First commitment at this stage: one person of demand for the element.
+      a.demandCounted[i] = stage;
+      const bin = Math.floor(this.sim.now / DEMAND_BIN);
+      const series = this.demand[geom.element] as number[];
+      while (series.length <= bin) series.push(0);
+      series[bin] = (series[bin] as number) + 1;
+    }
     this.setState(i, AgentState.Queuing);
     this.bank.commit(lane, i, false);
     a.queuePos[i] = this.bank.queueLength(lane) - 1;
@@ -631,6 +690,9 @@ class PedestrianRun implements Run {
     const a = this.agents;
     a.totalWait[agent] = (a.totalWait[agent] as number) + (time - (a.waitStart[agent] as number));
     a.waitStart[agent] = NaN;
+    const join = a.lineJoin[agent] as number;
+    (this.queueWaits[lane] as number[]).push(Number.isNaN(join) ? 0 : time - join);
+    a.lineJoin[agent] = NaN;
     const geom = this.model.lanes[lane] as LaneGeometry;
     if ((this.model.elements[geom.element] as LaneElement).kind === "gate" && Number.isNaN(a.gateStart[agent] as number)) a.gateStart[agent] = time;
     a.mode[agent] = Mode.Service;
@@ -684,6 +746,8 @@ class PedestrianRun implements Run {
     const now = this.sim.now;
     const a = this.agents;
     const m = this.model;
+    const added = this.arrived;
+    added.length = 0;
     while (this.nextArrival < this.order.length) {
       const i = this.order[this.nextArrival] as number;
       if ((a.arrivalTime[i] as number) > now) break;
@@ -712,7 +776,9 @@ class PedestrianRun implements Run {
         continue;
       }
       this.setState(i, AgentState.Walking);
+      added.push(i);
     }
+    this.refreshActive(added);
   }
 
   private turnAway(i: number): void {
@@ -725,7 +791,8 @@ class PedestrianRun implements Run {
   private assignLanes(): void {
     const a = this.agents;
     const grid = this.model.grid;
-    for (let i = 0; i < this.agentCount; i++) {
+    for (let k = 0; k < this.activeCount; k++) {
+      const i = this.active[k] as number;
       const mode = a.mode[i] as number;
       const state = a.state[i] as number;
       if (state === AgentState.Walking && mode === Mode.Approach) {
@@ -756,6 +823,13 @@ class PedestrianRun implements Run {
     const cell = m.grid.cellAt(a.x[i] as number, a.y[i] as number);
     const v0 = a.freeSpeed[i] as number;
     const k = (a.stage[i] as number) * 2;
+    // A group chooses together: follow the lane a member already chose at this stage, if usable.
+    const slot = 2 * (a.group[i] as number) + Math.min(1, a.stage[i] as number);
+    const shared = this.groupLane[slot] as number;
+    if (shared >= 0 && this.groupLaneSet[slot] === a.stageSet[i] && this.laneFailed[shared] === 0 && (m.lanes[shared] as LaneGeometry).field.distanceAt(cell) !== Infinity) {
+      this.commit(i, shared);
+      return;
+    }
     const lanes = this.logitLanes;
     const costs = this.logitWeights;
     lanes.length = 0;
@@ -790,6 +864,8 @@ class PedestrianRun implements Run {
       for (let j = 0; j < costs.length; j++) costs[j] = exp(-((costs[j] as number) - minCost) / this.logitScale);
       choice = lanes[sampleCategorical(uniform(this.seed, RandomStream.LaneChoice, i, k + 1), costs)] as number;
     }
+    this.groupLane[slot] = choice;
+    this.groupLaneSet[slot] = a.stageSet[i] as number;
     this.commit(i, choice);
   }
 
@@ -876,7 +952,8 @@ class PedestrianRun implements Run {
     const grid = m.grid;
     const dens = this.densityGrid;
     let walkedSomewhere = false;
-    for (let i = 0; i < this.agentCount; i++) {
+    for (let k = 0; k < this.activeCount; k++) {
+      const i = this.active[k] as number;
       const state = a.state[i] as number;
       if (state !== AgentState.Walking && state !== AgentState.Queuing && state !== AgentState.InService) continue;
       const x0 = a.x[i] as number;
@@ -902,13 +979,18 @@ class PedestrianRun implements Run {
           else this.still(i);
           if (geom.field.distanceAt(grid.cellAt(a.x[i] as number, a.y[i] as number)) <= ARRIVE_AT_LINE) {
             a.mode[i] = Mode.InLine;
+            if (Number.isNaN(a.lineJoin[i] as number)) a.lineJoin[i] = this.sim.now;
             this.lastProgress = this.sim.now;
           }
         } else {
           // Spilled back: stand in the walkable area behind the queue area, roughly in rows.
           const stopAt = ARRIVE_AT_LINE + this.parameters.slotSpacing * (1 + Math.floor((pos - geom.capacity) / geom.perRow));
           if (dist > stopAt) this.follow(i, geom.field, v0 * factor);
-          else this.still(i);
+          else {
+            this.still(i);
+            // Standing in the spill-back behind the queue area: physically in the line.
+            if (Number.isNaN(a.lineJoin[i] as number)) a.lineJoin[i] = this.sim.now;
+          }
         }
       } else if (mode === Mode.InLine) {
         const lane = a.lane[i] as number;
@@ -1004,7 +1086,8 @@ class PedestrianRun implements Run {
     const a = this.agents;
     const g = this.densityGrid;
     g.clear();
-    for (let i = 0; i < this.agentCount; i++) {
+    for (let k = 0; k < this.activeCount; k++) {
+      const i = this.active[k] as number;
       const s = a.state[i] as number;
       if (s === AgentState.Walking || s === AgentState.Queuing || s === AgentState.InService) g.add(a.x[i] as number, a.y[i] as number);
     }
@@ -1013,8 +1096,12 @@ class PedestrianRun implements Run {
 
   /** 5. Metric sampling. */
   private sample(): void {
-    const d = this.densityGrid.density;
-    for (let c = 0; c < d.length; c++) {
+    // Only active cells can be non-zero; adding 0 elsewhere would change nothing.
+    const g = this.densityGrid;
+    const d = g.density;
+    const active = g.active;
+    for (let k = 0; k < g.activeCount; k++) {
+      const c = active[k] as number;
       const v = d[c] as number;
       this.densitySum[c] = (this.densitySum[c] as number) + v * TICK_SECONDS;
       if (v > (this.densityMax[c] as number)) this.densityMax[c] = v;
@@ -1037,21 +1124,42 @@ class PedestrianRun implements Run {
   metrics(): RunMetrics {
     const a = this.agents;
     const now = this.sim.now;
+    const split = this.eventStartAt;
     const lanes: LaneReport[] = this.model.lanes.map((l) => {
       const el = this.model.elements[l.element] as LaneElement;
       const raw = this.bank.metrics(l.id);
       const preOpen = Math.min(Math.max(0, this.gatesOpenAt - raw.windowStart), raw.windowEnd - raw.windowStart);
+      const waits = this.bank.waits(l.id);
+      const starts = this.bank.starts(l.id);
+      const queueWaits = this.queueWaits[l.id] as number[];
+      const period = (side: "before" | "after"): LanePeriod => {
+        const w: number[] = [];
+        const q: number[] = [];
+        for (let k = 0; k < waits.length; k++) {
+          if (((starts[k] as number) < (split as number)) === (side === "before")) {
+            w.push(waits[k] as number);
+            q.push(queueWaits[k] as number);
+          }
+        }
+        const ws = waitStats(w);
+        return { started: ws.count, meanWait: ws.mean, p95Wait: ws.p95, maxWait: ws.max, queueWait: waitStats(q), utilisation: this.bank.periodUtilisation(l.id, side) };
+      };
       return {
         laneId: l.id,
         elementId: el.id,
         elementKind: el.kind,
         laneIndex: l.laneIndex,
         manual: l.manual,
+        laneType: l.manual ? "manual" : "regular",
         metrics: { ...raw, failedTime: Math.max(0, raw.failedTime - preOpen) },
+        queueWait: waitStats(queueWaits),
+        beforeStart: split === null ? null : period("before"),
+        afterStart: split === null ? null : period("after"),
         throughput: [...(this.throughput[l.id] as number[])],
         queueLength: [...(this.queueSeries[l.id] as number[])],
       };
     });
+    const elements = this.model.elements.map((el) => this.elementReport(el));
 
     // Agents that have arrived, in arrival order.
     const arrived: number[] = [];
@@ -1091,10 +1199,14 @@ class PedestrianRun implements Run {
     const shareAt = this.parameters.shareInsideAt - this.timeOffset;
     let insideBy = 0;
     let outside = 0;
+    let outsideArrived = 0;
     for (let i = 0; i < this.agentCount; i++) {
       if ((a.insideTime[i] as number) <= shareAt) insideBy++;
       const gs = a.gateStart[i] as number;
-      if (this.eventStartAt !== null && (Number.isNaN(gs) || gs > this.eventStartAt)) outside++;
+      if (this.eventStartAt !== null && (Number.isNaN(gs) || gs > this.eventStartAt)) {
+        outside++;
+        if ((a.arrivalTime[i] as number) <= this.eventStartAt) outsideArrived++;
+      }
     }
 
     const dt = this.densityTime > 0 ? this.densityTime : 1;
@@ -1106,6 +1218,7 @@ class PedestrianRun implements Run {
       countsByState: this.countsByState(),
       unreachable: this.unreachable,
       lanes,
+      elements,
       peakHour: {
         start: peakStart + this.timeOffset,
         end: peakStart + 3600 + this.timeOffset,
@@ -1116,6 +1229,8 @@ class PedestrianRun implements Run {
       p95Wait: percentileNearestRank(allWaits, 0.95),
       shareInside: { time: this.parameters.shareInsideAt, share: this.agentCount > 0 ? insideBy / this.agentCount : 0 },
       stillOutsideAtStart: this.eventStartAt === null ? null : outside,
+      arrivedButOutsideAtStart: this.eventStartAt === null ? null : outsideArrived,
+      notYetArrivedAtStart: this.eventStartAt === null ? null : outside - outsideArrived,
       density: {
         cols: this.densityGrid.cols,
         rows: this.densityGrid.rows,
@@ -1128,20 +1243,299 @@ class PedestrianRun implements Run {
   }
 
   /**
+   * Capacity against demand for one element (review E1). Capacity = regular lanes × 3600 / mean busy
+   * time per person. Demand = people choosing the element per minute; its peak is the busiest
+   * 60 minutes. Utilisation per throughput bin = busy / open time of the regular lanes; the peak and
+   * "below 85%" use windows of utilisationWindowBins bins, so a single quiet minute does not count.
+   */
+  private elementReport(el: LaneElement): ElementReport {
+    const bin = RUN_DEFAULTS.throughputBin;
+    const busy: number[] = [];
+    const open: number[] = [];
+    for (const l of el.laneIds) {
+      const b = this.bank.bins(l);
+      for (let k = 0; k < b.busy.length; k++) busy[k] = (busy[k] ?? 0) + (b.busy[k] as number);
+      for (let k = 0; k < b.open.length; k++) open[k] = (open[k] ?? 0) + (b.open[k] as number);
+    }
+    const bins = Math.max(busy.length, open.length);
+    const utilisation: number[] = [];
+    for (let k = 0; k < bins; k++) utilisation.push((open[k] ?? 0) > 0 ? (busy[k] ?? 0) / (open[k] as number) : 0);
+    const w = RUN_DEFAULTS.utilisationWindowBins;
+    const windowed: number[] = [];
+    for (let k = 0; k < bins; k++) {
+      let b = 0;
+      let o = 0;
+      for (let j = Math.max(0, k - w + 1); j <= k; j++) {
+        b += busy[j] ?? 0;
+        o += open[j] ?? 0;
+      }
+      windowed.push(o > 0 ? b / o : 0);
+    }
+    let peakK = -1;
+    let peak = 0;
+    for (let k = 0; k < bins; k++) {
+      if ((windowed[k] as number) > peak) {
+        peak = windowed[k] as number;
+        peakK = k;
+      }
+    }
+    let below = -1;
+    if (peak >= RUN_DEFAULTS.reliefUtilisation) {
+      for (let k = peakK + 1; k < bins; k++) {
+        if ((windowed[k] as number) < RUN_DEFAULTS.reliefUtilisation) {
+          below = k;
+          break;
+        }
+      }
+    }
+    // Peak demand: the busiest 60 one-minute bins (earliest wins).
+    const demand = this.demand[el.index] as number[];
+    const span = Math.round(3600 / DEMAND_BIN);
+    let peakDemand = 0;
+    let peakDemandBin = -1;
+    let sum = 0;
+    for (let k = 0; k < demand.length; k++) {
+      sum += demand[k] as number;
+      if (k >= span) sum -= demand[k - span] as number;
+      if (sum > peakDemand) {
+        peakDemand = sum;
+        peakDemandBin = Math.max(0, k - span + 1);
+      }
+    }
+    const capacity = el.meanService > 0 ? (el.laneCount * 3600) / el.meanService : 0;
+    return {
+      elementId: el.id,
+      kind: el.kind,
+      laneCount: el.laneCount,
+      meanBusyTime: el.meanService,
+      capacityPerHour: capacity,
+      peakDemandPerHour: peakDemand,
+      peakDemandStart: peakDemandBin < 0 ? null : peakDemandBin * DEMAND_BIN + this.timeOffset,
+      utilisation,
+      peakUtilisation: peak,
+      peakUtilisationAt: peakK < 0 ? null : (peakK + 1) * bin + this.timeOffset,
+      below85At: below < 0 ? null : (below + 1) * bin + this.timeOffset,
+    };
+  }
+
+  /**
    * Hash of the metrics over a fixed order (decision D-006). Booleans are 1/0, null is NaN.
    *   agentCount, drained, deadlock, time, unreachable, countsByState[0..9],
    *   for each lane in id order: laneIndex, manual, then LaneMetrics in the order
    *     arrivals, started, served, windowStart, windowEnd, meanWait, p95Wait, maxWait, meanQueue,
    *     maxQueue, arrivalRate, utilisation, failedTime, queuedAtWindowEnd, littleLawError,
-   *   then throughput.length and its values, queueLength.length and its values;
+   *   then throughput.length and its values, queueLength.length and its values,
+   *   queueWait (count, mean, p95, max), then beforeStart and afterStart: NaN if null, else
+   *     started, meanWait, p95Wait, maxWait, queueWait (count, mean, p95, max), utilisation;
+   *   for each element in model order: laneCount, meanBusyTime, capacityPerHour,
+   *     peakDemandPerHour, peakDemandStart, utilisation.length and its values, peakUtilisation,
+   *     peakUtilisationAt, below85At;
    *   peakHour start, end, arrivals, p95Wait; meanWait, p95Wait; shareInside time, share;
-   *   stillOutsideAtStart; density cols, rows, cellSize, every mean value, every max value.
+   *   stillOutsideAtStart, arrivedButOutsideAtStart, notYetArrivedAtStart;
+   *   density cols, rows, cellSize, every mean value, every max value.
    * The parameters are not hashed: they are inputs, stored alongside.
    */
   metricsHash(): string {
     return hashMetrics(this.metrics());
   }
+
+  // --- Checkpoints (review C1) ---
+
+  saveCheckpoint(): RunCheckpoint {
+    const sim = this.sim.saveState();
+    const events = sim.events;
+    const agents: Record<string, Float64Array | Int32Array | Uint8Array> = {};
+    for (const name of AGENT_ARRAYS) agents[name] = this.agents[name].slice();
+    return {
+      version: 1,
+      seed: this.seed,
+      agentCount: this.agentCount,
+      laneCount: this.model.lanes.length,
+      time: sim.now,
+      scalars: Float64Array.from([
+        sim.ticks,
+        sim.now,
+        sim.nextSeq,
+        this.nextArrival,
+        this.gatesAreOpen ? 1 : 0,
+        this.pendingActions,
+        this.densityTime,
+        this.lastProgress,
+        this.unreachable,
+        this.isDone ? 1 : 0,
+        this.isDrained ? 1 : 0,
+        this.isDeadlock ? 1 : 0,
+      ]),
+      counts: this.counts.slice(),
+      laneFailed: this.laneFailed.slice(),
+      agents,
+      groupLane: this.groupLane.slice(),
+      groupLaneSet: this.groupLaneSet.slice(),
+      events: {
+        time: Float64Array.from(events, (e) => e.time),
+        kind: Int32Array.from(events, (e) => e.kind),
+        id: Int32Array.from(events, (e) => e.id),
+        seq: Float64Array.from(events, (e) => e.seq),
+        payload: Float64Array.from(events, (e) => e.payload),
+      },
+      lanes: this.bank.save(),
+      queueSeries: packSeries(this.queueSeries),
+      throughput: packSeries(this.throughput),
+      queueWaits: packSeries(this.queueWaits),
+      demand: packSeries(this.demand),
+      densitySum: this.densitySum.slice(),
+      densityMax: this.densityMax.slice(),
+    };
+  }
+
+  /** Overwrites this freshly created run's state with a checkpoint taken from a run of the same venue and scenario. */
+  restore(cp: RunCheckpoint): void {
+    if (cp.version !== 1 || cp.seed !== this.seed || cp.agentCount !== this.agentCount || cp.laneCount !== this.model.lanes.length) {
+      throw new RangeError("The checkpoint was taken from a different venue or scenario");
+    }
+    const sc = cp.scalars;
+    const events = [];
+    for (let k = 0; k < cp.events.time.length; k++) {
+      events.push({ time: cp.events.time[k] as number, kind: cp.events.kind[k] as number, id: cp.events.id[k] as number, seq: cp.events.seq[k] as number, payload: cp.events.payload[k] as number });
+    }
+    this.sim.restoreState({ ticks: sc[0] as number, now: sc[1] as number, nextSeq: sc[2] as number, events });
+    this.nextArrival = sc[3] as number;
+    this.gatesAreOpen = sc[4] === 1;
+    this.pendingActions = sc[5] as number;
+    this.densityTime = sc[6] as number;
+    this.lastProgress = sc[7] as number;
+    this.unreachable = sc[8] as number;
+    this.isDone = sc[9] === 1;
+    this.isDrained = sc[10] === 1;
+    this.isDeadlock = sc[11] === 1;
+    this.counts.set(cp.counts);
+    this.laneFailed.set(cp.laneFailed);
+    for (const name of AGENT_ARRAYS) {
+      const src = cp.agents[name];
+      if (src === undefined) throw new RangeError(`The checkpoint has no agent array "${name}"`);
+      (this.agents[name] as Float64Array).set(src as Float64Array);
+    }
+    this.groupLane.set(cp.groupLane);
+    this.groupLaneSet.set(cp.groupLaneSet);
+    this.bank.restore(cp.lanes);
+    unpackSeries(cp.queueSeries, this.queueSeries);
+    unpackSeries(cp.throughput, this.throughput);
+    unpackSeries(cp.queueWaits, this.queueWaits);
+    unpackSeries(cp.demand, this.demand);
+    this.densitySum.set(cp.densitySum);
+    this.densityMax.set(cp.densityMax);
+    this.activeCount = 0;
+    this.activeStale = false;
+    const added: number[] = [];
+    for (let i = 0; i < this.agentCount; i++) {
+      const st = this.agents.state[i] as number;
+      if (st === AgentState.Walking || st === AgentState.Queuing || st === AgentState.InService) added.push(i);
+    }
+    this.refreshActive(added);
+    // The density grid is a pure function of the positions at the end of the last tick.
+    this.updateDensity();
+  }
 }
+
+/**
+ * A run's complete dynamic state at a tick boundary, as a plain object of typed arrays (cheap to
+ * structured-clone or transfer from a Web Worker). Everything static (grid, flow fields, personal
+ * draws) is rebuilt from the venue and scenario by restoreRun().
+ */
+export interface RunCheckpoint {
+  readonly version: 1;
+  readonly seed: number;
+  readonly agentCount: number;
+  readonly laneCount: number;
+  /** Engine time of the checkpoint (seconds from the start of the run). */
+  readonly time: number;
+  /** ticks, now, nextSeq, nextArrival, gatesAreOpen, pendingActions, densityTime, lastProgress, unreachable, done, drained, deadlock. */
+  readonly scalars: Float64Array;
+  readonly counts: Int32Array;
+  readonly laneFailed: Uint8Array;
+  /** Every AgentStore array by name (AGENT_ARRAYS). */
+  readonly agents: Readonly<Record<string, Float64Array | Int32Array | Uint8Array>>;
+  readonly groupLane: Int32Array;
+  readonly groupLaneSet: Int32Array;
+  /** The event queue in heap order. */
+  readonly events: { time: Float64Array; kind: Int32Array; id: Int32Array; seq: Float64Array; payload: Float64Array };
+  readonly lanes: LaneBankState;
+  readonly queueSeries: PackedSeries;
+  readonly throughput: PackedSeries;
+  readonly queueWaits: PackedSeries;
+  readonly demand: PackedSeries;
+  readonly densitySum: Float64Array;
+  readonly densityMax: Float64Array;
+}
+
+/** Lists of numbers concatenated: list k is data[offsets[k] .. offsets[k + 1]). */
+export interface PackedSeries {
+  readonly data: Float64Array;
+  readonly offsets: Int32Array;
+}
+
+function packSeries(lists: readonly (readonly number[])[]): PackedSeries {
+  const offsets = new Int32Array(lists.length + 1);
+  for (let k = 0; k < lists.length; k++) offsets[k + 1] = (offsets[k] as number) + (lists[k] as readonly number[]).length;
+  const data = new Float64Array(offsets[lists.length] as number);
+  for (let k = 0; k < lists.length; k++) data.set(lists[k] as readonly number[], offsets[k] as number);
+  return { data, offsets };
+}
+
+function unpackSeries(p: PackedSeries, into: number[][]): void {
+  if (p.offsets.length !== into.length + 1) throw new RangeError("The checkpoint does not match this run");
+  for (let k = 0; k < into.length; k++) {
+    const list = into[k] as number[];
+    list.length = 0;
+    for (let i = p.offsets[k] as number; i < (p.offsets[k + 1] as number); i++) list.push(p.data[i] as number);
+  }
+}
+
+/** Count, mean, nearest-rank p95 and max of a list of waits. */
+function waitStats(values: readonly number[]): WaitStats {
+  let sum = 0;
+  let max = 0;
+  for (const v of values) {
+    sum += v;
+    if (v > max) max = v;
+  }
+  return { count: values.length, mean: values.length > 0 ? sum / values.length : 0, p95: percentileNearestRank(values, 0.95), max };
+}
+
+/** The entries of an object whose value is not undefined (so they can override defaults in a spread). */
+function definedOnly<T extends object>(o: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const key of Object.keys(o) as (keyof T)[]) if (o[key] !== undefined) out[key] = o[key];
+  return out;
+}
+
+/**
+ * Splits agents [from, to) into groups of consecutive ids. Each group's size is drawn by its first
+ * member (the leader) from the relative frequencies `sizes` (sizes[k] for k + 1 people), cut short
+ * at `to`. Every member's group[] entry is set to the leader's id.
+ */
+function formGroups(group: Int32Array, from: number, to: number, sizes: readonly number[], seed: number): void {
+  let total = 0;
+  for (const w of sizes) total += w;
+  let i = from;
+  while (i < to) {
+    const size = sizes.length > 1 && total > 0 ? 1 + sampleCategorical(uniform(seed, RandomStream.GroupSize, i, 0), sizes) : 1;
+    const end = Math.min(to, i + size);
+    for (let j = i; j < end; j++) group[j] = i;
+    i = end;
+  }
+}
+
+function hashPeriod(h: Float64Hasher, p: LanePeriod | null): void {
+  if (p === null) {
+    h.add(NaN);
+    return;
+  }
+  h.add(p.started).add(p.meanWait).add(p.p95Wait).add(p.maxWait);
+  h.add(p.queueWait.count).add(p.queueWait.mean).add(p.queueWait.p95).add(p.queueWait.max).add(p.utilisation);
+}
+
+const nullToNaN = (v: number | null): number => (v === null ? NaN : v);
 
 export function hashMetrics(m: RunMetrics): string {
   const h = new Float64Hasher();
@@ -1157,10 +1551,17 @@ export function hashMetrics(m: RunMetrics): string {
     h.add(x.arrivals).add(x.started).add(x.served).add(x.windowStart).add(x.windowEnd).add(x.meanWait).add(x.p95Wait).add(x.maxWait);
     h.add(x.meanQueue).add(x.maxQueue).add(x.arrivalRate).add(x.utilisation).add(x.failedTime).add(x.queuedAtWindowEnd).add(x.littleLawError);
     h.add(l.throughput.length).addAll(l.throughput).add(l.queueLength.length).addAll(l.queueLength);
+    h.add(l.queueWait.count).add(l.queueWait.mean).add(l.queueWait.p95).add(l.queueWait.max);
+    hashPeriod(h, l.beforeStart);
+    hashPeriod(h, l.afterStart);
+  }
+  for (const e of m.elements) {
+    h.add(e.laneCount).add(e.meanBusyTime).add(e.capacityPerHour).add(e.peakDemandPerHour).add(nullToNaN(e.peakDemandStart));
+    h.add(e.utilisation.length).addAll(e.utilisation).add(e.peakUtilisation).add(nullToNaN(e.peakUtilisationAt)).add(nullToNaN(e.below85At));
   }
   h.add(m.peakHour.start).add(m.peakHour.end).add(m.peakHour.arrivals).add(m.peakHour.p95Wait);
   h.add(m.meanWait).add(m.p95Wait).add(m.shareInside.time).add(m.shareInside.share);
-  h.add(m.stillOutsideAtStart === null ? NaN : m.stillOutsideAtStart);
+  h.add(nullToNaN(m.stillOutsideAtStart)).add(nullToNaN(m.arrivedButOutsideAtStart)).add(nullToNaN(m.notYetArrivedAtStart));
   h.add(m.density.cols).add(m.density.rows).add(m.density.cellSize).addAll(m.density.mean).addAll(m.density.max);
   return h.digest();
 }
@@ -1168,4 +1569,14 @@ export function hashMetrics(m: RunMetrics): string {
 /** Creates a pedestrian run of `scenario` on `venue`. All work that does not change over time (grid, flow fields, personal draws) happens here. */
 export function createRun(venue: Venue, scenario: Scenario, options?: RunOptions): Run {
   return new PedestrianRun(venue, scenario, options);
+}
+
+/**
+ * Recreates a run from a checkpoint taken with run.saveCheckpoint() on the same venue, scenario and
+ * options. Stepping it on gives bit-identical results to the run the checkpoint came from.
+ */
+export function restoreRun(venue: Venue, scenario: Scenario, checkpoint: RunCheckpoint, options?: RunOptions): Run {
+  const run = new PedestrianRun(venue, scenario, options);
+  run.restore(checkpoint);
+  return run;
 }

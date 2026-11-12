@@ -10,6 +10,11 @@
  * Speed then follows Weidmann: v = v0 · (1 − exp(−γ · (1/ρ − 1/ρmax))), with two guards from
  * review B4: v = v0 below ρ = 0.1 /m² (avoids 1/0), and never below 0.1·v0 (so a crowd at ρmax
  * still creeps instead of freezing forever). The factor v/v0 is computed once per density cell.
+ *
+ * Performance: a venue grid has tens of thousands of cells but people occupy only a few hundred,
+ * so steps 2–3 only visit the 3 × 3 neighbourhoods of occupied cells (the "active" cells). Every
+ * other cell has an exact 0 in every term of the smoothing, so its density is 0 and its factor 1;
+ * the result is bit-identical to a pass over the whole grid.
  */
 
 import { exp } from "./detmath.ts";
@@ -29,10 +34,18 @@ export class DensityGrid {
   readonly density: Float32Array;
   /** v/v0 per cell from the Weidmann relation. */
   readonly speedFactor: Float64Array;
+  /**
+   * The first `activeCount` entries are the cells whose density may be non-zero after the last
+   * finish(): the 3 × 3 neighbourhoods of the occupied cells. Everywhere else the density is 0.
+   */
+  readonly active: Int32Array;
+  activeCount = 0;
   private readonly counts: Float64Array;
   private readonly smoothedArea: Float64Array;
-  private readonly scratch: Float64Array;
   private readonly tmp: Float64Array;
+  private readonly mark: Uint8Array;
+  private readonly occupied: Int32Array;
+  private occupiedCount = 0;
   private readonly weightSide: number;
 
   constructor(
@@ -47,8 +60,10 @@ export class DensityGrid {
     this.density = new Float32Array(n);
     this.speedFactor = new Float64Array(n).fill(1);
     this.counts = new Float64Array(n);
-    this.scratch = new Float64Array(n);
     this.tmp = new Float64Array(n);
+    this.mark = new Uint8Array(n);
+    this.occupied = new Int32Array(n);
+    this.active = new Int32Array(n);
     this.smoothedArea = new Float64Array(n);
     // Weight of the neighbouring cell (2 m away) relative to the centre: exp(−d²/2σ²).
     this.weightSide = exp(-(DENSITY_CELL * DENSITY_CELL) / (2 * sigma * sigma));
@@ -60,7 +75,9 @@ export class DensityGrid {
       const r = Math.floor(Math.floor(cell / grid.cols) / per);
       area[r * this.cols + c] = (area[r * this.cols + c] as number) + CELL_SIZE * CELL_SIZE;
     }
-    this.smooth(area, this.smoothedArea);
+    for (let i = 0; i < n; i++) this.tmp[i] = this.rowPass(area, i);
+    for (let i = 0; i < n; i++) this.smoothedArea[i] = this.columnPass(this.tmp, i);
+    this.tmp.fill(0);
   }
 
   /** Density cell of a local point (clamped to the grid). */
@@ -72,70 +89,110 @@ export class DensityGrid {
 
   /** Starts a new count. */
   clear(): void {
-    this.counts.fill(0);
+    const counts = this.counts;
+    const occupied = this.occupied;
+    for (let k = 0; k < this.occupiedCount; k++) counts[occupied[k] as number] = 0;
+    this.occupiedCount = 0;
   }
 
   add(x: number, y: number): void {
     const cell = this.cellAt(x, y);
-    this.counts[cell] = (this.counts[cell] as number) + 1;
+    const c = this.counts[cell] as number;
+    if (c === 0) this.occupied[this.occupiedCount++] = cell;
+    this.counts[cell] = c + 1;
   }
 
-  /** Smooths the counts into densities and recomputes the speed factors. */
+  /** Smooths the counts into densities and recomputes the speed factors (active cells only). */
   finish(): void {
-    const out = this.scratch;
-    this.smooth(this.counts, out);
+    const cols = this.cols;
+    const rows = this.rows;
+    const mark = this.mark;
+    const active = this.active;
+    const density = this.density;
+    const factor = this.speedFactor;
+    // Forget the previous tick's active cells.
+    for (let k = 0; k < this.activeCount; k++) {
+      const i = active[k] as number;
+      density[i] = 0;
+      factor[i] = 1;
+      mark[i] = 0;
+    }
+    let count = 0;
+    for (let k = 0; k < this.occupiedCount; k++) {
+      const cell = this.occupied[k] as number;
+      const c = cell % cols;
+      const r = (cell - c) / cols;
+      const r0 = r > 0 ? r - 1 : 0;
+      const r1 = r < rows - 1 ? r + 1 : r;
+      const c0 = c > 0 ? c - 1 : 0;
+      const c1 = c < cols - 1 ? c + 1 : c;
+      for (let rr = r0; rr <= r1; rr++) {
+        for (let cc = c0; cc <= c1; cc++) {
+          const i = rr * cols + cc;
+          if (mark[i] === 0) {
+            mark[i] = 1;
+            active[count++] = i;
+          }
+        }
+      }
+    }
+    this.activeCount = count;
+    // Row pass where it can be non-zero; tmp stays 0 everywhere else.
+    const tmp = this.tmp;
+    const counts = this.counts;
+    for (let k = 0; k < count; k++) {
+      const i = active[k] as number;
+      tmp[i] = this.rowPass(counts, i);
+    }
     const invRhoMax = 1 / this.rhoMax;
-    for (let i = 0; i < out.length; i++) {
+    for (let k = 0; k < count; k++) {
+      const i = active[k] as number;
+      const smoothed = this.columnPass(tmp, i);
       const area = this.smoothedArea[i] as number;
-      const rho = area > 0 ? (out[i] as number) / area : 0;
-      this.density[i] = rho;
+      const rho = area > 0 ? smoothed / area : 0;
+      density[i] = rho;
       let f = 1;
       if (rho >= FREE_FLOW_DENSITY) {
         f = 1 - exp(-this.gamma * (1 / rho - invRhoMax));
         if (f < MIN_SPEED_FACTOR) f = MIN_SPEED_FACTOR;
       }
-      this.speedFactor[i] = f;
+      factor[i] = f;
     }
+    for (let k = 0; k < count; k++) tmp[active[k] as number] = 0;
   }
 
-  /** Separable three-tap Gaussian: rows, then columns. Weights are normalised over cells that exist. */
-  private smooth(src: Float64Array, dst: Float64Array): void {
+  /** Three-tap Gaussian along the row at cell i; weights normalised over the cells that exist. */
+  private rowPass(src: Float64Array, i: number): number {
+    const w = this.weightSide;
+    const c = i % this.cols;
+    let sum = src[i] as number;
+    let norm = 1;
+    if (c > 0) {
+      sum += w * (src[i - 1] as number);
+      norm += w;
+    }
+    if (c < this.cols - 1) {
+      sum += w * (src[i + 1] as number);
+      norm += w;
+    }
+    return sum / norm;
+  }
+
+  /** Three-tap Gaussian along the column at cell i. */
+  private columnPass(src: Float64Array, i: number): number {
     const w = this.weightSide;
     const cols = this.cols;
-    const rows = this.rows;
-    const tmp = this.tmp;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const i = r * cols + c;
-        let sum = src[i] as number;
-        let norm = 1;
-        if (c > 0) {
-          sum += w * (src[i - 1] as number);
-          norm += w;
-        }
-        if (c < cols - 1) {
-          sum += w * (src[i + 1] as number);
-          norm += w;
-        }
-        tmp[i] = sum / norm;
-      }
+    let sum = src[i] as number;
+    let norm = 1;
+    if (i >= cols) {
+      sum += w * (src[i - cols] as number);
+      norm += w;
     }
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const i = r * cols + c;
-        let sum = tmp[i] as number;
-        let norm = 1;
-        if (r > 0) {
-          sum += w * (tmp[i - cols] as number);
-          norm += w;
-        }
-        if (r < rows - 1) {
-          sum += w * (tmp[i + cols] as number);
-          norm += w;
-        }
-        dst[i] = sum / norm;
-      }
+    if (i < (this.rows - 1) * cols) {
+      sum += w * (src[i + cols] as number);
+      norm += w;
     }
+    return sum / norm;
   }
 }
 

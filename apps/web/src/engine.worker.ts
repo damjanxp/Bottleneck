@@ -6,6 +6,7 @@
 
 import { ENGINE_VERSION, EXPECTED_SELF_CHECK_HASH, PlaybackPacer, TICK_SECONDS, createRun, runSelfCheck, snapshotLength, type Run } from "@bottleneck/engine";
 import type { Scenario, Venue } from "@bottleneck/schema";
+import { tinyScenario, tinyVenue } from "./determinism/tinyScenario.ts";
 import { peakWindowStart } from "./sim/peak.ts";
 import { RollingSamples } from "./sim/rolling.ts";
 import { seekFraction, summariseMetrics, type StatsMessage, type WorkerRequest, type WorkerResponse } from "./workerProtocol.ts";
@@ -251,6 +252,12 @@ scope.onmessage = (event) => {
           durationMs: performance.now() - started,
           engineVersion: ENGINE_VERSION,
         });
+        break;
+      }
+      case "determinismCheck": {
+        const r = createRun(tinyVenue, tinyScenario);
+        while (!r.done) r.step();
+        post({ type: "determinismResult", hash: r.metricsHash() });
         break;
       }
       case "load":

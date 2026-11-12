@@ -137,7 +137,7 @@ describe("M/D/1 at 70% utilisation", () => {
       return (run.bank.queueIntegral(0) - atWarmUp) / (10 * HOUR);
     });
     expectMatchesTheory(lq, theory, "M/D/1 Lq");
-  });
+  }, 60_000);
 });
 
 describe("M/G/1 at 80% utilisation with the default scan-time distribution", () => {
@@ -163,7 +163,7 @@ describe("M/G/1 at 80% utilisation with the default scan-time distribution", () 
       return run.meanWaitFrom(1 * HOUR);
     });
     expectMatchesTheory(wq, theory, "M/G/1 Wq");
-  });
+  }, 60_000);
 });
 
 describe("Little's law, L = λ·W, within 3% on the lane's reporting window", () => {

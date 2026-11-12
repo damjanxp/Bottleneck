@@ -32,7 +32,7 @@ export function describeParameters(p: ResolvedParameters, venue: Venue, scenario
     { key: "logitScale", label: L.logitScale, value: `${p.logitScale} s`, assumed: true },
     { key: "slotSpacing", label: L.slotSpacing, value: `${p.slotSpacing} m`, assumed: true },
     { key: "jockeyThreshold", label: L.jockeyThreshold, value: String(p.jockeyThreshold), assumed: true },
-    { key: "manualServiceTime", label: L.manualServiceTime, value: formatDistribution(p.manualServiceTime, "s"), assumed: true },
+    { key: "manualServiceTime", label: L.manualServiceTime, value: formatDistribution(p.manualLaneServiceTime, "s"), assumed: true },
     { key: "densitySigma", label: L.densitySigma, value: `${p.densitySigma} m`, assumed: true },
     { key: "watchdog", label: L.watchdog, value: `${p.watchdogMinutes} min`, assumed: true },
     { key: "shareInsideLead", label: L.shareInsideAt, value: scenario.timeline.eventStart === null ? strings.parameters.oneHourAfterOpening : formatDuration(scenario.timeline.eventStart - p.shareInsideAt) + strings.parameters.beforeStart, assumed: true },

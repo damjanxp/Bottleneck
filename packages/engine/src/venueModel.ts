@@ -8,8 +8,8 @@
  * - Stage sets: the groups of elements an agent chooses between at one point of its journey.
  *
  * Lane geometry. The inside of a line a→b is the side where cross(b − a, p − a) > 0, i.e. the
- * left-hand side in the usual maths orientation (in the venue's y-down picture it appears on the
- * right). Each lane has a service point on the line, an exit point 0.75 m inside, and a queue
+ * left-hand side in the usual maths orientation (y up); in the venue's y-down picture it is the
+ * right-hand side when looking from a towards b. Each lane has a service point on the line, an exit point 0.75 m inside, and a queue
  * area: slots 0.6 m apart going straight outwards for `queueLength` metres. Slot 0 is the head
  * of the line. The queue area is cut short where it would leave the walkable grid; it always has
  * at least one slot. Each lane has a flow field towards its tail slot (the back of the line).
@@ -33,6 +33,8 @@ import { distributionMoments } from "./sampling.ts";
 export interface ModelSettings {
   slotSpacing: number;
   manualServiceTime: Distribution;
+  /** Service time of every screening stage from the scenario's bag policy; null keeps the venue's. */
+  screeningServiceTime: Distribution | null;
 }
 
 export interface LaneElement {
@@ -115,7 +117,7 @@ export function buildVenueModel(venue: Venue, scenario: Scenario, settings: Mode
 
   for (const s of venue.screeningStages) {
     const o = overrides[s.id] ?? {};
-    const serviceTime = o.serviceTime ?? s.serviceTime;
+    const serviceTime = o.serviceTime ?? settings.screeningServiceTime ?? s.serviceTime;
     const index = elements.length;
     const used = usedScreening.has(s.id);
     const nextStageSet = used ? stageSets.length : -1;

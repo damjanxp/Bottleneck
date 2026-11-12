@@ -220,7 +220,7 @@
     },
     "LaneLine": {
       "title": "LaneLine",
-      "description": "The line the lanes of a gate group or screening stage stand on. Lanes are spaced evenly along it. People pass from the right-hand side of a→b to the left-hand side (the inside).",
+      "description": "The line the lanes of a gate group or screening stage stand on. Lanes are spaced evenly along it. People pass from the outside to the inside. The inside is the side where cross(b − a, p − a) > 0: in the venue's y-down picture, the right-hand side when looking from a towards b.",
       "type": "object",
       "additionalProperties": false,
       "required": [
