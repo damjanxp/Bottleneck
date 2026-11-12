@@ -7,7 +7,7 @@
   "timeline": { "referenceClock": "20:00", "gatesOpen": -5400, "eventStart": 0, "eventEnd": 9000, "horizon": 3600 },
   "attendance": 4500,
   "carShare": 0,
-  "arrivals": { "preset": "custom", "points": [{ "t": -5400, "weight": 0 }, { "t": -4800, "weight": 0.3 }, { "t": -3600, "weight": 0.95 }, { "t": -2700, "weight": 1 }, { "t": -1800, "weight": 0.6 }, { "t": -900, "weight": 0.8 }, { "t": -450, "weight": 1.2 }, { "t": 0, "weight": 0.5 }, { "t": 300, "weight": 0 }] },
+  "arrivals": { "preset": "custom", "points": [{ "t": -5400, "weight": 0 }, { "t": -4800, "weight": 0.3 }, { "t": -3600, "weight": 0.95 }, { "t": -2700, "weight": 1 }, { "t": -1800, "weight": 0.6 }, { "t": -900, "weight": 0.8 }, { "t": -450, "weight": 0.9 }, { "t": 0, "weight": 0.3 }, { "t": 480, "weight": 0 }] },
   "seed": 1,
   "overrides": { "gate-main": { "laneCount": 3 }, "screening-main": { "laneCount": 3 } }
 }

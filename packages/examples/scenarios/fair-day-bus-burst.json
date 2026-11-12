@@ -10,7 +10,7 @@
   "arrivals": { "preset": "fair" },
   "seed": 1,
   "timedEvents": [
-    { "kind": "busBurst", "at": 1800, "sourceId": "tram-stop", "count": 1500 },
-    { "kind": "busBurst", "at": 1860, "sourceId": "bus-stop", "count": 1000 }
+    { "kind": "busBurst", "at": 1800, "sourceId": "tram-stop", "count": 1800 },
+    { "kind": "busBurst", "at": 1860, "sourceId": "bus-stop", "count": 1200 }
   ]
 }

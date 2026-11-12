@@ -56,7 +56,7 @@ export const exampleVenues: ExampleVenue[] = [
     fairDayVenue,
     [
       { json: fairDayBaseline, description: "4,000 visitors over a two-hour session, all 15 gate lanes open." },
-      { json: fairDayBusBurst, description: "Baseline plus a full tram (1,500) and a full bus load (1,000) arriving 30 minutes after opening." },
+      { json: fairDayBusBurst, description: "Baseline plus a full tram (1,800) and a full bus load (1,200) arriving 30 minutes after opening." },
       { json: fairDayGateAReduced, description: "Gate A staffed with only 1 of its 4 lanes." },
     ],
   ),
