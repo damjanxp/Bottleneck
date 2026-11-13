@@ -1,13 +1,13 @@
 /**
  * Runs every built-in example scenario headless to completion and checks the qualitative outcomes
- * the examples are meant to show. Margins are generous: the point is "jams" versus "copes", not exact numbers.
+ * the examples are meant to show (including the Belgrade Fair car parks of Phase 3). Margins are generous: the point is "jams" versus "copes", not exact numbers.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Ajv } from "ajv";
 import addFormats from "ajv-formats";
-import { ENGINE_VERSION, createRun, type RunMetrics } from "@bottleneck/engine";
+import { AgentState, ENGINE_VERSION, createRun, type RunMetrics } from "@bottleneck/engine";
 import { SCHEMA_FILES, type RunRecord, type Scenario } from "@bottleneck/schema";
 import { beforeAll, describe, expect, it } from "vitest";
 import { exampleVenues } from "../src/index.ts";
@@ -136,5 +136,98 @@ describe("example scenarios, simulated", () => {
     const red = r("fair-day-gate-a-reduced");
     expect(red.maxQueue("gate-a")).toBeGreaterThan(base.maxQueue("gate-a") + 4);
     expect(red.m.p95Wait).toBeGreaterThan(base.m.p95Wait * 1.1);
+  });
+  describe("Belgrade Fair with car parks (Phase 3)", () => {
+    const carIds = ["fair-day-with-cars", "fair-day-north-car-park-closes", "concert-cars-pay-station", "concert-cars-pay-at-barrier"];
+    const have = (id: string) => results.has(id);
+    const parking = (id: string) => r(id).m.parking!;
+    const lotOf = (id: string, lotId: string) => parking(id).lots.find((l) => l.lotId === lotId)!;
+    const exitBarrier = (id: string, barrierId: string) => parking(id).barriers.find((b) => b.barrierId === barrierId)!;
+    const payServed = (id: string) => r(id).m.lanes.filter((l) => l.elementKind === "payStation").reduce((s, l) => s + l.metrics.served, 0);
+
+    it("conserves people and cars: everyone departs or was turned away, nobody is unreachable, the run drains without deadlock", () => {
+      for (const id of carIds.filter(have)) {
+        const { m } = r(id);
+        const p = m.parking!;
+        expect(p.carCount, id).toBeGreaterThan(500);
+        expect(m.unreachable, id).toBe(0);
+        expect(m.deadlock, id).toBe(false);
+        expect(m.drained, id).toBe(true);
+        expect(m.countsByState.reduce((a, b) => a + b, 0), id).toBe(m.agentCount);
+        expect(p.carCountsByState.reduce((a, b) => a + b, 0), id).toBe(p.carCount);
+        expect(m.countsByState[AgentState.Departed]! + m.countsByState[AgentState.TurnedAway]!, id).toBe(m.agentCount);
+        expect(p.carCountsByState[AgentState.Departed]! + p.carCountsByState[AgentState.TurnedAway]!, id).toBe(p.carCount);
+        // Cars turned away at lots add up to the turned-away cars, and every car that parked drove off again.
+        expect(p.lots.reduce((s, l) => s + l.turnedAway, 0), id).toBe(p.carCountsByState[AgentState.TurnedAway]);
+        expect(p.lots.reduce((s, l) => s + l.parked, 0), id).toBeGreaterThan(300);
+        expect(m.departures!.departedCars, id).toBe(p.carCountsByState[AgentState.Departed]);
+        for (const l of p.lots) {
+          expect(l.maxOccupancy, id).toBeLessThanOrEqual(l.stalls);
+          expect(l.timeToEmpty, `${id} ${l.lotId}`).not.toBeNull();
+          expect(l.timeToEmpty!, `${id} ${l.lotId}`).toBeGreaterThan(0);
+        }
+        for (const l of [...m.lanes, ...p.barrierLanes]) expect(l.metrics.littleLawError, `${id} lane ${l.laneId}`).toBeLessThan(1e-9);
+      }
+    });
+
+    it("fair day with cars: both car parks cope with the cars, and paying at the north exit barrier builds a long exit queue", () => {
+      const id = "fair-day-with-cars";
+      if (!have(id)) return;
+      const p = parking(id);
+      expect(p.carCount).toBeGreaterThan(900);
+      expect(p.carCount).toBeLessThan(1200);
+      expect(p.carCountsByState[AgentState.TurnedAway]!).toBeLessThan(0.1 * p.carCount);
+      expect(lotOf(id, "n-car-park").parked).toBeGreaterThan(300);
+      expect(lotOf(id, "s-car-park").parked).toBeGreaterThan(300);
+      // North pays at the barrier (slow exit), south at machines on foot.
+      expect(exitBarrier(id, "n-exit-barrier").maxQueueMetres).toBeGreaterThan(100);
+      expect(exitBarrier(id, "n-exit-barrier").meanQueueMetres).toBeGreaterThan(5 * exitBarrier(id, "s-exit-barrier").meanQueueMetres);
+      expect(payServed(id)).toBe(lotOf(id, "s-car-park").parked);
+      expect(lotOf(id, "n-car-park").timeToEmpty!).toBeLessThan(2 * 3600);
+      // Pedestrian waits at the gates stay in the normal range of the fair day.
+      expect(r(id).m.peakHour.p95Wait).toBeLessThan(200);
+    });
+
+    it("closing the north car park diverts its cars to the south one and turns the rest away", () => {
+      const id = "fair-day-north-car-park-closes";
+      if (!have(id)) return;
+      const north = lotOf(id, "n-car-park");
+      const south = lotOf(id, "s-car-park");
+      expect(north.closedAt).toBe(1800);
+      expect(north.divertedAway).toBeGreaterThan(100);
+      expect(south.divertedIn).toBeGreaterThan(100);
+      expect(south.maxOccupancy).toBe(south.stalls);
+      expect(north.maxOccupancy).toBeLessThan(0.7 * north.stalls);
+      expect(parking(id).carCountsByState[AgentState.TurnedAway]!).toBeGreaterThan(100);
+      expect(r(id).m.countsByState[AgentState.TurnedAway]!).toBeGreaterThan(100);
+      // The base day turns nobody away.
+      if (have("fair-day-with-cars")) expect(parking("fair-day-with-cars").carCountsByState[AgentState.TurnedAway]!).toBeLessThan(parking(id).carCountsByState[AgentState.TurnedAway]! / 5);
+    });
+
+    it("concert with cars: the exit rush after the show builds a visible exit queue and the car park empties well after the end", () => {
+      const id = "concert-cars-pay-station";
+      if (!have(id)) return;
+      const lot = lotOf(id, "car-park");
+      const exit = exitBarrier(id, "exit-barrier");
+      expect(lot.parked).toBeGreaterThan(500);
+      expect(lot.maxOccupancy).toBeGreaterThan(500);
+      expect(exit.maxQueueMetres).toBeGreaterThan(100);
+      expect(exit.maxQueueCars).toBeGreaterThan(50);
+      expect(exit.meanQueueMetres).toBeGreaterThan(30);
+      expect(lot.timeToEmpty!).toBeGreaterThan(1800);
+      expect(lot.timeToEmpty!).toBeLessThan(3 * 3600);
+      expect(payServed(id)).toBe(lot.parked);
+      // The pedestrian side still works: 5 gate lanes cope with the walk-ins from the car park too.
+      expect(r(id).m.stillOutsideAtStart ?? 0).toBeLessThan(900);
+    });
+
+    it("concert car park: paying at the exit barrier instead of at the machines lengthens the exit queue and empties the lot at least 15 minutes later", () => {
+      const a = "concert-cars-pay-station";
+      const b = "concert-cars-pay-at-barrier";
+      if (!have(a) || !have(b)) return;
+      expect(payServed(b)).toBe(0);
+      expect(lotOf(b, "car-park").timeToEmpty!).toBeGreaterThan(lotOf(a, "car-park").timeToEmpty! + 900);
+      expect(exitBarrier(b, "exit-barrier").meanQueueMetres).toBeGreaterThan(1.2 * exitBarrier(a, "exit-barrier").meanQueueMetres);
+    });
   });
 });

@@ -2,11 +2,13 @@
   "schemaVersion": 1,
   "id": "belgrade-fair-fair-day",
   "name": "Belgrade Fair, open-door fair day",
-  "description": "Beogradski sajam on a fair day: pedestrians arrive from the tram and bus stops on Bulevar vojvode Misica and from the street entrance, cross the forecourt and enter through three gate groups into the halls. No screening.",
+  "description": "Beogradski sajam on a fair day: pedestrians arrive from the tram and bus stops on Bulevar vojvode Misica and from the street entrance, cross the forecourt and enter through three gate groups into the halls. No screening. Two car parks on Bulevar vojvode Misica (north: pay at the exit barrier; south: pay machines) feed the forecourt on foot; they are used when a scenario has a car share.",
   "attribution": "Layout drawn by hand after © OpenStreetMap contributors",
   "walkableAreas": [
     { "id": "forecourt", "name": "Forecourt and boulevard sidewalk", "polygon": { "outer": [{ "x": 0, "y": 0 }, { "x": 250, "y": 0 }, { "x": 250, "y": 200 }, { "x": 0, "y": 200 }] } },
-    { "id": "inside", "name": "Inside the grounds", "polygon": { "outer": [{ "x": 230, "y": 0 }, { "x": 360, "y": 0 }, { "x": 360, "y": 200 }, { "x": 230, "y": 200 }] } }
+    { "id": "inside", "name": "Inside the grounds", "polygon": { "outer": [{ "x": 230, "y": 0 }, { "x": 360, "y": 0 }, { "x": 360, "y": 200 }, { "x": 230, "y": 200 }] } },
+    { "id": "n-plaza", "name": "Walkway Car park North", "polygon": { "outer": [{ "x": 20, "y": -50 }, { "x": 150, "y": -50 }, { "x": 150, "y": 20 }, { "x": 20, "y": 20 }] } },
+    { "id": "s-plaza", "name": "Walkway Car park South", "polygon": { "outer": [{ "x": 20, "y": 250 }, { "x": 150, "y": 250 }, { "x": 150, "y": 180 }, { "x": 20, "y": 180 }] } }
   ],
   "obstacles": [
     { "id": "wall-n", "name": "Wall north of gate A", "polygon": { "outer": [{ "x": 236, "y": 0 }, { "x": 246, "y": 0 }, { "x": 246, "y": 40 }, { "x": 236, "y": 40 }] } },
@@ -14,7 +16,11 @@
     { "id": "wall-bc", "name": "Wall between gates B and C", "polygon": { "outer": [{ "x": 236, "y": 112 }, { "x": 246, "y": 112 }, { "x": 246, "y": 162 }, { "x": 236, "y": 162 }] } },
     { "id": "wall-s", "name": "Wall south of gate C", "polygon": { "outer": [{ "x": 236, "y": 174 }, { "x": 246, "y": 174 }, { "x": 246, "y": 200 }, { "x": 236, "y": 200 }] } },
     { "id": "fountain", "name": "Fountain", "polygon": { "outer": [{ "x": 80, "y": 80 }, { "x": 110, "y": 80 }, { "x": 110, "y": 110 }, { "x": 80, "y": 110 }] } },
-    { "id": "pavilion", "name": "Information pavilion", "polygon": { "outer": [{ "x": 130, "y": 30 }, { "x": 190, "y": 30 }, { "x": 190, "y": 60 }, { "x": 130, "y": 60 }] } }
+    { "id": "pavilion", "name": "Information pavilion", "polygon": { "outer": [{ "x": 130, "y": 30 }, { "x": 190, "y": 30 }, { "x": 190, "y": 60 }, { "x": 130, "y": 60 }] } },
+    { "id": "n-exit-road-west", "name": "Exit road Car park North (no walking)", "polygon": { "outer": [{ "x": 20, "y": -43 }, { "x": 77, "y": -43 }, { "x": 77, "y": -37 }, { "x": 20, "y": -37 }] } },
+    { "id": "n-exit-road-east", "name": "Exit road Car park North (no walking)", "polygon": { "outer": [{ "x": 83, "y": -43 }, { "x": 150, "y": -43 }, { "x": 150, "y": -37 }, { "x": 83, "y": -37 }] } },
+    { "id": "s-exit-road-west", "name": "Exit road Car park South (no walking)", "polygon": { "outer": [{ "x": 20, "y": 243 }, { "x": 77, "y": 243 }, { "x": 77, "y": 237 }, { "x": 20, "y": 237 }] } },
+    { "id": "s-exit-road-east", "name": "Exit road Car park South (no walking)", "polygon": { "outer": [{ "x": 83, "y": 243 }, { "x": 150, "y": 243 }, { "x": 150, "y": 237 }, { "x": 83, "y": 237 }] } }
   ],
   "sources": [
     { "id": "tram-stop", "name": "Tram stop, Bulevar vojvode Misica", "position": { "x": 8, "y": 60 }, "share": 0.7 },
@@ -30,5 +36,34 @@
   "destinations": [
     { "id": "hall-1", "name": "Hall 1", "area": { "outer": [{ "x": 280, "y": 10 }, { "x": 350, "y": 10 }, { "x": 350, "y": 90 }, { "x": 280, "y": 90 }] } },
     { "id": "hall-2", "name": "Hall 2", "area": { "outer": [{ "x": 280, "y": 110 }, { "x": 350, "y": 110 }, { "x": 350, "y": 190 }, { "x": 280, "y": 190 }] } }
+  ],
+  "roads": [
+    { "id": "main-road", "name": "Bulevar vojvode Misica (public road)", "points": [{ "x": -30, "y": -250 }, { "x": -30, "y": 500 }], "direction": "twoWay", "laneCount": 1, "freeSpeed": 50, "publicRoad": true },
+    { "id": "n-entry-1", "name": "Car park North entry road 1", "points": [{ "x": -30, "y": -142 }, { "x": 28, "y": -142 }], "direction": "oneWay", "laneCount": 1 },
+    { "id": "n-entry-2", "name": "Car park North entry road 2", "points": [{ "x": -30, "y": -62 }, { "x": 28, "y": -62 }], "direction": "oneWay", "laneCount": 1 },
+    { "id": "n-exit-road", "name": "Car park North exit road", "points": [{ "x": 142, "y": -62 }, { "x": 142, "y": -40 }, { "x": -30, "y": -40 }], "direction": "oneWay", "laneCount": 1 },
+    { "id": "s-entry-1", "name": "Car park South entry road 1", "points": [{ "x": -30, "y": 342 }, { "x": 28, "y": 342 }], "direction": "oneWay", "laneCount": 1 },
+    { "id": "s-entry-2", "name": "Car park South entry road 2", "points": [{ "x": -30, "y": 262 }, { "x": 28, "y": 262 }], "direction": "oneWay", "laneCount": 1 },
+    { "id": "s-exit-road", "name": "Car park South exit road", "points": [{ "x": 142, "y": 262 }, { "x": 142, "y": 240 }, { "x": -30, "y": 240 }], "direction": "oneWay", "laneCount": 1 }
+  ],
+  "vehicleSources": [
+    { "id": "from-north", "name": "Bulevar from the north", "position": { "x": -30, "y": -245 }, "share": 1 },
+    { "id": "from-south", "name": "Bulevar from the south", "position": { "x": -30, "y": 495 }, "share": 1 }
+  ],
+  "vehicleBarriers": [
+    { "id": "n-entry-1-barrier", "name": "Car park North entry barrier 1", "roadId": "n-entry-1", "position": { "x": 20, "y": -142 }, "kind": "entry", "laneCount": 1, "serviceType": "ticket" },
+    { "id": "n-entry-2-barrier", "name": "Car park North entry barrier 2", "roadId": "n-entry-2", "position": { "x": 20, "y": -62 }, "kind": "entry", "laneCount": 1, "serviceType": "ticket" },
+    { "id": "n-exit-barrier", "name": "Car park North exit barrier", "roadId": "n-exit-road", "position": { "x": 130, "y": -40 }, "kind": "exit", "laneCount": 3, "serviceType": "ticket" },
+    { "id": "s-entry-1-barrier", "name": "Car park South entry barrier 1", "roadId": "s-entry-1", "position": { "x": 20, "y": 342 }, "kind": "entry", "laneCount": 1, "serviceType": "ticket" },
+    { "id": "s-entry-2-barrier", "name": "Car park South entry barrier 2", "roadId": "s-entry-2", "position": { "x": 20, "y": 262 }, "kind": "entry", "laneCount": 1, "serviceType": "ticket" },
+    { "id": "s-exit-barrier", "name": "Car park South exit barrier", "roadId": "s-exit-road", "position": { "x": 130, "y": 240 }, "kind": "exit", "laneCount": 2, "serviceType": "ticket" }
+  ],
+  "parkingLots": [
+    { "id": "n-car-park", "name": "Car park North", "outline": { "outer": [{ "x": 20, "y": -152 }, { "x": 150, "y": -152 }, { "x": 150, "y": -52 }, { "x": 20, "y": -52 }] }, "stallRows": [{ "a": { "x": 34, "y": -145 }, "b": { "x": 134, "y": -145 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": -139 }, "b": { "x": 134, "y": -139 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": -129 }, "b": { "x": 134, "y": -129 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": -123 }, "b": { "x": 134, "y": -123 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": -113 }, "b": { "x": 134, "y": -113 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": -107 }, "b": { "x": 134, "y": -107 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": -97 }, "b": { "x": 134, "y": -97 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": -91 }, "b": { "x": 134, "y": -91 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": -81 }, "b": { "x": 134, "y": -81 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": -75 }, "b": { "x": 134, "y": -75 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": -65 }, "b": { "x": 134, "y": -65 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": -59 }, "b": { "x": 134, "y": -59 }, "count": 40, "side": "right" }], "aisles": [{ "id": "n-aisle-1", "points": [{ "x": 28, "y": -142 }, { "x": 142, "y": -142 }] }, { "id": "n-aisle-2", "points": [{ "x": 28, "y": -126 }, { "x": 142, "y": -126 }] }, { "id": "n-aisle-3", "points": [{ "x": 28, "y": -110 }, { "x": 142, "y": -110 }] }, { "id": "n-aisle-4", "points": [{ "x": 28, "y": -94 }, { "x": 142, "y": -94 }] }, { "id": "n-aisle-5", "points": [{ "x": 28, "y": -78 }, { "x": 142, "y": -78 }] }, { "id": "n-aisle-6", "points": [{ "x": 28, "y": -62 }, { "x": 142, "y": -62 }] }, { "id": "n-aisle-west", "points": [{ "x": 28, "y": -142 }, { "x": 28, "y": -62 }] }, { "id": "n-aisle-east", "points": [{ "x": 142, "y": -142 }, { "x": 142, "y": -62 }] }], "entryBarrierIds": ["n-entry-1-barrier", "n-entry-2-barrier"], "exitBarrierIds": ["n-exit-barrier"], "walkingExit": { "x": 80, "y": -49 }, "stallChoice": "nearestWalkingExit", "overflow": { "rule": "divert", "divertTo": "s-car-park" }, "paymentMode": "payAtBarrier" },
+    { "id": "s-car-park", "name": "Car park South", "outline": { "outer": [{ "x": 20, "y": 352 }, { "x": 150, "y": 352 }, { "x": 150, "y": 252 }, { "x": 20, "y": 252 }] }, "stallRows": [{ "a": { "x": 34, "y": 345 }, "b": { "x": 134, "y": 345 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": 339 }, "b": { "x": 134, "y": 339 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": 329 }, "b": { "x": 134, "y": 329 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": 323 }, "b": { "x": 134, "y": 323 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": 313 }, "b": { "x": 134, "y": 313 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": 307 }, "b": { "x": 134, "y": 307 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": 297 }, "b": { "x": 134, "y": 297 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": 291 }, "b": { "x": 134, "y": 291 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": 281 }, "b": { "x": 134, "y": 281 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": 275 }, "b": { "x": 134, "y": 275 }, "count": 40, "side": "left" }, { "a": { "x": 34, "y": 265 }, "b": { "x": 134, "y": 265 }, "count": 40, "side": "right" }, { "a": { "x": 34, "y": 259 }, "b": { "x": 134, "y": 259 }, "count": 40, "side": "left" }], "aisles": [{ "id": "s-aisle-1", "points": [{ "x": 28, "y": 342 }, { "x": 142, "y": 342 }] }, { "id": "s-aisle-2", "points": [{ "x": 28, "y": 326 }, { "x": 142, "y": 326 }] }, { "id": "s-aisle-3", "points": [{ "x": 28, "y": 310 }, { "x": 142, "y": 310 }] }, { "id": "s-aisle-4", "points": [{ "x": 28, "y": 294 }, { "x": 142, "y": 294 }] }, { "id": "s-aisle-5", "points": [{ "x": 28, "y": 278 }, { "x": 142, "y": 278 }] }, { "id": "s-aisle-6", "points": [{ "x": 28, "y": 262 }, { "x": 142, "y": 262 }] }, { "id": "s-aisle-west", "points": [{ "x": 28, "y": 342 }, { "x": 28, "y": 262 }] }, { "id": "s-aisle-east", "points": [{ "x": 142, "y": 342 }, { "x": 142, "y": 262 }] }], "entryBarrierIds": ["s-entry-1-barrier", "s-entry-2-barrier"], "exitBarrierIds": ["s-exit-barrier"], "walkingExit": { "x": 80, "y": 249 }, "payStation": { "id": "s-pay-machines", "name": "Pay machines Car park South", "line": { "a": { "x": 60, "y": 215 }, "b": { "x": 100, "y": 215 } }, "laneCount": 4, "queueLength": 12 }, "stallChoice": "nearestWalkingExit", "overflow": { "rule": "divert", "divertTo": "n-car-park" }, "paymentMode": "payStation" }
+  ],
+  "crossings": [
+    { "id": "n-zebra", "name": "Zebra crossing over the Car park North exit road", "a": { "x": 80, "y": -42 }, "b": { "x": 80, "y": -38 }, "width": 4 },
+    { "id": "s-zebra", "name": "Zebra crossing over the Car park South exit road", "a": { "x": 80, "y": 242 }, "b": { "x": 80, "y": 238 }, "width": 4 }
   ]
 }
