@@ -6,7 +6,7 @@
  * arrived. If no buffer is free when a snapshot is due, the worker drops it (never queues it).
  */
 
-import type { LaneLayout, LaneLive, ResolvedParameters, RunMetrics } from "@bottleneck/engine";
+import type { BarrierLaneLive, LaneLayout, LaneLive, LotLive, ResolvedParameters, RunMetrics, VehicleLayout } from "@bottleneck/engine";
 import type { Scenario, Venue } from "@bottleneck/schema";
 
 export type WorkerRequest =
@@ -26,10 +26,11 @@ export type WorkerRequest =
    */
   | { type: "seek"; time: number; seekId: number }
   | { type: "cancelSeek" }
-  | { type: "returnBuffer"; buffer: Float32Array; generation: number }
+  /** Hands a snapshot's buffers back to the worker: the people buffer and the cars buffer travel as a pair. */
+  | { type: "returnBuffer"; buffer: Float32Array; vehicles: Float32Array; generation: number }
   | { type: "setDensity"; enabled: boolean }
   /**
-   * Interactive lane failure (review B8): the page recorded a timed event in its working copy of the
+   * Interactive lane failure or lot closing (review B8): the page recorded a timed event in its working copy of the
    * scenario. The worker swaps in that scenario, drops its checkpoints (they belong to the old one)
    * and re-runs from 0 to `time` as a normal seek, so the state is exactly what the new scenario
    * gives at that moment; playing resumes if it was playing.
@@ -60,6 +61,12 @@ export interface LoadedInfo {
   /** Scenario time at which the busiest 60-minute arrival window starts. */
   peakStart: number;
   density: { cols: number; rows: number; cellSize: number; originX: number; originY: number };
+  /** Number of cars (0 when nobody comes by car). */
+  vehicleCount: number;
+  /** Roads, aisles, lots, stalls, barriers and crossings to draw; null without cars. */
+  vehicleLayout: VehicleLayout | null;
+  /** Scenario time at which the busiest 15 minutes of the departure curve start; null without departures. */
+  departurePeakStart: number | null;
 }
 
 export interface StatsMessage {
@@ -74,6 +81,12 @@ export interface StatsMessage {
   speed: number;
   countsByState: number[];
   lanes: LaneLive[];
+  /** Cars per AgentState (all zero without cars). */
+  carCounts: number[];
+  /** Live state of every barrier lane (empty without cars). */
+  barriers: BarrierLaneLive[];
+  /** Live state of every parking lot (empty without cars). */
+  lots: LotLive[];
   tick: TickTiming;
   /** Engine checkpoints held for seeking: how many, their total size, the interval (simulated s). */
   checkpoints: { count: number; bytes: number; interval: number };
@@ -94,7 +107,8 @@ export type WorkerResponse =
   | { type: "determinismResult"; hash: string }
   | { type: "error"; message: string }
   | LoadedInfo
-  | { type: "snapshot"; generation: number; buffer: Float32Array; time: number; agentCount: number }
+  /** People (SnapshotField layout) and cars (VehicleSnapshotField layout, empty without cars), as a pair of Transferables. */
+  | { type: "snapshot"; generation: number; buffer: Float32Array; time: number; agentCount: number; vehicles: Float32Array; vehicleCount: number }
   | StatsMessage
   | { type: "metrics"; generation: number; metrics: MetricsSummary }
   | { type: "seekProgress"; generation: number; seekId: number; fraction: number }

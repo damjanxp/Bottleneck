@@ -4,7 +4,7 @@
  * owns the timer and turns wall-clock time into ticks with PlaybackPacer.
  */
 
-import { ENGINE_VERSION, EXPECTED_SELF_CHECK_HASH, PlaybackPacer, TICK_SECONDS, createRun, restoreRun, runSelfCheck, snapshotLength, type Run, type RunCheckpoint } from "@bottleneck/engine";
+import { ENGINE_VERSION, EXPECTED_SELF_CHECK_HASH, PlaybackPacer, TICK_SECONDS, createRun, restoreRun, runSelfCheck, snapshotLength, vehicleSnapshotLength, type Run, type RunCheckpoint } from "@bottleneck/engine";
 import { scanLogFromRun, toScanLogCsv } from "@bottleneck/analysis";
 import type { Scenario, Venue } from "@bottleneck/schema";
 import { tinyScenario, tinyVenue } from "./determinism/tinyScenario.ts";
@@ -28,6 +28,8 @@ const LOOP_BUDGET_MS = 40;
 const SEEK_CHUNK_MS = 30;
 const STATS_EVERY_LOOPS = 4;
 const METRICS_EVERY_LOOPS = 20;
+/** "Jump to departures" seeks to the start of the busiest window of this length on the departure curve (s). */
+const DEPARTURE_PEAK_WINDOW = 900;
 
 let venue: Venue | null = null;
 let scenario: Scenario | null = null;
@@ -40,11 +42,26 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let lastLoop = 0;
 let loopCount = 0;
 let lastSnapshotTime = Number.NaN;
-let freeBuffers: Float32Array[] = [];
+/** Free snapshot buffer pairs (people, cars); two pairs in all, double-buffered with the page. */
+let freeBuffers: SnapshotBuffers[] = [];
 const tickTimes = new RollingSamples(600);
 let seek: { id: number; target: number; from: number; resumePlaying: boolean; cancelled: boolean; startedAt: number } | null = null;
 /** Engine checkpoints of the loaded scenario (review C1); kept across restarts, cleared on load. */
 const checkpoints = new CheckpointStore<RunCheckpoint>();
+
+interface SnapshotBuffers {
+  people: Float32Array;
+  cars: Float32Array;
+}
+
+function newBufferPair(r: Run): SnapshotBuffers {
+  return { people: new Float32Array(snapshotLength(r.agentCount)), cars: new Float32Array(vehicleSnapshotLength(r.vehicleCount)) };
+}
+
+/** Transfer list of a buffer pair: zero-length car buffers (no cars) are simply copied. */
+function transferables(b: SnapshotBuffers): Transferable[] {
+  return b.cars.length > 0 ? [b.people.buffer, b.cars.buffer] : [b.people.buffer];
+}
 
 function post(message: WorkerResponse, transfer?: Transferable[]): void {
   scope.postMessage(message, transfer);
@@ -74,11 +91,12 @@ function postSnapshot(force = false): void {
   if (!run) return;
   const time = run.toScenarioTime(run.time);
   if (!force && time === lastSnapshotTime) return;
-  const buffer = freeBuffers.pop();
-  if (!buffer) return; // both buffers are with the main thread: drop, never queue
-  run.writeSnapshot(buffer);
+  const pair = freeBuffers.pop();
+  if (!pair) return; // both buffer pairs are with the main thread: drop, never queue
+  run.writeSnapshot(pair.people);
+  if (pair.cars.length > 0) run.writeVehicleSnapshot(pair.cars);
   lastSnapshotTime = time;
-  post({ type: "snapshot", generation, buffer, time, agentCount: run.agentCount }, [buffer.buffer]);
+  post({ type: "snapshot", generation, buffer: pair.people, time, agentCount: run.agentCount, vehicles: pair.cars, vehicleCount: run.vehicleCount }, transferables(pair));
 }
 
 function postStats(): void {
@@ -94,6 +112,9 @@ function postStats(): void {
     speed: pacer.speed,
     countsByState: run.countsByState(),
     lanes: run.laneStates(),
+    carCounts: run.carCountsByState(),
+    barriers: run.barrierStates(),
+    lots: run.lotStates(),
     tick: { p50: tickTimes.percentile(0.5), p95: tickTimes.percentile(0.95), samples: tickTimes.size },
     checkpoints: { count: checkpoints.size, bytes: checkpoints.totalBytes, interval: checkpoints.interval },
   };
@@ -184,8 +205,7 @@ function load(v: Venue, s: Scenario, speed: number): void {
   run = newRun();
   // Size the checkpoint interval from a checkpoint of the fresh run (review C1, see checkpoints.ts).
   checkpoints.clear(chooseInterval(run.toEngineTime(run.parameters.horizon), checkpointBytes(run.saveCheckpoint())));
-  const len = snapshotLength(run.agentCount);
-  freeBuffers = [new Float32Array(len), new Float32Array(len)];
+  freeBuffers = [newBufferPair(run), newBufferPair(run)];
   lastSnapshotTime = Number.NaN;
   const p = run.parameters;
   const d = run.density;
@@ -199,6 +219,9 @@ function load(v: Venue, s: Scenario, speed: number): void {
     parameters: p,
     peakStart: Math.max(run.toScenarioTime(0), peakWindowStart(p.arrivalCurve)),
     density: { cols: d.cols, rows: d.rows, cellSize: d.cellSize, originX: d.originX, originY: d.originY },
+    vehicleCount: run.vehicleCount,
+    vehicleLayout: run.vehicleLayout,
+    departurePeakStart: p.departureCurve && p.departureCurve.length > 0 ? Math.max(run.toScenarioTime(0), peakWindowStart(p.departureCurve, DEPARTURE_PEAK_WINDOW)) : null,
   });
   postAll();
 }
@@ -223,10 +246,11 @@ function replaceScenario(s: Scenario, target: number, id: number): void {
   playing = false;
   pacer.reset();
   const before = run.agentCount;
+  const carsBefore = run.vehicleCount;
   scenario = s;
   run = newRun();
-  if (run.agentCount !== before) {
-    // Only bus bursts change the head count; lane events never do. Reload properly to resize buffers.
+  if (run.agentCount !== before || run.vehicleCount !== carsBefore) {
+    // Only bus bursts change the head count; lane and lot events never do. Reload properly to resize buffers.
     load(venue, s, pacer.speed);
     return;
   }
@@ -331,7 +355,7 @@ scope.onmessage = (event) => {
         if (seek) seek.cancelled = true;
         break;
       case "returnBuffer":
-        if (msg.generation === generation && run && msg.buffer.length === snapshotLength(run.agentCount) && freeBuffers.length < 2) freeBuffers.push(msg.buffer);
+        if (msg.generation === generation && run && msg.buffer.length === snapshotLength(run.agentCount) && msg.vehicles.length === vehicleSnapshotLength(run.vehicleCount) && freeBuffers.length < 2) freeBuffers.push({ people: msg.buffer, cars: msg.vehicles });
         break;
       case "setDensity":
         densityOn = msg.enabled;

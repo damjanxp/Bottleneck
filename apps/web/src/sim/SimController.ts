@@ -9,6 +9,9 @@ import type { LoadedInfo, MetricsSummary, StatsMessage, WorkerRequest, WorkerRes
 export interface Snapshot {
   buffer: Float32Array;
   agentCount: number;
+  /** Cars, VehicleSnapshotField layout (empty without cars). */
+  vehicles: Float32Array;
+  vehicleCount: number;
   /** Scenario time of the snapshot. */
   time: number;
   /** performance.now() when it arrived. */
@@ -98,7 +101,7 @@ export class SimController {
     this.send({ type: "seek", time, seekId });
     return seekId;
   }
-  /** Swaps in an edited scenario (a recorded lane event) and replays exactly to `time`; returns the seek id. */
+  /** Swaps in an edited scenario (a recorded lane or lot event) and replays exactly to `time`; returns the seek id. */
   replaceScenario(scenario: Scenario, time: number): number {
     const seekId = this.nextSeekId++;
     this.setSeek({ seekId, target: time, fraction: 0 });
@@ -145,9 +148,13 @@ export class SimController {
         if (msg.generation !== this.generation) return; // stale size: let the buffer go
         const previous = this.latest;
         const receivedAt = performance.now();
-        this.latest = { buffer: msg.buffer, agentCount: msg.agentCount, time: msg.time, receivedAt };
-        this.bytesWindow.push({ at: receivedAt, bytes: msg.buffer.byteLength });
-        if (previous) this.send({ type: "returnBuffer", buffer: previous.buffer, generation: this.generation }, [previous.buffer.buffer]);
+        this.latest = { buffer: msg.buffer, agentCount: msg.agentCount, vehicles: msg.vehicles, vehicleCount: msg.vehicleCount, time: msg.time, receivedAt };
+        this.bytesWindow.push({ at: receivedAt, bytes: msg.buffer.byteLength + msg.vehicles.byteLength });
+        if (previous) {
+          const transfer: Transferable[] = [previous.buffer.buffer];
+          if (previous.vehicles.length > 0) transfer.push(previous.vehicles.buffer);
+          this.send({ type: "returnBuffer", buffer: previous.buffer, vehicles: previous.vehicles, generation: this.generation }, transfer);
+        }
         const latest = this.latest;
         this.emit((l) => l.onSnapshot?.(latest));
         break;

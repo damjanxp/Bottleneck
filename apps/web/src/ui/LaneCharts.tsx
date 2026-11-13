@@ -7,7 +7,7 @@ import { laneSeries, type ChartSeries } from "../sim/series.ts";
 import { strings } from "../strings.ts";
 import { LaneWaits, ManualBadge } from "./Panels.tsx";
 
-function Chart({ title, series, anchor, fixedStart, color, bars, unit }: { title: string; series: ChartSeries; anchor: number; fixedStart: boolean; color: string; bars?: boolean; unit: string }) {
+export function Chart({ title, series, anchor, fixedStart, color, bars, unit }: { title: string; series: ChartSeries; anchor: number; fixedStart: boolean; color: string; bars?: boolean; unit: string }) {
   const host = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
 

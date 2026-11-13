@@ -9,15 +9,19 @@ import type { FrameStats, VenueRenderer } from "../render/VenueRenderer.ts";
 import { formatBytesPerSecond, formatCount, formatDuration, formatRelativeClock } from "../sim/format.ts";
 import { MAX_LANES, headlines, laneLabel, withExtraLane, worstLane } from "../sim/headline.ts";
 import { describeParameters, elementName } from "../sim/parameters.ts";
+import { barrierRows, eventPhase, lotRows, parkingHeadlines, withLotClosed } from "../sim/parking.ts";
 import { SimController, type SeekState } from "../sim/SimController.ts";
 import { strings } from "../strings.ts";
 import type { LoadedInfo, MetricsSummary, StatsMessage } from "../workerProtocol.ts";
 import { downloadText } from "./browserFiles.ts";
 import { Legend } from "./Legend.tsx";
 import { CapacityTable, ClockDisplay, Headlines, LaneTable, ParametersList, StateCounts, WorstLane, type ClockInfo } from "./Panels.tsx";
+import { BarrierTable, CarCounts, LotTable, ParkingHeadlineCard } from "./ParkingPanels.tsx";
 import { btn, btnPrimary, btnSmall } from "./styles.ts";
 
 const LaneCharts = lazy(() => import("./LaneCharts.tsx").then((m) => ({ default: m.LaneCharts })));
+const LotChart = lazy(() => import("./ParkingCharts.tsx").then((m) => ({ default: m.LotChart })));
+const BarrierChart = lazy(() => import("./ParkingCharts.tsx").then((m) => ({ default: m.BarrierChart })));
 
 const SPEEDS = [1, 2, 5, 10, 30, 60].filter((s) => s >= MIN_SPEED && s <= MAX_SPEED);
 const DEFAULT_SPEED = 30;
@@ -66,6 +70,8 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
   const [seek, setSeek] = useState<SeekState | null>(null);
   const [heatmap, setHeatmap] = useState(false);
   const [selectedLane, setSelectedLane] = useState<number | null>(null);
+  const [lotChart, setLotChart] = useState<string | null>(null);
+  const [barrierChart, setBarrierChart] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(() => typeof window === "undefined" || window.innerWidth >= NARROW_PX);
   const [error, setError] = useState<string | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
@@ -104,6 +110,8 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
         setMetrics(null);
         setStats(null);
         setSelectedLane(null);
+        setLotChart(null);
+        setBarrierChart(null);
         setError(null);
         if (!prefersReducedMotion()) c.play();
       },
@@ -113,6 +121,7 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
         const r = rendererRef.current;
         if (r) {
           r.setLaneStates(s.lanes);
+          r.setBarrierStates(s.barriers);
           r.setPlayback(s.playing, s.speed);
           const info = loadedRef.current;
           if (s.density && info) r.setDensity({ data: s.density, ...info.density });
@@ -163,7 +172,7 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
         r.onLaneClick = (id) => setSelectedLane(id);
         const info = loadedRef.current;
         const c = controllerRef.current;
-        if (info) r.setVenue(venue, info.lanes);
+        if (info) r.setVenue(venue, info.lanes, info.vehicleLayout);
         if (c?.latest) r.setSnapshot(c.latest);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
@@ -179,7 +188,7 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
   // New venue geometry for the renderer.
   useEffect(() => {
     const r = rendererRef.current;
-    if (r && loaded) r.setVenue(venue, loaded.lanes);
+    if (r && loaded) r.setVenue(venue, loaded.lanes, loaded.vehicleLayout);
   }, [loaded, venue]);
 
   useEffect(() => {
@@ -249,6 +258,16 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
     setApplyingSeek(c.replaceScenario(next, at));
   };
 
+  /** Interactive "close lot now": a lotClose timed event at the current time in the working copy, like a lane failure. */
+  const onLotClose = (lotId: string) => {
+    const c = controllerRef.current;
+    if (!c || seek) return;
+    const at = time;
+    const next = withLotClosed(effective, lotId, at);
+    setWorkingState({ base: scenario, scenario: next, added: (working?.added ?? 0) + 1 });
+    setApplyingSeek(c.replaceScenario(next, at));
+  };
+
   const discardWorking = () => {
     const c = controllerRef.current;
     setWorkingState(null);
@@ -278,13 +297,21 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
 
   const worst = stats ? worstLane(stats.lanes) : null;
   const worstElement = worst && loaded ? loaded.lanes.find((l) => l.laneId === worst.laneId)?.elementId : undefined;
-  const heads = metrics ? headlines(metrics, scenario.timeline.eventStart, done ? Infinity : time) : [];
+  // The pedestrian headlines are about gates; a venue without gates or screening (a car park on its own) skips them.
+  const hasGates = venue.gateGroups.length + venue.screeningStages.length > 0;
+  const heads = metrics && hasGates ? headlines(metrics, scenario.timeline.eventStart, done ? Infinity : time) : [];
   const busy = !loaded || seek !== null;
   const names = (id: string) => elementName(venue, id);
   const selectedReport = selectedLane !== null ? metrics?.lanes.find((l) => l.laneId === selectedLane) : undefined;
   const selectedLayout = selectedLane !== null ? loaded?.lanes.find((l) => l.laneId === selectedLane) : undefined;
   const selectedLive = selectedLane !== null ? stats?.lanes[selectedLane] : undefined;
 
+  const layout = loaded?.vehicleLayout ?? null;
+  const parkingHeads = metrics?.parking ? parkingHeadlines(metrics.parking, metrics.departures, done) : null;
+  const lots = layout && stats ? lotRows(layout, stats.lots, metrics?.parking?.lots) : [];
+  const barriers = layout && stats ? barrierRows(layout, stats.barriers, metrics?.parking?.barriers) : [];
+  const phase = loaded ? eventPhase(scrub ?? time, scenario.timeline, loaded.parameters.departureCurve) : undefined;
+  const lotChartReport = lotChart ? metrics?.parking?.lots.find((l) => l.lotId === lotChart) : undefined;
   const statusNote = stats?.done ? (stats.deadlock ? strings.controls.deadlock : stats.drained ? strings.controls.drained : strings.controls.horizon) : null;
 
   return (
@@ -308,6 +335,11 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
             <button type="button" className={btn} onClick={() => loaded && controllerRef.current?.seek(loaded.peakStart)} disabled={!loaded || seek !== null} title={strings.controls.jumpToPeakHint}>
               {strings.controls.jumpToPeak}
             </button>
+            {loaded?.departurePeakStart !== null && loaded?.departurePeakStart !== undefined && (
+              <button type="button" className={btn} onClick={() => loaded.departurePeakStart !== null && controllerRef.current?.seek(loaded.departurePeakStart)} disabled={seek !== null} title={strings.controls.jumpToDeparturesHint}>
+                {strings.controls.jumpToDepartures}
+              </button>
+            )}
             <label className="flex items-center gap-1 text-sm">
               {strings.controls.speed}
               <select className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900" value={speed} onChange={(e) => onSpeed(Number(e.target.value))}>
@@ -350,7 +382,7 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
             )}
           </div>
 
-          <ClockDisplay time={scrub ?? time} clock={clock} />
+          <ClockDisplay time={scrub ?? time} clock={clock} phase={phase} />
 
           {/* Scrubber */}
           {loaded && (
@@ -433,11 +465,12 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
           ) : (
             <p className="text-sm text-slate-500">{strings.controls.mapHiddenNote}</p>
           )}
-          <Legend heatmap={heatmap} />
+          <Legend heatmap={heatmap} cars={layout !== null} />
           {venue.attribution && <p className="text-xs text-slate-500">{venue.attribution}</p>}
         </section>
 
         <aside className="flex min-w-0 flex-col gap-3">
+          {parkingHeads && <ParkingHeadlineCard h={parkingHeads} names={names} clock={clock} />}
           {heads.length > 0 && <Headlines items={heads} clock={clock} />}
           <WorstLane name={worst ? (laneNames.get(worst.laneId) ?? null) : null} queue={worst?.queueLength ?? 0} onAddLane={worstElement ? () => onAddLane(worstElement) : undefined} addDisabled={busy} />
           {selectedLayout && (
@@ -481,7 +514,20 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
           )}
           {metrics && metrics.elements.length > 0 && <CapacityTable elements={metrics.elements} names={names} clock={clock} onAddLane={onAddLane} addDisabled={busy} />}
           {loaded && stats && <LaneTable lanes={loaded.lanes} states={stats.lanes} names={laneNames} selected={selectedLane} onSelect={(id) => setSelectedLane((cur) => (cur === id ? null : id))} />}
-          {stats && <StateCounts counts={stats.countsByState} time={stats.time} />}
+          {layout && stats && <CarCounts counts={stats.carCounts} />}
+          {layout && stats && <LotTable rows={lots} onClose={onLotClose} closeDisabled={busy || done} onCharts={(id) => setLotChart((cur) => (cur === id ? null : id))} chartsFor={lotChart} />}
+          {lotChartReport && loaded && (
+            <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts.loading}</p>}>
+              <LotChart name={names(lotChartReport.lotId)} report={lotChartReport} startTime={loaded.startTime} binSeconds={loaded.parameters.throughputBin} anchor={clock.anchor} fixedStart={clock.fixedStart} />
+            </Suspense>
+          )}
+          {layout && stats && <BarrierTable rows={barriers} clock={clock} onCharts={(id) => setBarrierChart((cur) => (cur === id ? null : id))} chartsFor={barrierChart} />}
+          {barrierChart && metrics?.parking && loaded && (
+            <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts.loading}</p>}>
+              <BarrierChart name={names(barrierChart)} barrierId={barrierChart} lanes={metrics.parking.barrierLanes} startTime={loaded.startTime} queueInterval={loaded.parameters.queueSampleInterval} anchor={clock.anchor} fixedStart={clock.fixedStart} />
+            </Suspense>
+          )}
+          {stats && <StateCounts counts={stats.countsByState} time={stats.time} cars={layout !== null} leaving={!!loaded?.parameters.departureCurve} />}
           {paramRows.length > 0 && <ParametersList rows={paramRows} />}
           {!showMap && perf && <PerfOverlay controller={controllerRef} renderer={rendererRef} stats={stats} agentCount={loaded?.agentCount ?? 0} />}
         </aside>
