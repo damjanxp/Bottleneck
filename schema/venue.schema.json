@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "venue.schema.json",
   "title": "Venue",
-  "description": "One site: background image, scale and every drawn element. Geometry is stored in metres, never pixels. Vehicle elements (roads, barriers, lots, crossings) are added in Phase 3.",
+  "description": "One site: background image, scale and every drawn element. Geometry is stored in metres, never pixels. Vehicle elements (roads, vehicle sources, barriers, parking lots, crossings) are optional; a venue without them is pedestrian-only.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -80,6 +80,41 @@
       "maxItems": 100,
       "items": {
         "$ref": "#/definitions/Destination"
+      }
+    },
+    "roads": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/definitions/Road"
+      }
+    },
+    "vehicleSources": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/definitions/VehicleSource"
+      }
+    },
+    "vehicleBarriers": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/definitions/VehicleBarrier"
+      }
+    },
+    "parkingLots": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "$ref": "#/definitions/ParkingLot"
+      }
+    },
+    "crossings": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/definitions/Crossing"
       }
     }
   },
@@ -351,6 +386,383 @@
         },
         "area": {
           "$ref": "common.schema.json#/definitions/Polygon"
+        }
+      }
+    },
+    "Road": {
+      "title": "Road",
+      "description": "A road cars drive along: a polyline in metres. Roads connect where an end point meets another road's end point or touches another road (within 1 m). oneWay roads are driven from the first point to the last. laneCount is per direction. A queue that backs up onto a road marked publicRoad has reached the public road (spec 4.3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "points",
+        "direction",
+        "laneCount"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 500,
+          "items": {
+            "$ref": "common.schema.json#/definitions/Point"
+          }
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "oneWay",
+            "twoWay"
+          ]
+        },
+        "laneCount": {
+          "description": "Lanes per direction.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "freeSpeed": {
+          "description": "Free speed in km/h (default 25, assumed).",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 130
+        },
+        "publicRoad": {
+          "description": "True if this road is public road outside the site: an entry queue that reaches it is recorded.",
+          "type": "boolean"
+        }
+      }
+    },
+    "VehicleSource": {
+      "title": "VehicleSource",
+      "description": "Where cars enter the model: a point on a road (snapped to the nearest road). Cars from all vehicle sources are split by share. lotId sends them to one lot; otherwise each car heads for the lot whose entry is quickest to reach.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "position",
+        "share"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "position": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "share": {
+          "description": "Relative weight of car arrivals from this source.",
+          "type": "number",
+          "minimum": 0
+        },
+        "lotId": {
+          "$ref": "common.schema.json#/definitions/Id"
+        }
+      }
+    },
+    "VehicleBarrier": {
+      "title": "VehicleBarrier",
+      "description": "A group of entry or exit lanes across a road, at `position` (snapped onto the road). It controls the road's drawn direction (first point to last). Each lane serves one car at a time. Default service times (assumed, spec section 5): entry ticket 5-10 s; plate and card 4-8 s; exit 4-8 s; pay at the barrier (or at an exit of a lot whose paymentMode is payAtBarrier) a card/cash mix. A plate misread sends the car through the slower fallback.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "roadId",
+        "position",
+        "kind",
+        "laneCount",
+        "serviceType"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "roadId": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "position": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "entry",
+            "exit"
+          ]
+        },
+        "laneCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "serviceType": {
+          "$ref": "common.schema.json#/definitions/BarrierServiceType"
+        },
+        "serviceTime": {
+          "$ref": "common.schema.json#/definitions/Distribution"
+        },
+        "misread": {
+          "description": "Plate recognition only (default: 5% of cars, fallback 15-30 s, assumed).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rate",
+            "fallbackTime"
+          ],
+          "properties": {
+            "rate": {
+              "$ref": "common.schema.json#/definitions/Probability"
+            },
+            "fallbackTime": {
+              "$ref": "common.schema.json#/definitions/Distribution"
+            }
+          }
+        }
+      }
+    },
+    "StallRow": {
+      "title": "StallRow",
+      "description": "A row of `count` stalls side by side along the line a-b (the stall fronts, at the aisle). The stalls extend `depth` metres to `side` of the line (right: the side where cross(b - a, p - a) > 0, i.e. the right-hand side looking from a to b in the y-down picture), or to both sides (count stalls each).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "a",
+        "b",
+        "count",
+        "side"
+      ],
+      "properties": {
+        "a": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "b": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right",
+            "both"
+          ]
+        },
+        "depth": {
+          "description": "Stall depth in metres (default 5).",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 20
+        },
+        "angle": {
+          "description": "Display only: stall angle to the row line in degrees (default 90).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 180
+        }
+      }
+    },
+    "Stall": {
+      "title": "Stall",
+      "description": "One stall drawn on its own: centre position and, for display, the heading of a parked car in degrees (0 = +x, 90 = +y).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position"
+      ],
+      "properties": {
+        "position": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "angle": {
+          "type": "number",
+          "minimum": -360,
+          "maximum": 360
+        }
+      }
+    },
+    "Aisle": {
+      "title": "Aisle",
+      "description": "A two-way parking aisle (polyline) cars drive along at the aisle speed (default 8 km/h, assumed). Aisles connect to each other and to roads like roads do.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "points"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 500,
+          "items": {
+            "$ref": "common.schema.json#/definitions/Point"
+          }
+        }
+      }
+    },
+    "PayStation": {
+      "title": "PayStation",
+      "description": "Pay machines on foot: a pedestrian queue element like a gate group (lanes spaced along `line`, people pass from the outside to the inside). Default service time per payer: a card/cash mix (assumed).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "line",
+        "laneCount",
+        "queueLength"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "line": {
+          "$ref": "#/definitions/LaneLine"
+        },
+        "laneCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "queueLength": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "serviceTime": {
+          "$ref": "common.schema.json#/definitions/Distribution"
+        }
+      }
+    },
+    "ParkingLot": {
+      "title": "ParkingLot",
+      "description": "A zone with stalls and aisles, linked to roads by its barriers. Capacity is its stall count (rows plus single stalls). Occupants get out after the exit delay and walk in a straight line from the stall to walkingExit (inside the lot they are not on the walking grid), then on as pedestrians. Defaults: stallChoice nearestEntry, overflow leave, paymentMode prepaid.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "outline",
+        "aisles",
+        "entryBarrierIds",
+        "exitBarrierIds",
+        "walkingExit"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "outline": {
+          "$ref": "common.schema.json#/definitions/Polygon"
+        },
+        "stallRows": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/definitions/StallRow"
+          }
+        },
+        "stalls": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "$ref": "#/definitions/Stall"
+          }
+        },
+        "aisles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/definitions/Aisle"
+          }
+        },
+        "entryBarrierIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "common.schema.json#/definitions/Id"
+          }
+        },
+        "exitBarrierIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "common.schema.json#/definitions/Id"
+          }
+        },
+        "walkingExit": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "payStation": {
+          "$ref": "#/definitions/PayStation"
+        },
+        "stallChoice": {
+          "$ref": "common.schema.json#/definitions/StallChoice"
+        },
+        "overflow": {
+          "$ref": "common.schema.json#/definitions/OverflowRule"
+        },
+        "paymentMode": {
+          "$ref": "common.schema.json#/definitions/PaymentMode"
+        }
+      }
+    },
+    "Crossing": {
+      "title": "Crossing",
+      "description": "Where a walkway crosses a road or aisle: the segment a-b across it, `width` metres wide (default 4). Cars stop before it while a pedestrian is on it; pedestrians wait while a stopped car stands across it. The walkable area must include the crossing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "a",
+        "b"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "name": {
+          "$ref": "common.schema.json#/definitions/Name"
+        },
+        "a": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "b": {
+          "$ref": "common.schema.json#/definitions/Point"
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 20
         }
       }
     }

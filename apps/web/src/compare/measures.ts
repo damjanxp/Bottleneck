@@ -7,21 +7,26 @@
 
 import { summarise, type Summary } from "@bottleneck/analysis";
 import { formatCount, formatDuration, formatPercent } from "../sim/format.ts";
+import { timeToEmpty } from "../sim/parking.ts";
 import type { MetricsSummary } from "../workerProtocol.ts";
 
 export type MeasureKey = "stillOutside" | "onSite" | "notArrived" | "p95PeakWait" | "meanWait" | "p95Wait" | "shareInside";
-export type MeasureUnit = "people" | "duration" | "share";
+/** "flag" is 1 (yes) or 0 (no) per run; a batch shows the share of seeds where it happened. */
+export type MeasureUnit = "people" | "duration" | "share" | "cars" | "metres" | "flag";
 
 export interface Measure {
-  key: MeasureKey;
+  /** A MeasureKey, or "parking.…", "lot.<id>.…", "barrier.<id>.…" for the car measures. */
+  key: string;
   label: string;
   unit: MeasureUnit;
   lowerIsBetter: boolean;
-  /** Shown indented under the measure above it (the outside-at-start split). */
+  /** Shown indented under the measure above it (the outside-at-start split, per-lot and per-barrier rows). */
   sub: boolean;
+  /** The value of this measure in one run's metrics, or null if it does not apply. */
+  read: (m: MetricsSummary) => number | null;
 }
 
-const MEASURES: Record<MeasureKey, Omit<Measure, "key">> = {
+const MEASURES: Record<MeasureKey, Omit<Measure, "key" | "read">> = {
   stillOutside: { label: "Still outside at the start", unit: "people", lowerIsBetter: true, sub: false },
   onSite: { label: "of them already on site", unit: "people", lowerIsBetter: true, sub: true },
   notArrived: { label: "of them not arrived yet", unit: "people", lowerIsBetter: true, sub: true },
@@ -34,7 +39,51 @@ const MEASURES: Record<MeasureKey, Omit<Measure, "key">> = {
 /** The measures for a fixed-start event (leading with people outside at the start) or an open-door one. */
 export function measuresFor(fixedStart: boolean): Measure[] {
   const keys: MeasureKey[] = fixedStart ? ["stillOutside", "onSite", "notArrived", "p95PeakWait", "meanWait", "p95Wait", "shareInside"] : ["shareInside", "p95PeakWait", "meanWait", "p95Wait"];
-  return keys.map((key) => ({ key, ...MEASURES[key] }));
+  return keys.map((key) => ({ key, ...MEASURES[key], read: (m: MetricsSummary) => measureValue(m, key) }));
+}
+
+/**
+ * Car and parking measures (spec 4.4, 4.5) for the lots and barriers of `sample` (a run of the
+ * baseline): the headline numbers, then one block per lot and per barrier. Empty without cars.
+ * Lower is better for all of them: time until the lots are empty, queues, cars turned away or
+ * diverted, search time, and whether an entry queue reached the public road.
+ */
+export function parkingMeasures(sample: MetricsSummary | null, name: (id: string) => string): Measure[] {
+  const p = sample?.parking;
+  if (!p) return [];
+  const flag = (b: boolean) => (b ? 1 : 0);
+  const out: Measure[] = [
+    { key: "parking.timeToEmpty", label: "Time until the car park is empty (after the event end)", unit: "duration", lowerIsBetter: true, sub: false, read: (m) => (m.parking ? timeToEmpty(m.parking, m.departures, true).seconds : null) },
+    { key: "parking.exitQueue", label: "Longest exit queue", unit: "metres", lowerIsBetter: true, sub: false, read: (m) => maxQueue(m, "exit") },
+    { key: "parking.entryQueue", label: "Longest entry queue", unit: "metres", lowerIsBetter: true, sub: false, read: (m) => maxQueue(m, "entry") },
+    { key: "parking.publicRoad", label: "Entry queue reached the public road", unit: "flag", lowerIsBetter: true, sub: false, read: (m) => (m.parking ? flag(m.parking.barriers.some((b) => b.kind === "entry" && b.reachedPublicRoadAt !== null)) : null) },
+    { key: "parking.turnedAway", label: "Cars turned away", unit: "cars", lowerIsBetter: true, sub: false, read: (m) => m.parking?.turnedAwayCars ?? null },
+    { key: "parking.diverted", label: "Cars diverted to another lot", unit: "cars", lowerIsBetter: true, sub: false, read: (m) => m.parking?.divertedCars ?? null },
+  ];
+  for (const lot of p.lots) {
+    const id = lot.lotId;
+    const get = (m: MetricsSummary) => m.parking?.lots.find((l) => l.lotId === id);
+    out.push(
+      { key: `lot.${id}.timeToEmpty`, label: `${name(id)}: time until empty`, unit: "duration", lowerIsBetter: true, sub: true, read: (m) => get(m)?.timeToEmpty ?? null },
+      { key: `lot.${id}.turnedAway`, label: `${name(id)}: cars turned away`, unit: "cars", lowerIsBetter: true, sub: true, read: (m) => get(m)?.turnedAway ?? null },
+      { key: `lot.${id}.search`, label: `${name(id)}: mean time to find a stall`, unit: "duration", lowerIsBetter: true, sub: true, read: (m) => get(m)?.meanSearchTime ?? null },
+    );
+  }
+  for (const b of p.barriers) {
+    const id = b.barrierId;
+    const get = (m: MetricsSummary) => m.parking?.barriers.find((x) => x.barrierId === id);
+    out.push(
+      { key: `barrier.${id}.maxQueue`, label: `${name(id)}: longest queue`, unit: "metres", lowerIsBetter: true, sub: true, read: (m) => get(m)?.maxQueueMetres ?? null },
+      { key: `barrier.${id}.meanQueue`, label: `${name(id)}: mean queue`, unit: "metres", lowerIsBetter: true, sub: true, read: (m) => get(m)?.meanQueueMetres ?? null },
+    );
+    if (b.kind === "entry") out.push({ key: `barrier.${id}.publicRoad`, label: `${name(id)}: queue reached the public road`, unit: "flag", lowerIsBetter: true, sub: true, read: (m) => { const x = get(m); return x ? flag(x.reachedPublicRoadAt !== null) : null; } });
+  }
+  return out;
+}
+
+function maxQueue(m: MetricsSummary, kind: "entry" | "exit"): number | null {
+  const bs = m.parking?.barriers.filter((b) => b.kind === kind) ?? [];
+  return bs.length === 0 ? null : Math.max(...bs.map((b) => b.maxQueueMetres));
 }
 
 export function measureValue(m: MetricsSummary, key: MeasureKey): number | null {
@@ -64,6 +113,12 @@ export function formatValue(unit: MeasureUnit, v: number): string {
       return formatDuration(v);
     case "share":
       return formatPercent(v, 1);
+    case "cars":
+      return `${formatCount(v)} cars`;
+    case "metres":
+      return `${formatCount(v)} m`;
+    case "flag":
+      return v >= 1 ? "yes" : v <= 0 ? "no" : `yes in ${formatPercent(v)} of seeds`;
   }
 }
 
@@ -78,12 +133,18 @@ export function formatDelta(unit: MeasureUnit, d: number): string {
       return `${sign}${formatDuration(a)}`;
     case "share":
       return `${sign}${(a * 100).toFixed(1)} points`;
+    case "cars":
+      return `${sign}${formatCount(a)} cars`;
+    case "metres":
+      return `${sign}${formatCount(a)} m`;
+    case "flag":
+      return `${sign}${(a * 100).toFixed(0)} points`;
   }
 }
 
 /** Differences smaller than this are "no change" (a person, half a second, 0.05 percentage points). */
 function negligible(unit: MeasureUnit): number {
-  return unit === "people" ? 0.5 : unit === "duration" ? 0.5 : 0.0005;
+  return unit === "people" || unit === "cars" || unit === "metres" || unit === "duration" ? 0.5 : unit === "flag" ? 0.01 : 0.0005;
 }
 
 export type Verdict = "better" | "worse" | "same" | "unclear";
@@ -127,7 +188,8 @@ export function compareValues(m: Measure, base: number | null, other: number | n
 export function formatSummary(unit: MeasureUnit, s: Summary): string {
   if (!Number.isFinite(s.mean)) return "–";
   if (s.n < 2 || !Number.isFinite(s.ci95HalfWidth)) return formatValue(unit, s.mean);
-  const half = unit === "people" ? `${formatCount(s.ci95HalfWidth)}` : unit === "duration" ? formatDuration(s.ci95HalfWidth) : `${(s.ci95HalfWidth * 100).toFixed(1)} points`;
+  if (unit === "flag") return formatValue(unit, s.mean);
+  const half = unit === "people" || unit === "cars" ? `${formatCount(s.ci95HalfWidth)}` : unit === "metres" ? `${formatCount(s.ci95HalfWidth)} m` : unit === "duration" ? formatDuration(s.ci95HalfWidth) : `${(s.ci95HalfWidth * 100).toFixed(1)} points`;
   return `${formatValue(unit, s.mean)} ± ${half}`;
 }
 

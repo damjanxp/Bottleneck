@@ -29,6 +29,18 @@ export type BaseDistribution =
   | ShiftedLognormalDistribution;
 export type Probability = number;
 /**
+ * How a barrier identifies (or charges) a car: 'ticket' (take or insert a ticket), 'plate' (plate recognition, with misreads), 'card' (tap a card or season pass), 'payAtBarrier' (pay at the barrier itself, card or cash).
+ */
+export type BarrierServiceType = "ticket" | "plate" | "card" | "payAtBarrier";
+/**
+ * Which free stall a car takes: the one quickest to drive to from its entry barrier, or the one nearest to the lot's walking exit.
+ */
+export type StallChoice = "nearestEntry" | "nearestWalkingExit";
+/**
+ * Where drivers pay: at the lot's pay station on foot before walking to the car, at the exit barrier (longer barrier service), or not at all on site (prepaid).
+ */
+export type PaymentMode = "payStation" | "payAtBarrier" | "prepaid";
+/**
  * Picks the arrival preset and which headline metrics apply. 'fair' is open-door (no fixed start).
  */
 export type EventType = "concert" | "stadium" | "fair" | "conference";
@@ -40,7 +52,7 @@ export type Seconds = number;
  * Bag policy at the screening stages; picks their service time (assumed values): 'none' (walk-through only, mean 2.5 s, at least 1.5 s), 'clearBag' (clear bags only, mean 4 s, at least 2 s), 'fullSearch' (every bag searched, mean 10 s, at least 4 s). Unset: the venue's own screening times. An element override's serviceTime still wins.
  */
 export type BagPolicy = "none" | "clearBag" | "fullSearch";
-export type TimedEvent = LaneFailEvent | LaneReopenEvent | BusBurstEvent;
+export type TimedEvent = LaneFailEvent | LaneReopenEvent | BusBurstEvent | LotCloseEvent;
 
 /**
  * Every document type in /schema. Generated only to emit all types into one file.
@@ -51,7 +63,7 @@ export interface SchemaBundle {
   run?: RunRecord;
 }
 /**
- * One site: background image, scale and every drawn element. Geometry is stored in metres, never pixels. Vehicle elements (roads, barriers, lots, crossings) are added in Phase 3.
+ * One site: background image, scale and every drawn element. Geometry is stored in metres, never pixels. Vehicle elements (roads, vehicle sources, barriers, parking lots, crossings) are optional; a venue without them is pedestrian-only.
  */
 export interface Venue {
   schemaVersion: 1;
@@ -88,6 +100,26 @@ export interface Venue {
    * @maxItems 100
    */
   destinations: Destination[];
+  /**
+   * @maxItems 500
+   */
+  roads?: Road[];
+  /**
+   * @maxItems 50
+   */
+  vehicleSources?: VehicleSource[];
+  /**
+   * @maxItems 100
+   */
+  vehicleBarriers?: VehicleBarrier[];
+  /**
+   * @maxItems 50
+   */
+  parkingLots?: ParkingLot[];
+  /**
+   * @maxItems 200
+   */
+  crossings?: Crossing[];
 }
 /**
  * The map image the venue is drawn on. Display only: the simulation never reads it. origin is where the image top-left corner sits, in venue metres.
@@ -255,7 +287,164 @@ export interface Destination {
   area: Polygon;
 }
 /**
- * All inputs for one run against a venue. Times are seconds relative to t = 0; for fixed-start events t = 0 is the event start, for open-door events it is the opening time.
+ * A road cars drive along: a polyline in metres. Roads connect where an end point meets another road's end point or touches another road (within 1 m). oneWay roads are driven from the first point to the last. laneCount is per direction. A queue that backs up onto a road marked publicRoad has reached the public road (spec 4.3).
+ */
+export interface Road {
+  id: Id;
+  name?: Name;
+  /**
+   * @minItems 2
+   * @maxItems 500
+   */
+  points: Point[];
+  direction: "oneWay" | "twoWay";
+  /**
+   * Lanes per direction.
+   */
+  laneCount: number;
+  /**
+   * Free speed in km/h (default 25, assumed).
+   */
+  freeSpeed?: number;
+  /**
+   * True if this road is public road outside the site: an entry queue that reaches it is recorded.
+   */
+  publicRoad?: boolean;
+}
+/**
+ * Where cars enter the model: a point on a road (snapped to the nearest road). Cars from all vehicle sources are split by share. lotId sends them to one lot; otherwise each car heads for the lot whose entry is quickest to reach.
+ */
+export interface VehicleSource {
+  id: Id;
+  name: Name;
+  position: Point;
+  /**
+   * Relative weight of car arrivals from this source.
+   */
+  share: number;
+  lotId?: Id;
+}
+/**
+ * A group of entry or exit lanes across a road, at `position` (snapped onto the road). It controls the road's drawn direction (first point to last). Each lane serves one car at a time. Default service times (assumed, spec section 5): entry ticket 5-10 s; plate and card 4-8 s; exit 4-8 s; pay at the barrier (or at an exit of a lot whose paymentMode is payAtBarrier) a card/cash mix. A plate misread sends the car through the slower fallback.
+ */
+export interface VehicleBarrier {
+  id: Id;
+  name: Name;
+  roadId: Id;
+  position: Point;
+  kind: "entry" | "exit";
+  laneCount: number;
+  serviceType: BarrierServiceType;
+  serviceTime?: Distribution;
+  /**
+   * Plate recognition only (default: 5% of cars, fallback 15-30 s, assumed).
+   */
+  misread?: {
+    rate: Probability;
+    fallbackTime: Distribution;
+  };
+}
+/**
+ * A zone with stalls and aisles, linked to roads by its barriers. Capacity is its stall count (rows plus single stalls). Occupants get out after the exit delay and walk in a straight line from the stall to walkingExit (inside the lot they are not on the walking grid), then on as pedestrians. Defaults: stallChoice nearestEntry, overflow leave, paymentMode prepaid.
+ */
+export interface ParkingLot {
+  id: Id;
+  name: Name;
+  outline: Polygon;
+  /**
+   * @maxItems 500
+   */
+  stallRows?: StallRow[];
+  /**
+   * @maxItems 5000
+   */
+  stalls?: Stall[];
+  /**
+   * @minItems 1
+   * @maxItems 500
+   */
+  aisles: Aisle[];
+  /**
+   * @minItems 1
+   * @maxItems 20
+   */
+  entryBarrierIds: Id[];
+  /**
+   * @minItems 1
+   * @maxItems 20
+   */
+  exitBarrierIds: Id[];
+  walkingExit: Point;
+  payStation?: PayStation;
+  stallChoice?: StallChoice;
+  overflow?: OverflowRule;
+  paymentMode?: PaymentMode;
+}
+/**
+ * A row of `count` stalls side by side along the line a-b (the stall fronts, at the aisle). The stalls extend `depth` metres to `side` of the line (right: the side where cross(b - a, p - a) > 0, i.e. the right-hand side looking from a to b in the y-down picture), or to both sides (count stalls each).
+ */
+export interface StallRow {
+  a: Point;
+  b: Point;
+  count: number;
+  side: "left" | "right" | "both";
+  /**
+   * Stall depth in metres (default 5).
+   */
+  depth?: number;
+  /**
+   * Display only: stall angle to the row line in degrees (default 90).
+   */
+  angle?: number;
+}
+/**
+ * One stall drawn on its own: centre position and, for display, the heading of a parked car in degrees (0 = +x, 90 = +y).
+ */
+export interface Stall {
+  position: Point;
+  angle?: number;
+}
+/**
+ * A two-way parking aisle (polyline) cars drive along at the aisle speed (default 8 km/h, assumed). Aisles connect to each other and to roads like roads do.
+ */
+export interface Aisle {
+  id?: Id;
+  /**
+   * @minItems 2
+   * @maxItems 500
+   */
+  points: Point[];
+}
+/**
+ * Pay machines on foot: a pedestrian queue element like a gate group (lanes spaced along `line`, people pass from the outside to the inside). Default service time per payer: a card/cash mix (assumed).
+ */
+export interface PayStation {
+  id: Id;
+  name: Name;
+  line: LaneLine;
+  laneCount: number;
+  queueLength: number;
+  serviceTime?: Distribution;
+}
+/**
+ * What a car does when the lot is full (or closed) as it reaches the entry: wait in the entry queue for a stall, drive on to the lot divertTo (once; a second full lot turns it away), or leave (TurnedAway).
+ */
+export interface OverflowRule {
+  rule: "queue" | "divert" | "leave";
+  divertTo?: Id;
+}
+/**
+ * Where a walkway crosses a road or aisle: the segment a-b across it, `width` metres wide (default 4). Cars stop before it while a pedestrian is on it; pedestrians wait while a stopped car stands across it. The walkable area must include the crossing.
+ */
+export interface Crossing {
+  id: Id;
+  name?: Name;
+  a: Point;
+  b: Point;
+  width?: number;
+}
+/**
+ * All inputs for one run against a venue. Times are seconds relative to t = 0; for fixed-start events t = 0 is the event start, for open-door events it is the opening time. carShare: Share of the attendance arriving by car (spec 4.3). Used only if the venue has a vehicle source and a parking lot; otherwise everyone arrives on foot. Suggested values per event type (assumed, review E4): fair 0.55, concert 0.35, stadium 0.30, conference 0.40 (CAR_SHARE_DEFAULTS in the engine). departures: Departure curve (spec 4.4). Optional: without it nobody leaves and the run ends once everyone is inside (and every car parked). Presets are placed relative to timeline.eventEnd (assumed): concert about 80% leave within 30 min of the end, stadium about 85% within 20 min, fair spread over the last 3 hours of opening, conference over the last hour. Custom points are scenario times.
  */
 export interface Scenario {
   schemaVersion: 1;
@@ -312,7 +501,7 @@ export interface DemandCurve {
   }[];
 }
 /**
- * Scenario-scope assumptions (spec section 5). Missing values use the built-in defaults (all assumed); the run stores the full resolved set. nearestLaneShare: share of people who take the lane with the shortest walk instead of choosing by expected cost (default 0.3). manualLaneServiceTime: service time at a gate group manual lane, used after a second scan failure (default uniform 20-40 s). shareInsideAt: reference time T of the share-inside-by-T metric, in scenario seconds (default 10 minutes before a fixed start, or 1 hour after the gates open for open-door events).
+ * Scenario-scope assumptions (spec section 5). Missing values use the built-in defaults (all assumed); the run stores the full resolved set. nearestLaneShare: share of people who take the lane with the shortest walk instead of choosing by expected cost (default 0.3). manualLaneServiceTime: service time at a gate group manual lane, used after a second scan failure (default uniform 20-40 s). shareInsideAt: reference time T of the share-inside-by-T metric, in scenario seconds (default 10 minutes before a fixed start, or 1 hour after the gates open for open-door events). The car parameters (occupancy, cardShare, carExitDelay, carBoardDelay, carLength, carGap, aisleSpeed, parkManoeuvre) only matter if some people arrive by car. cardShare: Share of payers who pay by card rather than cash, at pay stations and pay-at-barrier exits (default 0.7, assumed; card is faster, review E5).
  */
 export interface ScenarioParameters {
   freeWalkingSpeed?: Distribution;
@@ -347,11 +536,50 @@ export interface ScenarioParameters {
    */
   groupSizes?: number[];
   bagPolicy?: BagPolicy;
+  /**
+   * People per car: occupancy[k] is the relative frequency of cars with k + 1 people (default [0.35, 0.35, 0.18, 0.12] for 1-4, assumed).
+   *
+   * @minItems 1
+   * @maxItems 8
+   */
+  occupancy?: number[];
+  cardShare?: Probability;
+  /**
+   * Seconds between a car parking and its occupants starting to walk (default 20, assumed).
+   */
+  carExitDelay?: number;
+  /**
+   * Seconds between the last occupant reaching the car and the car pulling out (default 20, assumed).
+   */
+  carBoardDelay?: number;
+  /**
+   * Car length in metres (default 4.5, assumed).
+   */
+  carLength?: number;
+  /**
+   * Minimum gap between queued cars in metres (default 2.5, assumed). Road storage = length / (carLength + carGap) per lane.
+   */
+  carGap?: number;
+  /**
+   * Driving speed in parking aisles in km/h (default 8, assumed).
+   */
+  aisleSpeed?: number;
+  /**
+   * Seconds a car blocks its aisle while turning into or out of a stall (default 6, assumed).
+   */
+  parkManoeuvre?: number;
 }
+/**
+ * Changes to one element, keyed by its id: a gate group, screening stage, pay station, vehicle barrier or parking lot. Fields that do not apply to the element are ignored. scanFailureRate is the scan failure rate of a gate group and the misread rate of a plate-recognition barrier; serviceType applies to vehicle barriers; paymentMode, stallChoice and overflow to parking lots.
+ */
 export interface ElementOverride {
   laneCount?: number;
   serviceTime?: Distribution;
   scanFailureRate?: Probability;
+  serviceType?: BarrierServiceType;
+  paymentMode?: PaymentMode;
+  stallChoice?: StallChoice;
+  overflow?: OverflowRule;
 }
 export interface LaneFailEvent {
   kind: "laneFail";
@@ -373,6 +601,14 @@ export interface BusBurstEvent {
   at: Seconds;
   sourceId: Id;
   count: number;
+}
+/**
+ * From `at` on, the parking lot takes no new cars (as if it were full); cars that already hold a stall still park.
+ */
+export interface LotCloseEvent {
+  kind: "lotClose";
+  at: Seconds;
+  lotId: Id;
 }
 /**
  * The stored result of one seeded run: metrics plus everything needed to reproduce it, not every frame. scenario is a full copy of the scenario as it was run (it includes the seed). Lane windows are engine times (seconds from the start of the run); other times are scenario times (engine time + parameters.timeOffset).
@@ -437,6 +673,14 @@ export interface ResolvedParameters {
   bagPolicy: BagPolicy | null;
   arrivalCurve: ArrivalCurvePoint[];
   elements: ResolvedElement[];
+  /**
+   * The departure curve the run used (scenario times), or null if nobody leaves.
+   */
+  departureCurve: ArrivalCurvePoint[] | null;
+  /**
+   * Car and parking parameters, or null if nobody arrives by car (no vehicle source or parking lot, or carShare 0).
+   */
+  vehicles: VehicleParameters | null;
 }
 /**
  * Weidmann speed-density parameters.
@@ -450,11 +694,11 @@ export interface ArrivalCurvePoint {
   weight: number;
 }
 /**
- * A screening stage or gate group as the run used it (overrides and bag policy applied).
+ * A screening stage, gate group or parking pay station as the run used it (overrides and bag policy applied).
  */
 export interface ResolvedElement {
   id: Id;
-  kind: "screening" | "gate";
+  kind: "screening" | "gate" | "payStation";
   laneCount: number;
   queueLength: number;
   serviceTime: Distribution;
@@ -464,6 +708,61 @@ export interface ResolvedElement {
    * Expected time a lane is busy per person, including scan retries (s).
    */
   meanBusyTime: number;
+}
+/**
+ * Car and parking assumptions a run used (spec 4.3, 4.4, section 5).
+ */
+export interface VehicleParameters {
+  /**
+   * Share of the attendance that arrived by car.
+   */
+  carShare: number;
+  /**
+   * People who arrived by car (round(carShare × attendance)).
+   */
+  carPeople: number;
+  occupancy: number[];
+  cardShare: number;
+  carLength: number;
+  carGap: number;
+  carExitDelay: number;
+  carBoardDelay: number;
+  /**
+   * km/h
+   */
+  aisleSpeed: number;
+  /**
+   * Metres of road before a barrier widened to its lane count; a car joins a barrier lane when it enters this stretch.
+   */
+  barrierApproach: number;
+  /**
+   * Seconds a car blocks the aisle while turning into or out of a stall.
+   */
+  parkManoeuvre: number;
+  barriers: ResolvedBarrier[];
+  lots: ResolvedLot[];
+}
+export interface ResolvedBarrier {
+  id: Id;
+  kind: "entry" | "exit";
+  lotId: Id | null;
+  laneCount: number;
+  serviceType: BarrierServiceType;
+  serviceTime: Distribution;
+  misreadRate: number;
+  fallbackTime: Distribution | null;
+  /**
+   * Expected seconds a lane is busy per car, including misread fallbacks.
+   */
+  meanBusyTime: number;
+}
+export interface ResolvedLot {
+  id: Id;
+  stalls: number;
+  stallChoice: StallChoice;
+  overflow: OverflowRule;
+  paymentMode: PaymentMode;
+  payStationId: Id | null;
 }
 /**
  * Run metrics (spec section 4.5).
@@ -477,7 +776,7 @@ export interface RecordedMetrics {
    */
   time: number;
   /**
-   * Agents per AgentState (Pending, Walking, Queuing, InService, Inside, Driving, Parked, Departed, TurnedAway, Diverted).
+   * People per AgentState (Pending, Walking, Queuing, InService, Inside, Driving, Parked, Departed, TurnedAway, Diverted). Cars are counted separately in parking.carCountsByState. A person in a car is Pending (before getting out) or Driving (aboard on the way out).
    */
   countsByState: number[];
   unreachable: number;
@@ -500,14 +799,22 @@ export interface RecordedMetrics {
    */
   notYetArrivedAtStart: number | null;
   density: DensitySummary;
+  /**
+   * Null if the scenario has no departure curve.
+   */
+  departures: DepartureMetrics | null;
+  /**
+   * Null if nobody arrives by car.
+   */
+  parking: ParkingMetrics | null;
 }
 /**
- * One lane: a regular lane of a screening stage or gate group, or a gate group's manual lane.
+ * One lane: a regular lane of a screening stage, gate group or parking pay station, or a gate group's manual lane.
  */
 export interface LaneReport {
   laneId: number;
   elementId: Id;
-  elementKind: "screening" | "gate";
+  elementKind: "screening" | "gate" | "payStation";
   laneIndex: number;
   /**
    * True for a gate group's manual lane: people whose scan failed twice are sent there, nobody chooses it.
@@ -584,7 +891,7 @@ export interface LanePeriod {
  */
 export interface ElementReport {
   elementId: Id;
-  kind: "screening" | "gate";
+  kind: "screening" | "gate" | "payStation";
   laneCount: number;
   /**
    * Expected time a lane is busy per person, including scan retries (s).
@@ -644,4 +951,109 @@ export interface DensitySummary {
   cellSize: number;
   mean: number[];
   max: number[];
+}
+/**
+ * Departures (spec 4.4). Times are scenario times.
+ */
+export interface DepartureMetrics {
+  departedPeople: number;
+  departedCars: number;
+  /**
+   * First person who left the site (on foot or in a car).
+   */
+  firstDepartureAt: number | null;
+  lastDepartureAt: number | null;
+}
+/**
+ * Cars and parking (spec 4.5, Parking). Times are scenario times.
+ */
+export interface ParkingMetrics {
+  carCount: number;
+  /**
+   * Cars per AgentState: Pending (not yet on the road), Driving, Parked, Departed, TurnedAway, Diverted (driving to its second lot); the other states are always 0.
+   */
+  carCountsByState: number[];
+  /**
+   * People who came by car.
+   */
+  carPeople: number;
+  turnedAwayCars: number;
+  /**
+   * Cars redirected to another lot (each at most once).
+   */
+  divertedCars: number;
+  /**
+   * Occupants of turned-away cars (also counted as TurnedAway in countsByState).
+   */
+  turnedAwayPeople: number;
+  /**
+   * Most cars at once that could not yet enter the road network at their source (the queue reached beyond the model).
+   */
+  maxSourceBacklog: number;
+  lots: LotReport[];
+  barriers: BarrierReport[];
+  barrierLanes: BarrierLaneReport[];
+}
+export interface LotReport {
+  lotId: Id;
+  stalls: number;
+  /**
+   * Cars that parked in this lot.
+   */
+  parked: number;
+  maxOccupancy: number;
+  /**
+   * Cars in stalls at the end of each throughputBin, bins from engine time 0.
+   */
+  occupancy: number[];
+  /**
+   * Mean seconds from passing the entry barrier to standing in the stall.
+   */
+  meanSearchTime: number;
+  /**
+   * Cars this lot turned away (rule leave, or a diverted car arriving full).
+   */
+  turnedAway: number;
+  divertedAway: number;
+  divertedIn: number;
+  closedAt: number | null;
+  /**
+   * When the last car of the departure rush left the lot (passed its exit barrier); null if no departures or not empty by the end.
+   */
+  emptyAt: number | null;
+  /**
+   * emptyAt minus the event end, in seconds (spec 4.4 headline).
+   */
+  timeToEmpty: number | null;
+}
+/**
+ * Queue in front of one barrier group, measured along the road from the stop line to the back of the last queued car (spec 4.5).
+ */
+export interface BarrierReport {
+  barrierId: Id;
+  kind: "entry" | "exit";
+  lotId: Id | null;
+  maxQueueCars: number;
+  maxQueueMetres: number;
+  maxQueueAt: number | null;
+  /**
+   * Time average of the queue length in metres over the barrier's reporting window: from the first car joining one of its lanes to the last service start, like its lanes' LaneMetrics (sampled every tick).
+   */
+  meanQueueMetres: number;
+  /**
+   * First time a queued car stood on a public road (or could not enter the model at its source); null if never.
+   */
+  reachedPublicRoadAt: number | null;
+}
+/**
+ * One barrier lane, with the same queueing statistics as a pedestrian lane (Wq from joining the lane's approach to service start).
+ */
+export interface BarrierLaneReport {
+  laneId: number;
+  barrierId: Id;
+  kind: "entry" | "exit";
+  laneIndex: number;
+  metrics: LaneMetrics;
+  throughput: number[];
+  queueLength: number[];
 }

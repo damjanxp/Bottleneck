@@ -149,7 +149,11 @@ describe("editor form", () => {
         ? { ...el, laneCount: "6", serviceMode: "simple", serviceMin: "2", serviceMean: "4.5", serviceSigma: "0.6", scanFailurePercent: el.kind === "gate" ? "5" : "" }
         : { ...el, laneCount: "2", serviceMode: "json", serviceJson: '{"kind":"mixture","components":[{"weight":1,"distribution":{"kind":"uniform","min":2,"max":5}}]}' },
     );
-    f.events = [newEventForm("laneFail", venue, f.gatesOpen.seconds ?? 0), newEventForm("laneReopen", venue, (f.gatesOpen.seconds ?? 0) + 600), newEventForm("busBurst", venue, 120)];
+    // Only the timed events the venue supports (the stand-alone car park has no gates and no pedestrian sources).
+    f.events = [
+      ...(venue.gateGroups.length + venue.screeningStages.length > 0 ? [newEventForm("laneFail", venue, f.gatesOpen.seconds ?? 0), newEventForm("laneReopen", venue, (f.gatesOpen.seconds ?? 0) + 600)] : []),
+      ...(venue.sources.length > 0 ? [newEventForm("busBurst", venue, 120)] : []),
+    ];
     return f;
   }
 

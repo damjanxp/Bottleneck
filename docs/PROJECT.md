@@ -19,24 +19,31 @@ The specification it builds on lives next to it: [spec/Bottleneck-specification-
 
 ## 1. Status
 
-_Last updated: 2026-11-12_
+_Last updated: 2026-11-13_
 
 | | |
 |---|---|
-| **Current phase** | Phase 2: scenarios and comparison, complete on the `phase-2` branch, pending merge to `main` (see [section 6](#phase-2-scenarios-and-comparison)). Phases 0 and 1 are merged. |
-| **Next phase** | Phase 3: vehicles and parking |
+| **Current phase** | Phase 3: vehicles, parking and departures, **complete and merged into `main` locally** (engine, schema, examples and web view; see [section 6](#phase-3-vehicles-parking-and-departures)). Phases 0, 1 and 2 are merged into `main` and were pushed to GitHub on 2026-11-12. |
+| **Next phase** | Phase 4: .NET backend and jobs |
+| **Git state** | Phase 3 commits are **local only, not pushed** (`main` is ahead of `origin/main`): the owner pushes together with Claude. Until then GitHub CI and Vercel have not run on Phase 3; the same checks were run locally (`npm run check`: 263 tests; `npm run test:e2e`: 6 passed, 1 skipped). |
 | **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys |
 | **CI** | GitHub Actions: schema check, lint, typecheck, unit and validation tests, build on every push; a second job runs the Playwright browser tests (Chromium) |
 | **How the work is done** | Work is orchestrated with subagents: the main agent plans and reviews, and subagents do focused pieces (code, tests, docs). Everything lands on a `phase-N` branch and passes `npm run check` before merging. |
 
-**What exists after Phase 2** (on the `phase-2` branch, not yet merged to `main`):
+**What exists after Phase 2** (merged to `main`):
 - **Pedestrian engine, examples, simulation view and Playwright tests** from Phase 1 (decisions D-014 to D-031).
 - **Scenario library and editor** in the browser, validated against the JSON Schema (D-032, D-033); interactive lane failures (D-035).
 - **Comparison and batches** in background workers with common random numbers and paired confidence intervals (D-034); `@bottleneck/analysis` (statistics and scan-log fitting).
 - **Scan logs:** the engine's service log, CSV export, import, fit and apply (D-037 to D-039).
 - **README with a GIF** (`docs/media/demo.gif`, `docs/media/screenshot.png`), recorded by `apps/web/e2e/record-demo.spec.ts` (skipped unless `RECORD_DEMO=1`).
 
-**Remaining before Phase 2 is closed:** the owner's review of the README and GIF, then the merge of `phase-2` into `main`. Phase 1's two [human] checks (see [section 4](#phase-1-pedestrian-simulation-on-a-built-in-venue)) are also still open.
+**What exists after Phase 3** (merged to `main` locally, not pushed):
+- **Schema:** roads, vehicle sources, vehicle barriers, parking lots and crossings in the venue; car parameters, departures and `lotClose` in the scenario (D-040).
+- **Engine:** a road graph with routing, car-following, barriers on the shared lane core, parking with reservations, overflow rules, departures with an exit rush, and the parking metrics (D-041 to D-051).
+- **Examples:** a stand-alone 320-stall car park (pay machines, or pay at the barrier, or pay at the barrier with 3 exit lanes) and car parks at Belgrade Fair (fair day with cars, a car park that closes, a concert with cars and departures, paying at the machines or at the barrier), with qualitative tests (D-052).
+- **Web view:** cars, roads, lots, stalls, barriers, crossings and the public-road edge on the map; parking headline card, lot and barrier tables with charts; "Jump to departures" and "Close lot now"; car fields, departure curve, barrier and lot overrides in the scenario editor; parking rows in the comparison; a Playwright test of the car park example (D-053).
+
+**Still open:** the owner's [human] checks (below), and pushing Phase 3 to GitHub together with the owner.
 
 ### What the owner needs to do now
 
@@ -188,7 +195,7 @@ Each record has four short parts: context, decision, alternatives, consequences.
 - **Alternatives:** No jockeying (queues never balance); unlimited jockeying (people ping-pong).
 - **Consequences:** Jockeying moves a few people per jam, enough to even out lanes without changing the picture. It is on the cut list (F2 in section 3) if time runs out.
 
-### D-022 TurnedAway means "unreachable" in Phase 1, and `carShare` is ignored until Phase 3
+### D-022 TurnedAway means "unreachable" in Phase 1, and `carShare` is ignored until Phase 3 (superseded by D-046)
 - **Context:** The state enum has `TurnedAway` for cars rejected at a full lot (Phase 3). The scenario schema also has `carShare`.
 - **Decision:** In Phase 1 a person is `TurnedAway` only if their source has **no walking path** to a lane; the run counts them as `unreachable` and the example tests require 0. `carShare` is **accepted and stored but ignored** by the engine until vehicles exist (Phase 3): everyone arrives on foot.
 - **Alternatives:** Reject scenarios with `carShare > 0` (would block the schema); silently drop people (breaks conservation).
@@ -307,6 +314,135 @@ Each record has four short parts: context, decision, alternatives, consequences.
 - **Alternatives:** Using all gaps (dominated by idle time at quiet lanes); assuming a distribution family up front (the fit would then test the assumption instead of the data).
 - **Consequences:** The fit needs busy lanes; on a quiet lane it overstates the service time. The test uses the busy 5-lane concert, which is the intended use.
 
+### D-040 Schema additions for vehicles, and the shared enums
+- **Context:** D-007 left room for the vehicle elements. The browser validator (D-033) builds only `common` and `scenario`, and the venue schema is not loaded there.
+- **Decision:** The venue gets five optional collections:
+  - `roads`: a polyline, `direction` (`oneWay` or `twoWay`), `laneCount` per direction, `freeSpeed` (km/h, default 25), `publicRoad`.
+  - `vehicleSources`: a point on a road, a `share`, optionally a `lotId`.
+  - `vehicleBarriers`: a road, a position on it, `kind` (entry or exit), `laneCount`, `serviceType` (ticket, plate, card, payAtBarrier), an optional `serviceTime` and `misread`.
+  - `parkingLots`: an outline, `stallRows` (a line, a count, a side) and single `stalls`, `aisles`, the entry and exit barrier ids, `walkingExit`, an optional `payStation`, `stallChoice` (nearestEntry or nearestWalkingExit), `overflow` (queue, divert with `divertTo`, or leave) and `paymentMode` (payStation, payAtBarrier or prepaid).
+  - `crossings`: a segment across a road or aisle, with a width.
+  The scenario gets `departures` (a demand curve), the car parameters, and the timed event `lotClose`. Scenario `overrides` can now also change a barrier's `serviceType` and a lot's `paymentMode`, `stallChoice` and `overflow`. The enums these use (`BarrierServiceType`, `StallChoice`, `OverflowRule`, `PaymentMode`) live in `common.schema.json`, because the browser validator builds only `common` and `scenario`, and `scenario` needs them for overrides.
+- **Scenario parameters (all assumed, all stored with every run):** `occupancy` 0.35 / 0.35 / 0.18 / 0.12 for cars of 1 to 4 people (mean about 2.1), `cardShare` 0.7, `carExitDelay` 20 s (from parking to getting out), `carBoardDelay` 20 s (from everyone aboard to the car leaving), `carLength` 4.5 m, `carGap` 2.5 m, `aisleSpeed` 8 km/h, `parkManoeuvre` 6 s (the time a car blocks an aisle turning into or out of a stall).
+- **Departure presets** are relative to `eventEnd`: concert (−10 min to +50 min, peak 5 min after the end), stadium (about 85% within 20 minutes of the final whistle), fair (the last three hours of opening), conference (the last hour).
+- **Alternatives:** Putting the new enums in `venue.schema.json` (the browser could not validate overrides); a separate vehicle schema file.
+- **Consequences:** Still no migrations before Phase 4. The generated types were regenerated (`npm run schema:gen`) and checked by `schema:check`.
+
+### D-041 The road graph: cut at ends and junctions, all-pairs quickest routes
+- **Context:** Cars need a network to route on. Venue authors draw roads and aisles as polylines, and should not have to draw junction nodes.
+- **Decision:** `roadNetwork.ts` builds a directed graph of **edges** (one per road segment between junctions, with a lane count). Roads and aisles are **cut where an end point meets another road's end point, and at T-junctions**: where an end point lies within 1 m of another road's line. Barriers also cut the road: the last 30 m before a barrier become its own **approach edge** (D-044). Routing is **all pairs**: the quickest travel time (length / free speed, aisles at the aisle speed) from every edge to every other, computed once, with **deterministic tie-breaking** (lowest edge id first). A car's route is therefore a table lookup.
+- **Alternatives:** Routing per car with A* (more work per car, same answers); asking the author to draw nodes.
+- **Consequences:** A car that cannot reach any lot (a road that does not connect) is turned away and counted, so a badly connected venue shows up as a lot with no parked cars; the venue editor will flag it (Phase 5).
+
+### D-042 Car-following: ordered lanes, free speed, no overtaking
+- **Context:** The cars need to queue believably, and a full traffic model (acceleration, lane changes) would cost a lot for little insight into bottlenecks.
+- **Decision:** Every edge lane keeps its cars **in order, front first**. Each 0.25 s tick a car moves at its edge's **free speed**, but never closer than **carLength + carGap (7 m)** behind the car in front, never past a stop line it must obey (a barrier it has not been served at, its target, a crossing with a pedestrian on it), and never onto the next edge if that edge lane has no room. **There is no overtaking within a lane, and speed changes are instant** (no acceleration).
+- **Alternatives:** Intelligent-driver or Gipps models (more parameters, no new insight for queue lengths); cars as pedestrians (wrong geometry).
+- **Consequences:** A queue of cars moves up as a block with a speed that is a bit optimistic. The effect on a barrier's capacity is made explicit in D-044.
+
+### D-043 Spillback and reservations (B5)
+- **Context:** Review B5: cars must not be able to gridlock, and a full car park must not trap cars inside.
+- **Decision:**
+  - **Road space:** an edge lane has a storage of **length / 7 m** cars (at least 1). A car enters an edge lane only if it holds fewer cars than that and the last car there is far enough ahead; from that moment the space is the car's.
+  - **Stalls:** a car **reserves its stall when it is admitted to the barrier approach**, before it is served at the entry barrier. **A barrier serves only a car that holds a stall**, so no car is ever inside a lot without one and the aisles cannot gridlock with cars looking for space.
+- **Alternatives:** Letting cars search for a free stall inside the lot (can deadlock when the lot is full); reserving at the barrier (cars already in the approach would then wait with no stall).
+- **Consequences:** A full lot shows up as an entry queue or an overflow rule (D-045), never as a jam inside. Stall search time is the driving time from the barrier to the reserved stall.
+
+### D-044 Barriers on the shared lane core
+- **Context:** A barrier is a lane that serves one car at a time. It should have the same queueing logic (and the same checks) as a turnstile.
+- **Decision:**
+  - Barrier lanes live in the **same `LaneBank`** as the pedestrian lanes (ids after the pedestrian lanes), so Little's law, the service log and the exact-time events work unchanged.
+  - **The last 30 m before a barrier** are cut off as its approach edge and **widened to the barrier's lane count**.
+  - A car **commits to the lane with the fewest committed cars (among those with room) when it enters the approach**, and stays in it. That moment is the **start of Wq** (B3). It is **ready** at the stop line, and at an entry also holds a stall.
+  - A **plate misread** (default 5%, assumed) sends the car through the fallback time (15 to 30 s) instead of the normal one: a retry, as with a failed scan.
+  - **Capacity is about 1 / (s + 1.25 s)**, not 1 / s, because moving up to the stop line after a car has left adds about 1.25 s to every service.
+  - Default service times (assumed): entry ticket 5 to 10 s, plate or card 4 to 8 s, exit 4 to 8 s, pay at the barrier a card/cash mix (card 15 to 25 s, cash 25 to 45 s), pay station a card/cash mix on foot (card 20 to 35 s, cash 35 to 60 s) (E5, D-049).
+- **Alternatives:** A separate barrier model (duplicates the checks); letting a car pick a lane at the stop line (hides the queue for the lane, review B3).
+- **Consequences:** The capacity of a barrier lane is below 1 / s. The comparison test (D-050) uses this.
+
+### D-045 Overflow: queue, divert once, leave (A3)
+- **Context:** Review A3: what does a car do when the lot is full, and is `Diverted` a state or a counter?
+- **Decision:** When a car reaches the approach of a lot that is full (no free stall) or closed (`lotClose`, which makes the lot act as full) it applies the lot's rule:
+  - **queue:** the car is admitted without a stall and waits at the barrier until a stall frees up;
+  - **divert:** the car drives on to the lot `divertTo` and is **Diverted** while it does; **a second full lot turns it away** (`TurnedAway`), so a car is redirected at most once;
+  - **leave:** the car is `TurnedAway` and disappears from the road where it is.
+- **Alternatives:** Unlimited diverting (cars could circle forever); queueing as the only rule.
+- **Consequences:** The lot metrics report `turnedAway`, `divertedAway` and `divertedIn` per lot. A lot with the queue rule and no departures can never serve its waiting cars, so the run ends by the watchdog with `deadlock: true` (D-048); this is tested.
+
+### D-046 Cars and people are counted separately (A4)
+- **Context:** Review A4: occupants created at parking time would break conservation.
+- **Decision:**
+  - **Separate counts:** `carCountsByState` has the states Pending, Driving, Diverted, Parked, Departed and TurnedAway for cars; `countsByState` is for people. Each sums to its own total at every tick.
+  - **Occupants are drawn at creation:** if the venue has roads, a vehicle source and a lot, the first `round(carShare × attendance)` people come by car, as **consecutive ids**, one car per run of 1 to 4 people (the occupancy distribution). They are **Pending** while in the car, until `carExitDelay` after parking.
+  - **After parking** they walk **straight, off the walking grid**, to the lot's walking exit, and from there they are pedestrians like everyone else (through the gates, or to a destination if the venue has no gates).
+  - **Turned-away cars:** their occupants are `TurnedAway` (people who never arrive), **not** counted as `unreachable`.
+  - **`carShare` stays required.** `CAR_SHARE_DEFAULTS` (fair 0.55, concert 0.35, stadium 0.30, conference 0.40, review E4, assumed) is exported for editors to suggest; the engine uses the scenario's number and **ignores it if the venue has no roads, no vehicle source or no lot** (D-022 is therefore no longer true for venues with cars).
+- **Alternatives:** Creating people when the car parks (conservation test would have to special-case them); a counter instead of a state for `Diverted`.
+- **Consequences:** People and cars can be checked for conservation independently (tested on every example run).
+
+### D-047 Departures: the exit rush
+- **Context:** Spec 4.4: people leave in a wave after the event, and the car park's exit is where it jams.
+- **Decision:** Only a scenario with a **departures curve** simulates departures; without it the run ends when everyone is inside. Each group (and each car's occupants) draws **one** departure time. Whoever is inside by then leaves; whoever is not leaves as soon as they get in. **People on foot** walk back to the source they came from, cross the gate lines **without being scanned** (the lanes are just points on the grid), and are Departed there. **Car users** walk to their lot's walking exit and straight on to their car; the **driver pays at the pay station** first if the lot's payment mode is `payStation`. Once everyone is aboard the car leaves **`carBoardDelay`** later, chooses the **lowest-cost exit barrier** (driving time plus expected queue), drives through it, and then to the **nearest road end**. Pay stations are pedestrian lane elements that reuse the gate machinery, and are **closed until the gates open**, like gates.
+- **Alternatives:** Everyone leaves at the end time (no curve); scanning people on their way out (the gates are one-way turnstiles).
+- **Consequences:** The exit queue and the time to empty are results of the scenario, not of a fixed rule.
+
+### D-048 End of a run with cars: drained, the watchdog, crossings and measuring a queue
+- **Context:** D-023 defined the end of a pedestrian run; cars and departures need the same.
+- **Decision:**
+  - **Drained** means: without departures, every person is Inside or TurnedAway and every car is Parked or TurnedAway; with departures, every person and every car is Departed or TurnedAway.
+  - **The watchdog** counts moving or queued cars as active, in addition to walking or queuing people, and still waits while a gate opening, a timed event or a departure is yet to come.
+  - **Crossings:** cars stop before a crossing while a pedestrian is on it; pedestrians wait while a stopped car stands across it. Cars and people therefore never occupy it together (tested tick by tick on the stand-alone car park, and with a forced stop in the engine tests).
+  - **Queue measurement:** every tick, the cars that are heading for a barrier and are held up (moved less than half their free distance because of the car in front, the stop line or a full next edge) are candidates. Sorted by driving distance to the stop line, the queue is **the unbroken chain from the stop line backwards; it ends at the first gap of more than 1.5 car spacings**, so a car held up somewhere else does not count. Its length is the distance to the back of the last car in the chain, **extended by the cars waiting at a source only if the chain reaches that source**. The reported mean is over the window in which the barrier's lanes were open. A car of the chain on a road marked `publicRoad` means **the queue has reached the public road**, and the time is recorded.
+- **Alternatives:** Measuring the queue as all slow cars (counts unrelated slowdowns); counting only cars at the stop line.
+- **Consequences:** Queue lengths are comparable between scenarios. Numbers of cars are reported next to metres.
+
+### D-049 Payment defaults (E5) and the plate-recognition finding
+- **Context:** Review E5: payment times that are the same for everyone are pessimistic; card is faster than cash. Spec 6.5 expects plate recognition to beat tickets.
+- **Decision:** Pay stations and pay-at-barrier exits use a **card/cash mixture** with `cardShare` 0.7 (D-040, D-044), built from the existing mixture distribution (D-024), so E[S] and E[S²] stay exact.
+- **Finding, plate recognition is not always better:** the plate default (4 to 8 s, plus 5% misreads at 15 to 30 s) has a lower mean than the ticket default (5 to 10 s): **7.1 against 7.5 s**. But the misreads add a heavy tail, so its **second moment is larger**, and by the Pollaczek-Khinchine formula the wait depends on E[S²] (section 7). Plate recognition therefore **wins clearly only close to the barrier's capacity**; in a quiet hour the two are the same. And with a **6 s parking manoeuvre in a single aisle, the aisle becomes the bottleneck** before the entry barrier does. That is why `parkManoeuvre` is a scenario parameter, and why the plate-versus-ticket test uses 1 s (D-050).
+- **Alternatives:** Making plate recognition faster to get the "expected" result (would hide the second-moment effect).
+- **Consequences:** The numbers are assumptions: a venue with a real plate system should fit its own misread rate and fallback time.
+
+### D-050 How the Phase 3 tests are set up, and what they found
+- **Context:** The Phase 3 acceptance checks (section 4) each need a setup that isolates one effect.
+- **Decision:**
+  - **Plate against ticket:** 10 paired seeds (common random numbers), a lot whose entry barrier is the bottleneck, `parkManoeuvre` 1 s, and the paired difference of the mean entry queue with its 95% CI.
+  - **Time to empty:** N = 60 cars, a single exit lane with service time s = 12 s, departures all at once; time to empty is at least N·s = 720 s and within 10% of N·s plus walking and driving time. Measured **849 s**, which is within 2.3% of the expected **about 869 s** (the exit capacity is 1 / (s + 1.25 s), D-044).
+  - **Overflow:** one test each for leave, divert, queue (with departures), queue without departures (deadlock), and `lotClose`.
+  - **Conservation** and **Little's law** are checked on every example run, including barrier and pay-machine lanes.
+  - **Determinism:** the same seed gives the same hash, translating the venue gives a bit-identical one, and checkpoints restore bit-identically during arrivals, the show and departures.
+- **Finding, what decides the time to empty:** when drivers **pay at machines**, the time to empty mostly follows the **departure curve** (and the machines); when they **pay at the barrier**, the **exit lanes** matter, because every car then spends 25 to 45 s at the lane. The examples show both (section 6).
+- **Consequences:** A change to car behaviour that moves these numbers fails a test with a message saying which one.
+
+### D-051 Metrics added for parking and departures
+- **Decision:** `metrics.parking` has, per lot, the stall count, cars parked, the maximum occupancy and an occupancy series, the mean search time, `turnedAway`, `divertedAway`, `divertedIn`, when it closed, when it emptied and the **time to empty** (from the event end); per barrier the maximum and mean queue (metres and cars) and when the queue reached the public road; and the barrier lanes' own metrics (the same fields as a pedestrian lane). `metrics.departures` has the number of people and cars that departed and the first and last departure times. They enter the metrics hash only if the run has departures or the venue has a parking lot, so a venue without cars hashes exactly the numbers it did before. A venue with a lot hashes the (empty) parking block even with a car share of 0, so the hashes of the six Phase 1 scenarios changed when the Belgrade Fair venues got car parks (D-052); their numbers did not.
+- **Consequences:** `run.schema.json` allows the new metric groups; the example runs are validated against it.
+
+### D-052 Belgrade Fair car parks, and how the examples keep their old outcomes
+- **Context:** Spec 6.1 lists "car parks with barriers" for the fair day and an exit rush after the concert. The existing scenarios have `carShare` 0 and their outcomes are asserted.
+- **Decision:**
+  - **Venues:** the fair-day venue gets two 480-stall car parks beside the forecourt, **north** (pay at the exit barrier, 3 exit lanes, overflow diverts to the south one) and **south** (pay machines, 2 exit lanes, overflow diverts to the north one), each with two entry roads, an exit road and a zebra crossing where the walkway crosses the exit road. The concert venue gets one 640-stall car park south of the forecourt (10 pay machines, 3 exit lanes, overflow: leave). All roads connect to **Bulevar vojvode Misica** (a two-way public road). The geometry is hand-drawn, inspired by OpenStreetMap, not exact.
+  - **Scenarios:** only **new** scenarios use cars; the existing six keep `carShare` 0.
+  - **The existing outcomes are unchanged.** The venues grew (new walkways, roads), but the new walkways are only joined to the forecourt, the bounding box of the walkable areas changed only by whole metres, and the pedestrian metrics of the six scenarios are **identical to the last bit**; only their metrics hash differs, because a venue with a lot now hashes a parking block (D-051). Nothing pins those hashes (the browser tests compare Node and Chrome on the same scenario, not against a stored value).
+  - **New scenarios:** `fair-day-with-cars` (55% by car), `fair-day-north-car-park-closes` (`lotClose` at 30 minutes), `concert-cars-pay-station` (35% by car, 5 gate lanes, departures by the concert preset), `concert-cars-pay-at-barrier` (the same, paying at the exit barrier).
+  - **Tests:** the same file as the Phase 1 examples (`exampleRuns.test.ts`): conservation of people and cars, no unreachable people, no deadlock, drained, cars parked, a visible exit queue after the concert, time to empty reported, and the comparison of the two payment modes, each with margins of at least about 30%.
+- **Alternatives:** Changing the existing scenarios to use cars (would change asserted outcomes); a separate venue for the car examples (the spec wants the car parks at the Fair).
+- **Consequences:** The fair day and the concert are now venues with cars; whether to show them is the web view's choice (a scenario without a car share looks as before).
+
+### D-053 The web view of cars and parking
+- **Context:** Phase 3's engine produces cars, lots, barriers and departures; the browser must show them without slowing the pedestrian view, and within the strict CSP. The frontend will be redesigned later, so the aim is clear and working, not polished.
+- **Decision:**
+  - **Data path:** the worker sends people and cars as a **pair** of Float32Array snapshots (`{people, cars}`), double-buffered; if no pair is free, the snapshot is dropped, never queued (D-029 now covers the pair). A venue without cars sends a zero-length car buffer, which is copied instead of transferred. The load message adds `vehicleCount`, `vehicleLayout` and `departurePeakStart`; stats add car counts and live barrier and lot states.
+  - **Car markers:** four styles that differ in **shape as well as colour**: driving (arrow nose), standing (a driving car below 0.3 m/s; square front with a pause mark), parked (grey), diverted (arrow with a stripe). Pending, Departed and TurnedAway cars are not drawn; people inside a car are not drawn either. A stall shows as taken when a parked car stands on it (the engine has no per-stall state).
+  - **Phases on the clock:** "Departures" starts at the first point of the departure curve that has weight; "Jump to departures" seeks to the busiest 15 minutes of that curve.
+  - **"Close lot now"** records a `lotClose` timed event in the working copy and replays exactly up to now, like the interactive lane failures (D-035).
+  - **Headlines:** time until empty is that of the slowest lot that had cars. On a venue without gates or screening (the stand-alone car park), the pedestrian headlines and comparison rows are hidden, because "650 people still outside" would be meaningless there.
+  - **Comparison:** all car measures are lower-is-better; yes/no measures ("reached the public road") show the share of seeds.
+  - **Editor:** a barrier's misread % is written as the override `scanFailureRate`; every new editor field produces schema-valid scenarios.
+  - **Scan logs:** the export leaves out barrier lanes (`scanLogFromRun` uses only `run.lanes`); pay-station services appear as `scan_ok` rows.
+- **Alternatives:** One combined snapshot array (would change the people layout the existing code relies on); drawing every stall's state (needs engine support for little gain before the redesign).
+- **Consequences:** Known gaps, left for the redesign or later: with `carShare` 0 a venue's roads and lots are not drawn (the engine's vehicle layout is null then); the live barrier queue in metres comes from the metrics about once a second; barriers have no failed state; roads have no lane dividers; pay stations have no rows in the editor's element table; the comparison does not overlay lot occupancy across scenarios; the "+1 lane" button also appears for pay machines.
+
 ---
 
 ## 3. Review notes triage
@@ -317,8 +453,8 @@ What happened to each point in [keep-in-mind.md](spec/keep-in-mind.md). "Adopt" 
 |---|---|---|---|
 | A1 | Fixed rules scattered across sections | **Adopt**: consolidated list in [section 5](#5-fixed-rules-consolidated) | done |
 | A2 | Not every invariant can be a pure [test] | **Adopt**: section 5 marks each rule [test], [lint] or [human] | done |
-| A3 | `Diverted`: state or counter? | **Adopt**: a car may be redirected **once** (counted as an event); if the second lot is also full it becomes `TurnedAway`. `Diverted` stays in the enum as the state of a car driving to its second lot. | Phase 3 |
-| A4 | Occupants created at parking break conservation | **Adopt**: occupants are drawn when the car is created and held as `Pending` until they get out | Phase 3 |
+| A3 | `Diverted`: state or counter? | **Adopt**: a car may be redirected **once** (counted as an event); if the second lot is also full it becomes `TurnedAway`. `Diverted` stays in the enum as the state of a car driving to its second lot. | **done in Phase 3** (D-045; tests: divert, `lotClose`, `fair-day-north-car-park-closes`) |
+| A4 | Occupants created at parking break conservation | **Adopt**: occupants are drawn when the car is created and held as `Pending` until they get out | **done in Phase 3** (D-046; people and cars each conserved at every tick) |
 | A5 | Phase tests listed under the wrong phase | **Adopt**: re-sorted in [section 4](#4-acceptance-checklist) | done |
 | A6 | Scenarios before the backend; timed failures need the timeline; roads before the editor | **Adopt**: localStorage plus JSON export/import (Phase 2); timed lane failure is scenario data from Phase 1; Phase 3 roads are hand-written JSON | Phases 1–2 done (D-032, D-033); roads in Phase 3 |
 | A7 | 20k+5k vs 10k+2k agents | **Adopt**: 20,000 pedestrians + 5,000 cars is the **soft cap** (warning in the UI); 10,000 + 2,000 is the **performance reference** scenario | Phase 1 |
@@ -328,8 +464,8 @@ What happened to each point in [keep-in-mind.md](spec/keep-in-mind.md). "Adopt" 
 | B2 | Lanes idle up to 0.25 s per service | **Adopt**: D-004 | done |
 | B3 | Wq starts only when joining the queue area | **Adopt**: a logical FIFO per lane begins when the agent **commits** to the lane (wherever it is standing); Wq, L and λ are measured per lane-visit, and spilled-back agents count | done in Phase 1 (D-014, D-019; `queueWait` is also reported) |
 | B4 | Weidmann divides by zero / freezes at ρmax | **Adopt**: v = v₀ below ρ = 0.1 /m², and a floor of 0.1·v₀ | done in Phase 1 (`density.ts`, tested in `runParts.test.ts`) |
-| B5 | Run end and "time until empty" when overloaded | **Adopt**: `timeline.horizon`, a `drained` flag, and a deadlock watchdog; cars reserve road space or a stall before entering | Phase 1 done (`horizon`, `drained`, watchdog: D-023); cars in Phase 3 |
-| B6 | Test criteria that pass for the wrong reason | **Adopt**: M/D/1 and M/G/1 pass only if the 95% CI from 20 seeds contains the theoretical value **and** the CI half-width is under 3% of it; P-K uses the implemented E[S] and E[S²]; seeds pinned; setups stated (lane-failure test: about 85% utilisation before the failure); queue length excludes the person in service | Phase 1 done (`queueing.test.ts`, D-012); cars in Phase 3 |
+| B5 | Run end and "time until empty" when overloaded | **Adopt**: `timeline.horizon`, a `drained` flag, and a deadlock watchdog; cars reserve road space or a stall before entering | **done**: Phase 1 (`horizon`, `drained`, watchdog: D-023); Phase 3 cars (reservations D-043, end of a run D-048) |
+| B6 | Test criteria that pass for the wrong reason | **Adopt**: M/D/1 and M/G/1 pass only if the 95% CI from 20 seeds contains the theoretical value **and** the CI half-width is under 3% of it; P-K uses the implemented E[S] and E[S²]; seeds pinned; setups stated (lane-failure test: about 85% utilisation before the failure); queue length excludes the person in service | Phase 1 done (`queueing.test.ts`, D-012); Phase 3: paired seeds and a CI that excludes 0 for plate against ticket (D-050) |
 | B7 | Rescale check too noisy on one seed | **Adopt**: rescaling is checked on the mean of 20 paired seeds; translation must be bit-identical, with the raster anchored to the venue's bounding box | done in Phase 1 (D-016; `run.test.ts`) |
 | B8 | Hash JSON vs bytes; p95 definition; interactive failures | **Adopt**: D-006 for the hash; p95 by nearest rank; interactive lane failures are recorded as timestamped scenario events, so replay by re-running stays exact | done: Phase 1 (D-006; timed lane events are scenario data); Phase 2 interactive "fail lane now" (D-035) |
 | C1 | Replay memory blows 200 MB | **Adopt**: adaptive keyframe interval plus engine checkpoints every few simulated minutes; backward seeks restore the nearest checkpoint and re-run, cancellably | done in Phase 1: checkpoint interval adapts to a 64 MB budget, cancellable seeks (D-026) |
@@ -348,8 +484,8 @@ What happened to each point in [keep-in-mind.md](spec/keep-in-mind.md). "Adopt" 
 | E1 | Capacity in people/hour next to peak demand; first time under 85% utilisation | **Adopt** | done in Phase 1 (D-025) |
 | E2 | Turnstile 4 s is slow: card 3 s vs QR 4.5 s, 50/50 | **Adopt** as the new assumed default (mixed distribution) | done in Phase 1 (D-024) |
 | E3 | Arrivals too smooth: groups of 1–5, late tail | **Adopt**: groups choose the same lane; concert preset gets ~20% of arrivals in the last 15 min | done in Phase 1 (D-018; the concert example uses its own curve, D-028) |
-| E4 | Bag-policy field; car share per preset | **Adopt**: bag policy (none / clear bag / full search) sets screening time (Phase 1); car share fair 55%, concert 35%, stadium 30% (Phase 3) | bag policy done in Phase 1 (D-024); car share in Phase 3 |
-| E5 | Payment defaults pessimistic | **Adopt**: card/cash mix for pay-at-barrier and pay stations | Phase 3 |
+| E4 | Bag-policy field; car share per preset | **Adopt**: bag policy (none / clear bag / full search) sets screening time (Phase 1); car share fair 55%, concert 35%, stadium 30% (Phase 3) | **done**: bag policy in Phase 1 (D-024); car share defaults exported as `CAR_SHARE_DEFAULTS` in Phase 3 (D-046) |
+| E5 | Payment defaults pessimistic | **Adopt**: card/cash mix for pay-at-barrier and pay stations | **done in Phase 3** (D-044, D-049) |
 | E6 | "Latest gate opening for 95% inside" first in comparison | **Adopt** once sweeps exist | Phase 4 |
 | E7 | README: replace defaults with measured throughput | **Adopt** | Phase 6 |
 | F1 | Too many documents | **Replaced** by D-001 (one document) | done |
@@ -389,12 +525,16 @@ Every check from spec section 9, sorted into the phase where the work actually h
 - [ ] [human] README with a GIF, the live link and the how-it-works notes. **First CV milestone.** *Ready for owner review:* `README.md` has the GIF (`docs/media/demo.gif`) and the status; the live link reads "link added after deployment check" until the Vercel URL is confirmed; the how-it-works notes are in [section 7](#7-how-it-works-learning-notes).
 
 ### Phase 3: Vehicles and parking
-- [ ] [test] A parked car produces exactly its occupant count as pedestrians
-- [ ] [test] Over 10 paired seeds, plate recognition gives a lower mean entry queue than ticket entry, and the 95% CI of the paired difference excludes 0
-- [ ] [test] Departure with N cars and one exit lane as the bottleneck (service time s): time to empty is at least N·s and within 10% of N·s plus walking and driving time
-- [ ] [test] A full lot applies its overflow rule; turned-away cars are counted; conservation holds
-- [ ] [test] An entry queue reaching the public-road boundary is recorded with its time
-- [ ] [test] Little's law and conservation hold for barriers, pay stations and cars too
+- [x] [test] A parked car produces exactly its occupant count as pedestrians (`packages/engine/test/vehicles.test.ts`, "cars become people")
+- [x] [test] Over 10 paired seeds, plate recognition gives a lower mean entry queue than ticket entry, and the 95% CI of the paired difference excludes 0: **mean entry queue 60.98 m (ticket) against 40.81 m (plate), paired difference 20.16 ± 8.64 m** (`vehicles.test.ts`; setup and the finding behind it in D-049, D-050)
+- [x] [test] Departure with N cars and one exit lane as the bottleneck (service time s): time to empty is at least N·s and within 10% of N·s plus walking and driving time: **N = 60, s = 12 s: 849 s, which is at least 720 s and within 2.3% of the expected about 869 s** (`vehicles.test.ts`, "departures")
+- [x] [test] A full lot applies its overflow rule; turned-away cars are counted; conservation holds: leave, divert (once), queue with departures, queue without departures (deadlock) and `lotClose` each have a test (`vehicles.test.ts`, "overflow rules"); on the examples, `fair-day-north-car-park-closes` shows divert and turn-away at fair scale (`exampleRuns.test.ts`)
+- [x] [test] An entry queue reaching the public-road boundary is recorded with its time (`vehicles.test.ts`; on the stand-alone car park the entry queues reach the main road during the arrival peak, `carParkExample.test.ts`)
+- [x] [test] Little's law and conservation hold for barriers, pay stations and cars too: Little's law below 1e-9 on every barrier and pay-machine lane, and people and cars each conserved at every tick, on the stand-alone car park (every tick) and on every example run
+- [x] [test] Checkpoints restore bit-identically with vehicles, translating the venue gives a bit-identical hash (`vehicles.test.ts`, "determinism with cars")
+- [x] [test] Belgrade Fair with car parks: conservation, no unreachable people, no deadlock, drained, cars parked, a visible exit queue after the concert, time to empty reported, pay at the machines against pay at the barrier (`exampleRuns.test.ts`)
+- [ ] [human] **The performance target with vehicles is measured on the reference machine** (10,000 pedestrians and 2,000 cars). Our own numbers (Node, development machine): tick mean 2.07 ms, p95 5.52 ms, of which the vehicle step p95 is about 0.4 ms (section 6). The frame time in the browser is the part we have not seen, like the Phase 1 item above.
+- [x] [test] Web view of cars and parking: the car park example loads, cars drive and park, "Jump to departures" shows cars leaving, and after running to the end the time until empty and the longest exit queue equal a Node run; charts open; no console or CSP errors (`apps/web/e2e/parking.spec.ts`, D-053)
 
 ### Phase 4: .NET backend and jobs
 - [ ] [test] Integration tests (Testcontainers): a missing or wrong edit key is rejected; rotating the key invalidates the old one; concurrent updates are detected
@@ -543,6 +683,44 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
 - **README:** a GIF (15 s, 960 px wide, about 4 MB) and a screenshot in `docs/media/`, recorded against the production build by `apps/web/e2e/record-demo.spec.ts` (skipped unless `RECORD_DEMO=1`). The live link is added after the deployment check (owner).
 - **Deferred:** the live link in the README (the [human] check, after the merge). Undo in the editor (Phase 5, review C4). Editing custom arrival points by hand (only via the JSON box or a fitted scan log).
 - **Known limitations:** scenarios live in one browser until Phase 4; a lane event recorded late in a run costs a re-run up to that moment; the fitted service time includes scan retries, so it slightly overstates the pure scan time when scan failures are on.
+
+### Phase 3: Vehicles, parking and departures
+
+**Plan** (2026-11-13)
+- **3a. Schema:** roads, vehicle sources, barriers, lots and crossings; scenario car parameters, departures and `lotClose` (D-040).
+- **3b. Engine:** road graph and routing, car-following, barriers on the shared lane core, parking with reservations, overflow, counting of people and cars, departures (D-041 to D-048); metrics (D-051).
+- **3c. Examples:** a stand-alone car park (three scenarios) and the Belgrade Fair car parks (four scenarios) (D-052).
+- **3d. Web:** cars on the map, parking panels, departure and car fields in the editor, parking rows in the comparison (D-053).
+- *Risks:* gridlock of cars (mitigated by reservations, D-043); a plate system that is not faster than tickets (it turned out to be a finding, D-049); run time with 2,000 cars (measured below); example outcomes of Phase 1 changing when the venues grew (checked: identical, D-052).
+
+**Summary** (2026-11-13; merged into `main` **locally**, not pushed: the owner pushes together with Claude)
+- **Built:** 3a to 3d. Local checks: `npm run check` (263 tests) and `npm run test:e2e` (6 passed, 1 skipped: the demo recorder) pass. The web view was looked at in the browser on the car park example: entry queue backing up onto the main road before the start, cars parking, the exit rush with queues at the pay machines and the exit barrier, and the comparison pay machines → pay at the barrier (49 min 21 s → 1 h 05 min until empty; exit queue 12 m → 192 m). Not looked at: the Belgrade Fair car scenarios in the browser, dark mode, phone width.
+- **Measured** (Node, development machine):
+  - **10,515 pedestrians and 2,000 cars:** tick mean **2.07 ms**, p95 **5.52 ms**; the vehicle step on its own has a p95 of about **0.4 ms**. The target is 12 ms.
+  - The four Belgrade Fair car scenarios take about 3 s each headless; the whole example suite (all 13 scenarios and the car-park tests) about 26 s.
+- **Example results, stand-alone car park** (seed 1, 320 stalls, about 650 people in 329 cars, departures by the concert preset):
+
+  | Scenario | Lot empty after the end | Pay-machine wait | Exit queue |
+  |---|---|---|---|
+  | Pay at the machines (4 machines, 2 exit lanes) | 49 min | about 293 s | at most 12 m |
+  | Pay at the barrier (2 exit lanes) | 66 min | none (no machines) | up to 192 m |
+  | Pay at the barrier, 3 exit lanes | 49 min | none | shorter |
+
+  The entry queues reach the main road during the arrival peak (recorded with their time). Paying at the barrier costs 17 minutes; a third exit lane wins them back.
+- **Example results, Belgrade Fair car parks** (seed 1):
+
+  | Scenario | Cars | Parked / turned away | Time to empty after the end | Exit queue (max, mean) |
+  |---|---|---|---|---|
+  | Fair day with cars (55%), 4,000 people | 1,056 | 554 north + 502 south / 0 | north 37 min, south 29 min | north (pay at the barrier) 210 m, 68 m mean; south (machines) 19 m, 2.4 m mean |
+  | Fair day, north car park closes after 30 min | 1,056 | 803 / 253 | north 27 min, south 45 min | north 12 m; south 19 m; south full at 480 |
+  | Concert with cars and departures (35%), 4,500 people | 763 | 640 / 123 (lot full) | 65 min (pay at the machines) | 256 m, 73 m mean (3 exit lanes) |
+  | Concert car park, pay at the exit barrier | 763 | 640 / 123 | 104 min | 256 m, 133 m mean |
+
+  What they show: on the fair day, **both car parks cope** and the pedestrians' waits stay normal (peak p95 86 s against 85 s without cars); the long exit queue is only at the north car park, where drivers pay at the barrier. Closing the north car park makes its cars **divert** to the south one (381 cars), the south fills up (480 of 480), and 253 cars are turned away; the south pay machines then have a mean wait of about 588 s. At the **concert**, the lot fills up and 123 cars are turned away; the exit rush builds a queue of up to **256 m (139 cars)** at the exit barrier even with 3 lanes and machines, and **paying at the barrier empties the lot 39 minutes later and almost doubles the mean queue** (133 m against 73 m). Everyone departs or is turned away, nobody is unreachable, no deadlock, Little's law below 1e-9 on every barrier and machine lane.
+  The concert's pedestrians still cope with 5 gate lanes (360 people outside at the start, up from 177 without cars, because the car park's walk-ins arrive together in the peak).
+- **Existing examples unchanged:** the six Phase 1 scenarios give the same numbers to the last bit (D-052).
+- **Deferred:** the [human] performance check in the browser; the web-view gaps listed in D-053; scenarios with plate recognition at the Belgrade Fair car parks (the stand-alone example and the tests cover plate against ticket).
+- **Known limitations:** all vehicle defaults are assumptions (D-040, D-044); cars have no acceleration and no overtaking (D-042); the car parks and roads of the Fair are hand-drawn, not surveyed; occupants walk in a straight line inside a lot (off the walking grid); a lot has no one-way aisle rules beyond the drawn direction of roads.
 
 ---
 
@@ -755,6 +933,46 @@ A scan log says *when* things happened, not how long a scan took. The idea: on a
 6. **You only have timestamps of people leaving a gate. How do you estimate the service time, and when does it go wrong?**
    Use the intervals between consecutive departures on the same lane, but only while the lane was busy, because then each interval is one service time. Idle gaps are filtered out with a threshold relative to the median gap (here 3 times). It goes wrong on quiet lanes (the intervals are inter-arrival times, so the estimate is too high) and for very long services (they look like idle gaps and are dropped, so the estimate is slightly too low). The round-trip test (generate a log from the simulator, fit it, compare with the true mean, within 10%) shows the method is sound where it is meant to be used.
 
+### Phase 3: cars, parking and departures, in plain language
+
+#### The road graph and routing
+Roads and parking aisles are drawn as polylines. The engine cuts them into **edges** wherever one ends at another or touches it within a metre, and cuts the last 30 m before each barrier as its own edge. That gives a directed graph: a node where roads meet, an edge for each stretch between them, with a length, a speed and a lane count. Every car needs "the quickest way from here to there". Instead of searching for each car, the engine computes the quickest travel time between **every pair** of edges once (a shortest-path search from each edge), and breaks ties in a fixed order (lowest edge id first), so the table is the same on every machine. A car's route is then a lookup: "from this edge, towards that target, which edge is next?". As with the pedestrian flow fields (Phase 1), the cost depends on the size of the network, not on the number of cars.
+
+#### Car-following and spillback
+Each edge lane keeps its cars **in order**. In every 0.25 s tick a car drives at the edge's free speed, but never closer than 7 m (4.5 m car plus 2.5 m gap) behind the car in front, and never past a stop line it must obey: a barrier it has not been served at, a crossing a pedestrian is on, or its target. It cannot enter the next edge unless that edge has room. A queue of cars therefore forms behind a barrier by itself, and grows backwards over the edges: when an edge is full, the next one fills, and so on up to the public road. That is **spillback**, and it is measured: the queue is the unbroken chain of held-up cars back from the stop line, and it ends at the first gap of more than 1.5 car spacings. It is a deliberately simple model (instant speed changes, no overtaking): enough to show where a queue ends up, not how smoothly it moves.
+
+#### Reservations: how to avoid gridlock
+A road with finite space and a lot with finite stalls can **deadlock**: car A waits for space that car B holds, and B waits for something A holds. The engine rules this out by reserving. **Road space:** a car enters an edge only if the edge has a free slot (length divided by 7 m), and the slot is then its own. **Stalls:** a car reserves its stall when it is admitted to the barrier's approach, and the barrier serves only cars that hold one. So nobody inside the lot is ever looking for space, and a full lot never blocks its own aisles: it shows up as an entry queue, or triggers the overflow rule (queue, divert once, leave). A waiting queue that can never be served (a lot with the queue rule and no departures) is caught by the watchdog, which ends the run with `deadlock: true` instead of running to the horizon.
+
+#### Barriers are lanes
+A barrier lane is a queueing server like a turnstile, so it uses the same `LaneBank`: a logical FIFO that starts when the car enters the approach (a car commits to the lane with the fewest committed cars), exact service events, retries after a plate misread, and Little's law checked on it too. One real-world detail changes the capacity: after a car leaves, the next one must drive from its place in the queue to the stop line, which takes about 1.25 s. So a lane with service time s serves about **1 / (s + 1.25 s)** cars per second, not 1 / s. The "time to empty" test uses exactly this: 60 cars at 12 s each give 720 s without the move-up and about 869 s with it, and the simulation gives 849 s.
+
+#### Why plate recognition is not always better
+Plate recognition has a lower mean service time than a ticket (7.1 against 7.5 s in our defaults). You would expect a shorter queue. But 5% of the cars are misread and take the fallback, 15 to 30 s. The **Pollaczek-Khinchine formula** (Phase 1) says the average wait is λ·E[S²] / (2(1 − ρ)): it depends on the **second moment** E[S²], which is large when a few services are very long. The misreads raise E[S²] a lot, even though they barely move the mean. At low utilisation ρ the queue is short anyway and the difference is lost in the noise; near the barrier's capacity (ρ close to 1, where the denominator 1 − ρ is small) the lower mean wins clearly. There is a second catch: with a 6 s parking manoeuvre in a single aisle, the aisle, not the barrier, is the bottleneck, so a faster barrier changes nothing. The test therefore uses a 1 s manoeuvre, over 10 paired seeds, and requires the 95% CI of the paired difference to exclude 0 (20.16 ± 8.64 m shorter on average). The lesson: a measure can make the average better and the queue worse, or not better at all; always look at the bottleneck and at the variation, not only at the mean.
+
+#### Conservation with two kinds of agents
+Conservation (Phase 1) says the states of all agents sum to the number created. With cars there are two kinds of agents, and the people in a car do not exist on the walking grid until they get out. So the engine keeps two counts: cars (Pending, Driving, Diverted, Parked, Departed, TurnedAway) and people. The occupants are **drawn when the car is created** (consecutive ids, so they are known), and are **Pending** until `carExitDelay` after the car parks. If the car is turned away, its occupants are `TurnedAway`: they never came, which is different from "unreachable" (nowhere to walk). Each count sums to its own total at every tick, and a test checks it on every example run.
+
+#### Departures
+A departure curve gives each group (a car's occupants are one group) a time to leave. People on foot walk back to where they came from, passing the gate lines without being scanned. People with a car walk to the lot's walking exit, and the driver first pays at the pay machines if the lot has them. When everyone is aboard, the car leaves after a boarding delay, picks the exit barrier with the lowest cost (driving time plus expected queue), and queues there. The **exit rush** is the result: a wave of cars meets a barrier whose capacity is about 1 / (s + 1.25 s) per lane. If drivers pay at the machines, the barrier's service is short (4 to 8 s) and the time to empty follows the departure curve and the machines; if they pay at the barrier, each car spends 25 to 45 s at the lane and the number of exit lanes decides everything (stand-alone example: 49 minutes with machines, 66 with payment at the barrier and 2 lanes, 49 again with 3 lanes).
+
+#### Interview questions (Phase 3)
+
+1. **Why compute all-pairs routes once instead of routing each car?**
+   The cost then depends on the size of the network, not on the number of cars; every car's next step is a table lookup, and ties are broken in a fixed order, so the table is identical in every JavaScript engine. It is the same idea as the pedestrian flow fields.
+
+2. **How do you stop cars deadlocking in a finite road network and a full car park?**
+   By reserving before entering: a car takes road space only if an edge has a free slot, and a car is only served at the entry barrier if it already holds a stall. Nothing can then wait for space held by something that is waiting for it. A lot that is full shows up as an entry queue or an overflow rule, and a queue that can never clear is caught by the watchdog.
+
+3. **Why is a barrier's capacity 1 / (s + 1.25 s) and not 1 / s?**
+   After each service the next car must drive up to the stop line, which takes about 1.25 s during which the lane serves nobody. The time to empty for N cars is therefore about N·(s + 1.25 s) plus walking and driving, which the test checks (849 s measured against about 869 s expected for N = 60, s = 12 s).
+
+4. **Plate recognition has a lower mean service time, but did not always give a shorter queue. Why?**
+   The wait depends on the second moment E[S²] (Pollaczek-Khinchine), and the 5% misreads at 15 to 30 s make it large. At low utilisation the queue is short anyway; near capacity the lower mean wins. In a single aisle with a 6 s parking manoeuvre the aisle is the bottleneck, so the barrier does not matter. The test isolates the effect (1 s manoeuvre, 10 paired seeds, a CI that excludes 0).
+
+5. **Occupants of a car only exist as walking people after it parks. How is conservation still exact?**
+   They are created with the car (consecutive ids, drawn at creation) and held as Pending, so people are conserved from the start; cars have their own state counts that sum to the number of cars. A turned-away car turns its occupants into TurnedAway, not into unreachable people. Two counts, each exact at every tick, checked on every example.
+
 ---
 
 ## 8. Reference
@@ -771,7 +989,7 @@ apps/web/src/validation/   build-time (Ajv standalone) scenario validator, serve
 apps/web/e2e/              Playwright tests (determinism, smoke, replay, compare, library) and record-demo (media recording, skipped unless RECORD_DEMO=1)
 packages/engine/           simulation engine (pure TS) and its tests in test/
 packages/analysis/         statistics (mean and 95% CI, paired differences) and scan-log generation, import and fitting, with tests
-packages/examples/         built-in Belgrade Fair venues (venues/) and scenarios (scenarios/) as JSON, plus their tests in test/
+packages/examples/         built-in venues (venues/: Belgrade Fair fair day and concert with car parks, a stand-alone car park) and scenarios (scenarios/) as JSON, plus their tests in test/
 packages/schema/           generated types (src/generated) and schema tests
 schema/                    JSON Schema source files and shared fixtures
 tools/                     scripts (schema type generator)
@@ -791,7 +1009,7 @@ playwright.config.ts       Playwright setup (production build under the producti
 | `npm test` | all unit and validation tests (Vitest), including the example runs |
 | `npm run test:e2e` | Playwright browser tests (Chromium; builds the app and serves it with `vite preview`). Run `npx playwright install chromium` once first. Not part of `npm run check`; CI runs it as a separate job |
 | `RECORD_DEMO=1 npx playwright test record-demo` | records the README demo video and screenshots into `RECORD_DEMO_DIR` (default `./demo-out`); convert to a GIF with ffmpeg. Skipped without `RECORD_DEMO=1` |
-| `npx vitest run packages/examples` | only the example scenarios; set `EXAMPLE_RUNS_VERBOSE=1` to print their numbers and `EXAMPLE_RUNS_ONLY=concert` to run a subset |
+| `npx vitest run packages/examples` | only the example scenarios (about 26 s, including the car scenarios); set `EXAMPLE_RUNS_VERBOSE=1` to print their numbers and `EXAMPLE_RUNS_ONLY=cars` (or `concert`, `fair`) to run a subset |
 | `npm run lint` / `npm run typecheck` | ESLint / TypeScript |
 | `npm run schema:gen` | regenerate types after editing `/schema` |
 | `npm run check` | everything the CI `check` job runs (not the browser tests) |

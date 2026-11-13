@@ -2,13 +2,13 @@
  * The scenario editor's form model: every field as the text the user typed, so half-typed or empty
  * inputs are representable. `scenarioToForm` fills a form from a scenario; `formToScenario` turns it
  * back into a scenario plus a list of problems in plain words. Fields the form does not show
- * (departures, custom arrival points, manual-lane service time, …) are carried over from the base
+ * (custom arrival or departure points, manual-lane service time, barrier service times, …) are carried over from the base
  * scenario unchanged. Pure; tested in library.test.ts, including "every editor output is valid
  * against the JSON Schema".
  */
 
 import { RUN_DEFAULTS } from "@bottleneck/engine";
-import type { BagPolicy, Distribution, ElementOverride, EventType, Scenario, ScenarioParameters, TimedEvent, Venue } from "@bottleneck/schema";
+import type { BagPolicy, BarrierServiceType, Distribution, ElementOverride, EventType, OverflowRule, PaymentMode, Scenario, ScenarioParameters, StallChoice, TimedEvent, Venue } from "@bottleneck/schema";
 import { DEFAULT_SERVICE_SIGMA, cloneScenario, pruneOverrides, readSimpleServiceTime, simpleServiceTime, venueElements } from "./scenarios.ts";
 
 export interface Problem {
@@ -36,6 +36,27 @@ export interface ElementForm {
   serviceSigma: string;
   serviceJson: string;
   scanFailurePercent: string;
+}
+
+/** Overrides of one vehicle barrier; empty text or "" keeps the venue's value. */
+export interface BarrierForm {
+  id: string;
+  name: string;
+  kind: "entry" | "exit";
+  laneCount: string;
+  serviceType: "" | BarrierServiceType;
+  /** Plate-recognition misread rate (the override's scanFailureRate), percent. */
+  misreadPercent: string;
+}
+
+/** Overrides of one parking lot; "" keeps the venue's setting. */
+export interface LotForm {
+  id: string;
+  name: string;
+  paymentMode: "" | PaymentMode;
+  stallChoice: "" | StallChoice;
+  overflowRule: "" | OverflowRule["rule"];
+  divertTo: string;
 }
 
 export interface EventForm {
@@ -78,7 +99,34 @@ export interface ScenarioForm {
   logitScale: string;
   jockeyThreshold: string;
   elements: ElementForm[];
+  /** "" = no departures. "custom" only while custom points are kept. */
+  departurePreset: "" | DeparturePreset;
+  departureCustomPoints: number;
+  keepDeparturePoints: boolean;
+  /** Car parameters (empty = built-in default). */
+  occupancy: string;
+  cardSharePercent: string;
+  carExitDelay: string;
+  carBoardDelay: string;
+  carLength: string;
+  carGap: string;
+  aisleSpeed: string;
+  parkManoeuvre: string;
+  barriers: BarrierForm[];
+  lots: LotForm[];
   events: EventForm[];
+}
+
+export type DeparturePreset = NonNullable<Scenario["departures"]>["preset"];
+export const DEPARTURE_PRESETS: readonly DeparturePreset[] = ["concert", "stadium", "fair", "conference", "custom"];
+export const BARRIER_SERVICE_TYPES: readonly BarrierServiceType[] = ["ticket", "plate", "card", "payAtBarrier"];
+export const PAYMENT_MODES: readonly PaymentMode[] = ["payStation", "payAtBarrier", "prepaid"];
+export const STALL_CHOICES: readonly StallChoice[] = ["nearestEntry", "nearestWalkingExit"];
+export const OVERFLOW_RULES: readonly OverflowRule["rule"][] = ["queue", "divert", "leave"];
+
+/** True if the venue has what cars need (a vehicle source and a parking lot). */
+export function venueHasParking(venue: Venue): boolean {
+  return (venue.parkingLots?.length ?? 0) > 0 && (venue.vehicleSources?.length ?? 0) > 0;
 }
 
 export const EVENT_TYPES: readonly EventType[] = ["concert", "stadium", "fair", "conference"];
@@ -128,13 +176,16 @@ let nextKey = 1;
 export function eventToForm(e: TimedEvent): EventForm {
   const base = { key: nextKey++, at: timeField(e.at), groupId: "", laneNumber: "1", sourceId: "", count: "" };
   if (e.kind === "busBurst") return { ...base, kind: e.kind, sourceId: e.sourceId, count: String(e.count) };
+  // A lot closing keeps its lot id in groupId (the editor has no lot picker yet).
+  if (e.kind === "lotClose") return { ...base, kind: e.kind, groupId: e.lotId };
   return { ...base, kind: e.kind, groupId: e.groupId, laneNumber: String(e.laneIndex + 1) };
 }
 
 /** A new timed event row with sensible defaults for this venue. */
 export function newEventForm(kind: TimedEvent["kind"], venue: Venue, atSeconds: number): EventForm {
   const firstElement = venueElements(venue).find((e) => e.kind === "gate") ?? venueElements(venue)[0];
-  return { key: nextKey++, kind, at: timeField(atSeconds), groupId: firstElement?.id ?? "", laneNumber: "1", sourceId: venue.sources[0]?.id ?? "", count: kind === "busBurst" ? "500" : "" };
+  const groupId = kind === "lotClose" ? (venue.parkingLots?.[0]?.id ?? "") : (firstElement?.id ?? "");
+  return { key: nextKey++, kind, at: timeField(atSeconds), groupId, laneNumber: "1", sourceId: venue.sources[0]?.id ?? "", count: kind === "busBurst" ? "500" : "" };
 }
 
 export function scenarioToForm(s: Scenario, venue: Venue): ScenarioForm {
@@ -180,6 +231,25 @@ export function scenarioToForm(s: Scenario, venue: Venue): ScenarioForm {
     logitScale: numText(p.logitScale, 3),
     jockeyThreshold: p.jockeyThreshold !== undefined ? String(p.jockeyThreshold) : "",
     elements,
+    departurePreset: s.departures?.preset ?? "",
+    departureCustomPoints: s.departures?.points?.length ?? 0,
+    keepDeparturePoints: true,
+    occupancy: p.occupancy ? p.occupancy.map((w) => numText(w, 4)).join(", ") : "",
+    cardSharePercent: p.cardShare !== undefined ? numText(p.cardShare * 100, 3) : "",
+    carExitDelay: numText(p.carExitDelay, 3),
+    carBoardDelay: numText(p.carBoardDelay, 3),
+    carLength: numText(p.carLength, 3),
+    carGap: numText(p.carGap, 3),
+    aisleSpeed: numText(p.aisleSpeed, 3),
+    parkManoeuvre: numText(p.parkManoeuvre, 3),
+    barriers: (venue.vehicleBarriers ?? []).map((b) => {
+      const o = s.overrides?.[b.id] ?? {};
+      return { id: b.id, name: b.name, kind: b.kind, laneCount: o.laneCount !== undefined ? String(o.laneCount) : "", serviceType: o.serviceType ?? "", misreadPercent: o.scanFailureRate !== undefined ? numText(o.scanFailureRate * 100, 3) : "" };
+    }),
+    lots: (venue.parkingLots ?? []).map((l) => {
+      const o = s.overrides?.[l.id] ?? {};
+      return { id: l.id, name: l.name, paymentMode: o.paymentMode ?? "", stallChoice: o.stallChoice ?? "", overflowRule: o.overflow?.rule ?? "", divertTo: o.overflow?.divertTo ?? "" };
+    }),
     events: (s.timedEvents ?? []).map(eventToForm),
   };
 }
@@ -293,6 +363,24 @@ export function formToScenario(form: ScenarioForm, base: Scenario, venue: Venue)
   setParam("decisionDistance", c.number("decisionDistance", "Lane decision distance", form.decisionDistance, { min: 0, max: 500, exclusiveMin: true }));
   setParam("logitScale", c.number("logitScale", "Lane choice sensitivity τ", form.logitScale, { min: 0, max: 3600, exclusiveMin: true }));
   setParam("jockeyThreshold", c.number("jockeyThreshold", "Lane switching threshold", form.jockeyThreshold, { min: 1, max: 1000, integer: true }));
+  // Cars
+  setParam("occupancy", parseShares(c, "occupancy", "People per car", form.occupancy));
+  const card = c.number("cardSharePercent", "Share paying by card", form.cardSharePercent, { min: 0, max: 100 });
+  setParam("cardShare", card === undefined ? undefined : card / 100);
+  setParam("carExitDelay", c.number("carExitDelay", "Getting out after parking", form.carExitDelay, { min: 0, max: 3600 }));
+  setParam("carBoardDelay", c.number("carBoardDelay", "Getting in before pulling out", form.carBoardDelay, { min: 0, max: 3600 }));
+  setParam("carLength", c.number("carLength", "Car length", form.carLength, { min: 2, max: 20 }));
+  setParam("carGap", c.number("carGap", "Gap between queued cars", form.carGap, { min: 0, max: 20 }));
+  setParam("aisleSpeed", c.number("aisleSpeed", "Speed in aisles", form.aisleSpeed, { min: 1, max: 50 }));
+  setParam("parkManoeuvre", c.number("parkManoeuvre", "Turning into or out of a stall", form.parkManoeuvre, { min: 0, max: 600 }));
+
+  // Departures
+  if (form.departurePreset === "") delete s.departures;
+  else {
+    const dpts = form.keepDeparturePoints ? base.departures?.points : undefined;
+    s.departures = { preset: form.departurePreset, ...(dpts && dpts.length >= 2 ? { points: dpts } : {}) };
+    if (form.departurePreset === "custom" && !(dpts && dpts.length >= 2)) c.add("departurePreset", "The “custom” departure curve needs points. Pick a preset instead.");
+  }
   if (Object.keys(p).length > 0) s.parameters = p;
   else delete s.parameters;
 
@@ -310,6 +398,32 @@ export function formToScenario(form: ScenarioForm, base: Scenario, venue: Venue)
     }
     overrides[el.id] = o;
   }
+  // Vehicle barriers and parking lots: only the fields the form shows are replaced; others (a barrier's service time) are kept.
+  for (const b of form.barriers) {
+    const o: ElementOverride = { ...(base.overrides?.[b.id] ?? {}) };
+    delete o.laneCount;
+    delete o.serviceType;
+    delete o.scanFailureRate;
+    const lanes = c.number(`barriers.${b.id}.laneCount`, `${b.name}: lanes`, b.laneCount, { min: 1, max: 64, integer: true });
+    if (lanes !== undefined) o.laneCount = lanes;
+    if (b.serviceType !== "") o.serviceType = b.serviceType;
+    const mis = c.number(`barriers.${b.id}.misreadPercent`, `${b.name}: misread rate`, b.misreadPercent, { min: 0, max: 100 });
+    if (mis !== undefined) o.scanFailureRate = mis / 100;
+    overrides[b.id] = o;
+  }
+  for (const l of form.lots) {
+    const o: ElementOverride = { ...(base.overrides?.[l.id] ?? {}) };
+    delete o.paymentMode;
+    delete o.stallChoice;
+    delete o.overflow;
+    if (l.paymentMode !== "") o.paymentMode = l.paymentMode;
+    if (l.stallChoice !== "") o.stallChoice = l.stallChoice;
+    if (l.overflowRule === "divert") {
+      if (!l.divertTo || l.divertTo === l.id) c.add(`lots.${l.id}.divertTo`, `${l.name}: choose another lot to divert cars to.`);
+      else o.overflow = { rule: "divert", divertTo: l.divertTo };
+    } else if (l.overflowRule !== "") o.overflow = { rule: l.overflowRule };
+    overrides[l.id] = o;
+  }
   const pruned = pruneOverrides(overrides);
   if (pruned) s.overrides = pruned;
   else delete s.overrides;
@@ -324,10 +438,14 @@ export function formToScenario(form: ScenarioForm, base: Scenario, venue: Venue)
       const count = c.number(`events.${e.key}.count`, `${label}: number of people`, e.count, { min: 1, max: 5000, integer: true, required: true });
       if (!e.sourceId) c.add(`events.${e.key}.sourceId`, `${label}: choose where the people appear.`);
       if (count !== undefined && e.sourceId) events.push({ kind: "busBurst", at, sourceId: e.sourceId, count });
+    } else if (e.kind === "lotClose") {
+      if (!e.groupId) c.add(`events.${e.key}.groupId`, `${label}: choose the parking lot.`);
+      else events.push({ kind: "lotClose", at, lotId: e.groupId });
     } else {
       const lane = c.number(`events.${e.key}.laneNumber`, `${label}: lane number`, e.laneNumber, { min: 1, max: 64, integer: true, required: true });
       if (!e.groupId) c.add(`events.${e.key}.groupId`, `${label}: choose the gate group or screening stage.`);
-      if (lane !== undefined && e.groupId) events.push({ kind: e.kind, at, groupId: e.groupId, laneIndex: lane - 1 });
+      const kind = e.kind;
+      if (lane !== undefined && e.groupId) events.push({ kind, at, groupId: e.groupId, laneIndex: lane - 1 });
     }
   });
   const sorted = events.map((e, k) => ({ e, k })).sort((a, b) => a.e.at - b.e.at || a.k - b.k).map((x) => x.e);
@@ -335,6 +453,21 @@ export function formToScenario(form: ScenarioForm, base: Scenario, venue: Venue)
   else delete s.timedEvents;
 
   return { scenario: c.problems.length === 0 ? s : null, problems: c.problems };
+}
+
+/** Relative frequencies of 1, 2, 3, ... (people per car): 1 to 8 non-negative numbers, not all zero. */
+function parseShares(c: Collector, field: string, label: string, text: string): number[] | undefined {
+  const t = text.trim();
+  if (t === "") return undefined;
+  const values = t
+    .split(/[\s,;]+/)
+    .filter((x) => x !== "")
+    .map((x) => parseNumber(x));
+  if (values.length < 1 || values.length > 8 || values.some((v) => v === undefined || Number.isNaN(v) || v < 0) || !values.some((v) => (v ?? 0) > 0)) {
+    c.add(field, `${label}: 1 to 8 non-negative numbers separated by commas (shares of 1, 2, 3, ... people), not all zero.`);
+    return undefined;
+  }
+  return values as number[];
 }
 
 function parseGroupSizes(c: Collector, text: string): number[] | undefined {

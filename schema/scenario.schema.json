@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "scenario.schema.json",
   "title": "Scenario",
-  "description": "All inputs for one run against a venue. Times are seconds relative to t = 0; for fixed-start events t = 0 is the event start, for open-door events it is the opening time.",
+  "description": "All inputs for one run against a venue. Times are seconds relative to t = 0; for fixed-start events t = 0 is the event start, for open-door events it is the opening time. carShare: Share of the attendance arriving by car (spec 4.3). Used only if the venue has a vehicle source and a parking lot; otherwise everyone arrives on foot. Suggested values per event type (assumed, review E4): fair 0.55, concert 0.35, stadium 0.30, conference 0.40 (CAR_SHARE_DEFAULTS in the engine). departures: Departure curve (spec 4.4). Optional: without it nobody leaves and the run ends once everyone is inside (and every car parked). Presets are placed relative to timeline.eventEnd (assumed): concert about 80% leave within 30 min of the end, stadium about 85% within 20 min, fair spread over the last 3 hours of opening, conference over the last hour. Custom points are scenario times.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -172,7 +172,7 @@
     },
     "ScenarioParameters": {
       "title": "ScenarioParameters",
-      "description": "Scenario-scope assumptions (spec section 5). Missing values use the built-in defaults (all assumed); the run stores the full resolved set. nearestLaneShare: share of people who take the lane with the shortest walk instead of choosing by expected cost (default 0.3). manualLaneServiceTime: service time at a gate group manual lane, used after a second scan failure (default uniform 20-40 s). shareInsideAt: reference time T of the share-inside-by-T metric, in scenario seconds (default 10 minutes before a fixed start, or 1 hour after the gates open for open-door events).",
+      "description": "Scenario-scope assumptions (spec section 5). Missing values use the built-in defaults (all assumed); the run stores the full resolved set. nearestLaneShare: share of people who take the lane with the shortest walk instead of choosing by expected cost (default 0.3). manualLaneServiceTime: service time at a gate group manual lane, used after a second scan failure (default uniform 20-40 s). shareInsideAt: reference time T of the share-inside-by-T metric, in scenario seconds (default 10 minutes before a fixed start, or 1 hour after the gates open for open-door events). The car parameters (occupancy, cardShare, carExitDelay, carBoardDelay, carLength, carGap, aisleSpeed, parkManoeuvre) only matter if some people arrive by car. cardShare: Share of payers who pay by card rather than cash, at pay stations and pay-at-barrier exits (default 0.7, assumed; card is faster, review E5).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -230,6 +230,55 @@
         },
         "bagPolicy": {
           "$ref": "#/definitions/BagPolicy"
+        },
+        "occupancy": {
+          "description": "People per car: occupancy[k] is the relative frequency of cars with k + 1 people (default [0.35, 0.35, 0.18, 0.12] for 1-4, assumed).",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "cardShare": {
+          "$ref": "common.schema.json#/definitions/Probability"
+        },
+        "carExitDelay": {
+          "description": "Seconds between a car parking and its occupants starting to walk (default 20, assumed).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 600
+        },
+        "carBoardDelay": {
+          "description": "Seconds between the last occupant reaching the car and the car pulling out (default 20, assumed).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 600
+        },
+        "carLength": {
+          "description": "Car length in metres (default 4.5, assumed).",
+          "type": "number",
+          "minimum": 2,
+          "maximum": 20
+        },
+        "carGap": {
+          "description": "Minimum gap between queued cars in metres (default 2.5, assumed). Road storage = length / (carLength + carGap) per lane.",
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 10
+        },
+        "aisleSpeed": {
+          "description": "Driving speed in parking aisles in km/h (default 8, assumed).",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 50
+        },
+        "parkManoeuvre": {
+          "description": "Seconds a car blocks its aisle while turning into or out of a stall (default 6, assumed).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 120
         }
       }
     },
@@ -259,8 +308,21 @@
         },
         "scanFailureRate": {
           "$ref": "common.schema.json#/definitions/Probability"
+        },
+        "serviceType": {
+          "$ref": "common.schema.json#/definitions/BarrierServiceType"
+        },
+        "paymentMode": {
+          "$ref": "common.schema.json#/definitions/PaymentMode"
+        },
+        "stallChoice": {
+          "$ref": "common.schema.json#/definitions/StallChoice"
+        },
+        "overflow": {
+          "$ref": "common.schema.json#/definitions/OverflowRule"
         }
-      }
+      },
+      "description": "Changes to one element, keyed by its id: a gate group, screening stage, pay station, vehicle barrier or parking lot. Fields that do not apply to the element are ignored. scanFailureRate is the scan failure rate of a gate group and the misread rate of a plate-recognition barrier; serviceType applies to vehicle barriers; paymentMode, stallChoice and overflow to parking lots."
     },
     "TimedEvent": {
       "title": "TimedEvent",
@@ -273,6 +335,9 @@
         },
         {
           "$ref": "#/definitions/BusBurstEvent"
+        },
+        {
+          "$ref": "#/definitions/LotCloseEvent"
         }
       ]
     },
@@ -355,6 +420,28 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 5000
+        }
+      }
+    },
+    "LotCloseEvent": {
+      "title": "LotCloseEvent",
+      "description": "From `at` on, the parking lot takes no new cars (as if it were full); cars that already hold a stall still park.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "at",
+        "lotId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "lotClose"
+        },
+        "at": {
+          "$ref": "common.schema.json#/definitions/Seconds"
+        },
+        "lotId": {
+          "$ref": "common.schema.json#/definitions/Id"
         }
       }
     }

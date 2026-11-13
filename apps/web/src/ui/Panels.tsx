@@ -4,6 +4,7 @@ import type { ElementReport, LanePeriod } from "@bottleneck/schema";
 import { formatCount, formatDuration, formatPercent, formatRelativeClock, formatWallClock } from "../sim/format.ts";
 import type { Headline, HeadlineKind } from "../sim/headline.ts";
 import type { ParameterRow } from "../sim/parameters.ts";
+import type { EventPhase } from "../sim/parking.ts";
 import { strings } from "../strings.ts";
 import { ShapeIcon, stateShape } from "./Legend.tsx";
 
@@ -105,22 +106,24 @@ export function WorstLane({ name, queue, onAddLane, addDisabled }: { name: strin
 }
 
 const SHOWN_STATES = [AgentState.Pending, AgentState.Walking, AgentState.Queuing, AgentState.InService, AgentState.Inside, AgentState.TurnedAway] as const;
-const STATE_KEYS = { 0: "Pending", 1: "Walking", 2: "Queuing", 3: "InService", 4: "Inside", 8: "TurnedAway" } as const;
+/** With cars or departures, people can also be in a car on the way out, or gone. */
+const SHOWN_STATES_LEAVING = [AgentState.Pending, AgentState.Walking, AgentState.Queuing, AgentState.InService, AgentState.Inside, AgentState.Driving, AgentState.Departed, AgentState.TurnedAway] as const;
+const STATE_KEYS = { 0: "Pending", 1: "Walking", 2: "Queuing", 3: "InService", 4: "Inside", 5: "Driving", 7: "Departed", 8: "TurnedAway" } as const;
 
 /** `time` (scenario s of these counts) is exposed as data-time for the end-to-end tests. */
-export function StateCounts({ counts, time }: { counts: number[]; time: number }) {
+export function StateCounts({ counts, time, cars = false, leaving = false }: { counts: number[]; time: number; cars?: boolean; leaving?: boolean }) {
   return (
     <section className={card} aria-labelledby="states-heading" data-time={time}>
       <h2 id="states-heading" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
         {strings.states.heading}
       </h2>
       <dl className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-sm">
-        {SHOWN_STATES.map((s) => {
+        {(cars || leaving ? SHOWN_STATES_LEAVING : SHOWN_STATES).map((s) => {
           const shape = stateShape(s);
           return (
             <div key={s} className="contents">
               <span className="w-3">{shape && <ShapeIcon shape={shape.shape} color={shape.css} />}</span>
-              <dt>{strings.states[STATE_KEYS[s]]}</dt>
+              <dt>{s === AgentState.Pending && cars ? strings.states.PendingWithCars : strings.states[STATE_KEYS[s]]}</dt>
               <dd className="text-right font-mono tabular-nums">{formatCount(counts[s] ?? 0)}</dd>
             </div>
           );
@@ -207,14 +210,21 @@ export function ParametersList({ rows }: { rows: ParameterRow[] }) {
   );
 }
 
-export function ClockDisplay({ time, clock }: { time: number; clock: ClockInfo }) {
+export function ClockDisplay({ time, clock, phase }: { time: number; clock: ClockInfo; phase?: EventPhase }) {
   const C = strings.clock;
   return (
-    <div className="flex items-baseline gap-3" aria-label={C.eventClock}>
-      <span className="font-mono text-2xl font-bold tabular-nums">{formatRelativeClock(time, clock.anchor, clock.fixedStart)}</span>
-      <span className="text-sm text-slate-500">
-        {formatWallClock(clock.referenceClock, time, true)} · {clock.fixedStart ? C.relativeToStart : C.relativeToOpening}
-      </span>
+    <div className="flex flex-wrap items-baseline gap-x-3">
+      <div className="flex items-baseline gap-3" aria-label={C.eventClock}>
+        <span className="font-mono text-2xl font-bold tabular-nums">{formatRelativeClock(time, clock.anchor, clock.fixedStart)}</span>
+        <span className="text-sm text-slate-500">
+          {formatWallClock(clock.referenceClock, time, true)} · {clock.fixedStart ? C.relativeToStart : C.relativeToOpening}
+        </span>
+      </div>
+      {phase && (
+        <span className={`rounded px-2 py-0.5 text-xs font-semibold ${phase === "departures" ? "bg-sky-100 text-sky-900 dark:bg-sky-500/15 dark:text-sky-200" : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`} aria-label={C.phaseLabel} data-phase={phase}>
+          {C.phases[phase]}
+        </span>
+      )}
     </div>
   );
 }

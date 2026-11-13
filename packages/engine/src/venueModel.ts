@@ -23,6 +23,13 @@
  * group without screening. For each screening stage there is one more set: the gate groups behind
  * it. Agents walk the set's flow field (towards the nearest lane tail of any element in the set)
  * until they are within the decision distance, then choose a lane.
+ *
+ * Pay stations (Phase 3). A parking lot's pay station is a lane element like a gate group (kind
+ * "payStation", lanes along its line, a queue area, no scan failures, no manual lane). Elements are
+ * ordered screening stages, gate groups, pay stations; lane ids are the regular lanes of screening
+ * stages and gate groups, then the manual lanes, then the pay station lanes, so a venue without
+ * parking keeps exactly the ids it had. Each pay station has a stage set of its own (after the
+ * screening sets), used by drivers walking back to their car (see run.ts, departures).
  */
 
 import type { Distribution, Point, Scenario, Venue } from "@bottleneck/schema";
@@ -35,12 +42,14 @@ export interface ModelSettings {
   manualServiceTime: Distribution;
   /** Service time of every screening stage from the scenario's bag policy; null keeps the venue's. */
   screeningServiceTime: Distribution | null;
+  /** Default service time of pay stations without their own (the card/cash mix). */
+  payStationServiceTime: Distribution;
 }
 
 export interface LaneElement {
   readonly index: number;
   readonly id: string;
-  readonly kind: "screening" | "gate";
+  readonly kind: "screening" | "gate" | "payStation";
   readonly laneCount: number;
   readonly queueLength: number;
   readonly serviceTime: Distribution;
@@ -54,6 +63,9 @@ export interface LaneElement {
   readonly manualLaneId: number;
   /** For a screening stage: the stage set of the gate groups behind it. −1 otherwise. */
   readonly nextStageSet: number;
+  /** For a pay station: its own stage set, and its parking lot's id. −1 / null otherwise. */
+  readonly paySet: number;
+  readonly lotId: string | null;
 }
 
 export interface LaneGeometry {
@@ -96,6 +108,10 @@ export interface VenueModel {
   readonly sourceX: Float64Array;
   readonly sourceY: Float64Array;
   readonly sourceShares: number[];
+  /** Element index of each parking lot's pay station, by lot id. */
+  readonly payElements: Record<string, number>;
+  /** True if stage set 0 has lanes (a venue without gates sends arrivals straight to a destination). */
+  readonly hasEntryLanes: boolean;
 }
 
 const EXIT_DEPTH = 0.75;
@@ -139,6 +155,8 @@ export function buildVenueModel(venue: Venue, scenario: Scenario, settings: Mode
       laneIds: [],
       manualLaneId: -1,
       nextStageSet,
+      paySet: -1,
+      lotId: null,
     });
     pending.push({ element: index, line: s.line });
   }
@@ -164,8 +182,39 @@ export function buildVenueModel(venue: Venue, scenario: Scenario, settings: Mode
       laneIds: [],
       manualLaneId: -1,
       nextStageSet: -1,
+      paySet: -1,
+      lotId: null,
     });
     pending.push({ element: index, line: g.line });
+  }
+  const payPending: { element: number; line: { a: Point; b: Point } }[] = [];
+  const payElements: Record<string, number> = {};
+  for (const lot of venue.parkingLots ?? []) {
+    const ps = lot.payStation;
+    if (ps === undefined) continue;
+    const o = overrides[ps.id] ?? {};
+    const serviceTime = o.serviceTime ?? ps.serviceTime ?? settings.payStationServiceTime;
+    const index = elements.length;
+    const paySet = stageSets.length;
+    stageSets.push({ elements: [index] });
+    payElements[lot.id] = index;
+    elements.push({
+      index,
+      id: ps.id,
+      kind: "payStation",
+      laneCount: o.laneCount ?? ps.laneCount,
+      queueLength: ps.queueLength,
+      serviceTime,
+      scanFailureRate: 0,
+      retryTime: null,
+      meanService: distributionMoments(serviceTime).mean,
+      laneIds: [],
+      manualLaneId: -1,
+      nextStageSet: -1,
+      paySet,
+      lotId: lot.id,
+    });
+    payPending.push({ element: index, line: ps.line });
   }
 
   // Lane geometry: regular lanes of every element first (so their ids are dense per element),
@@ -184,6 +233,14 @@ export function buildVenueModel(venue: Venue, scenario: Scenario, settings: Mode
     const lane = buildLane(grid, frame, lanes.length, el, el.laneCount, true, line, -0.5 / el.laneCount, settings.slotSpacing);
     (el as { manualLaneId: number }).manualLaneId = lane.id;
     lanes.push(lane);
+  }
+  for (const { element, line } of payPending) {
+    const el = elements[element] as LaneElement;
+    for (let k = 0; k < el.laneCount; k++) {
+      const lane = buildLane(grid, frame, lanes.length, el, k, false, line, (k + 0.5) / el.laneCount, settings.slotSpacing);
+      el.laneIds.push(lane.id);
+      lanes.push(lane);
+    }
   }
 
   const builtSets: StageSet[] = stageSets.map((set) => {
@@ -250,6 +307,8 @@ export function buildVenueModel(venue: Venue, scenario: Scenario, settings: Mode
     sourceX,
     sourceY,
     sourceShares: venue.sources.map((s) => s.share),
+    payElements,
+    hasEntryLanes: (builtSets[0]?.laneIds.length ?? 0) > 0,
   };
 }
 

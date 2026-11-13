@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "fair-day-north-car-park-closes",
+  "venueId": "belgrade-fair-fair-day",
+  "name": "Fair day with cars, north car park closes",
+  "eventType": "fair",
+  "timeline": { "referenceClock": "10:00", "gatesOpen": 0, "eventStart": null, "eventEnd": 7200, "horizon": 21600 },
+  "attendance": 4000,
+  "carShare": 0.55,
+  "arrivals": { "preset": "fair" },
+  "departures": { "preset": "custom", "points": [{ "t": 3000, "weight": 0 }, { "t": 4500, "weight": 0.5 }, { "t": 6600, "weight": 1 }, { "t": 7500, "weight": 0.8 }, { "t": 8700, "weight": 0 }] },
+  "seed": 1,
+  "timedEvents": [{ "kind": "lotClose", "at": 1800, "lotId": "n-car-park" }]
+}

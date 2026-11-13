@@ -6,7 +6,7 @@
 
 import type { ElementReport } from "@bottleneck/schema";
 import type { RunResult } from "../batchProtocol.ts";
-import { compareBatches, compareValues, formatSummary, formatValue, measureValue, measuresFor, summariseMeasure, type Difference, type Measure } from "./measures.ts";
+import { compareBatches, compareValues, formatSummary, formatValue, measuresFor, parkingMeasures, summariseMeasure, type Difference, type Measure } from "./measures.ts";
 
 export interface MeasureRow {
   measure: Measure;
@@ -20,11 +20,13 @@ export interface MeasureRow {
  * `runs[i]` holds scenario i's runs, in seed order. Paired means every scenario used the same seeds.
  * A single seed shows plain values; several show mean ± 95% CI.
  */
-export function measureRows(runs: readonly (readonly RunResult[])[], fixedStart: boolean, paired: boolean): MeasureRow[] {
+export function measureRows(runs: readonly (readonly RunResult[])[], fixedStart: boolean, paired: boolean, name: (id: string) => string = (id) => id): MeasureRow[] {
   const base = runs[0] ?? [];
-  return measuresFor(fixedStart)
+  // Car measures follow the lots and barriers of the first run that has cars.
+  const sample = runs.flat().find((r) => r.metrics.parking)?.metrics ?? null;
+  return [...measuresFor(fixedStart), ...parkingMeasures(sample, name)]
     .map((measure) => {
-      const values = runs.map((rs) => rs.map((r) => measureValue(r.metrics, measure.key)));
+      const values = runs.map((rs) => rs.map((r) => measure.read(r.metrics)));
       const cells = values.map((vs) => {
         if (vs.length === 1) return vs[0] === null || vs[0] === undefined ? "–" : formatValue(measure.unit, vs[0]);
         const s = summariseMeasure(vs);

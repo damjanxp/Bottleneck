@@ -92,3 +92,63 @@ export function insideFade(age: number): number {
   if (Number.isNaN(age)) return 0;
   return Math.min(1, Math.max(0, 1 - age / INSIDE_FADE_SECONDS));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Cars (Phase 3)
+// ---------------------------------------------------------------------------------------------
+
+/** How a car is drawn: an arrow-nosed body while moving, a body with a stop bar while standing, plain while parked. */
+export type CarShape = "arrow" | "stopped" | "parked" | "striped";
+
+export type CarDrawnState = "CarDriving" | "CarStopped" | "CarParked" | "CarDiverted";
+
+export interface CarStyle {
+  key: CarDrawnState;
+  color: number;
+  css: string;
+  shape: CarShape;
+  alpha: number;
+}
+
+/** Index into CAR_STYLES: Driving (moving), Driving but standing (queued at a barrier, behind another car or at a crossing), Parked, Diverted. */
+export const CAR_STYLES: readonly CarStyle[] = [
+  { key: "CarDriving", color: 0x0072b2, css: "#0072B2", shape: "arrow", alpha: 1 },
+  { key: "CarStopped", color: 0xe69f00, css: "#E69F00", shape: "stopped", alpha: 1 },
+  { key: "CarParked", color: 0x64748b, css: "#64748B", shape: "parked", alpha: 0.85 },
+  { key: "CarDiverted", color: 0xcc79a7, css: "#CC79A7", shape: "striped", alpha: 1 },
+];
+
+/** Below this speed (m/s) a driving car counts as standing (queued). */
+export const CAR_STOPPED_SPEED = 0.3;
+
+/** Index into CAR_STYLES for a car's state and speed, or −1 when the car is not on the map (Pending, Departed, TurnedAway). */
+export function carStyleIndex(state: number, vx: number, vy: number): number {
+  switch (state) {
+    case AgentState.Driving:
+      return vx * vx + vy * vy < CAR_STOPPED_SPEED * CAR_STOPPED_SPEED ? 1 : 0;
+    case AgentState.Parked:
+      return 2;
+    case AgentState.Diverted:
+      return 3;
+    default:
+      return -1;
+  }
+}
+
+export const ROAD_COLORS = {
+  road: 0x9ca3af,
+  roadDark: 0x52525b,
+  publicRoad: 0x6b7280,
+  publicRoadDark: 0x3f3f46,
+  aisle: 0xcbd5e1,
+  aisleDark: 0x475569,
+  marking: 0xffffff,
+  lot: 0xe2e8f0,
+  lotDark: 0x334155,
+  stall: 0x64748b,
+  boundary: 0xd55e00,
+  barrierIdle: 0x1e293b,
+  barrierIdleDark: 0xe2e8f0,
+  barrierBusy: 0xcc79a7,
+  crossing: 0xffffff,
+} as const;

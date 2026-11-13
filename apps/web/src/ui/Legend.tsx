@@ -1,4 +1,5 @@
-import { LANE_COLORS, STATE_STYLES, type Shape } from "../render/palette.ts";
+import { CAR_STYLES, LANE_COLORS, ROAD_COLORS, STATE_STYLES, type Shape } from "../render/palette.ts";
+import { CarIcon } from "./ParkingPanels.tsx";
 import { strings } from "../strings.ts";
 
 function hex(n: number): string {
@@ -38,7 +39,7 @@ export function stateShape(state: number): { shape: Shape; css: string } | null 
   return s ? { shape: s.shape, css: s.css } : null;
 }
 
-export function Legend({ heatmap }: { heatmap: boolean }) {
+export function Legend({ heatmap, cars = false }: { heatmap: boolean; cars?: boolean }) {
   const L = strings.legend;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400" aria-label={L.heading}>
@@ -67,6 +68,30 @@ export function Legend({ heatmap }: { heatmap: boolean }) {
         </svg>
         {L.laneFailed}
       </span>
+      {cars &&
+        CAR_STYLES.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1">
+            <CarIcon shape={s.shape} color={s.css} />
+            {L[s.key]}
+          </span>
+        ))}
+      {cars && (
+        <>
+          <span className="inline-flex items-center gap-1">
+            <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
+              <path d="M1 6 L11 6" stroke={hex(ROAD_COLORS.barrierBusy)} strokeWidth="3" />
+              <circle cx="6" cy="6" r="2.5" fill={hex(ROAD_COLORS.barrierBusy)} />
+            </svg>
+            {L.barrierBusy}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
+              <path d="M6 0 L6 12" stroke={hex(ROAD_COLORS.boundary)} strokeWidth="3" />
+            </svg>
+            {L.boundary}
+          </span>
+        </>
+      )}
       {heatmap && (
         <span className="inline-flex items-center gap-1">
           <span aria-hidden="true" className="inline-block h-2.5 w-16 rounded-sm bg-linear-to-r from-[#ffffb2] via-[#fd8d3c] to-[#bd0026]" />

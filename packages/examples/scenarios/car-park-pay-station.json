@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "car-park-pay-station",
+  "venueId": "standalone-car-park",
+  "name": "Car park, pay machines",
+  "eventType": "concert",
+  "timeline": { "referenceClock": "20:00", "gatesOpen": -3600, "eventStart": 0, "eventEnd": 7200, "horizon": 14400 },
+  "attendance": 650,
+  "carShare": 1,
+  "arrivals": {
+    "preset": "custom",
+    "points": [
+      { "t": -3000, "weight": 0 },
+      { "t": -2100, "weight": 0.8 },
+      { "t": -1500, "weight": 1 },
+      { "t": -900, "weight": 1 },
+      { "t": -300, "weight": 0.3 },
+      { "t": 120, "weight": 0 }
+    ]
+  },
+  "departures": { "preset": "concert" },
+  "seed": 1
+}

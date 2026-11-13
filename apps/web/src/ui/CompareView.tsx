@@ -6,7 +6,7 @@ import type { RunResult } from "../batchProtocol.ts";
 import { MAX_ENTRIES, MAX_SEEDS, planJobs, venueIds, type CompareEntry, type Job } from "../compare/plan.ts";
 import { RunPool, poolSize } from "../compare/runPool.ts";
 import { capacityRows, endNotes, measureRows } from "../compare/table.ts";
-import { measureValue, formatValue, VERDICT_WORDS } from "../compare/measures.ts";
+import { formatValue, VERDICT_WORDS } from "../compare/measures.ts";
 import { builtInChoices, userChoices, venueById } from "../library/catalog.ts";
 import type { LibraryEntry } from "../library/storage.ts";
 import { formatCount, formatPercent } from "../sim/format.ts";
@@ -209,7 +209,9 @@ function Results({ run }: { run: RunState }) {
   const venue = base ? venueById(base.venueId) : undefined;
   const names = (id: string) => (venue ? elementName(venue, id) : id);
   const fixedStart = base?.timeline.eventStart !== null;
-  const rows = measureRows(runs, fixedStart, run.paired);
+  // Without gates or screening (a car park on its own) the pedestrian queue measures say nothing; only the car rows ("parking.", "lot.", "barrier.") stay.
+  const hasGates = !venue || venue.gateGroups.length + venue.screeningStages.length > 0;
+  const rows = measureRows(runs, fixedStart, run.paired, names).filter((r) => hasGates || r.measure.key.includes("."));
   const seedsPerEntry = Math.max(...runs.map((r) => r.length));
   const firstRuns = runs.map((r) => r[0] ?? null);
   const capacity = capacityRows(firstRuns);
@@ -337,7 +339,7 @@ function Results({ run }: { run: RunState }) {
                       <td className="pr-2 font-sans">{labels[i]}</td>
                       <td className="pr-2">{res.seed}</td>
                       {rows.map((r) => {
-                        const v = measureValue(res.metrics, r.measure.key);
+                        const v = r.measure.read(res.metrics);
                         return (
                           <td key={r.measure.key} className="pr-2 text-right">
                             {v === null ? "–" : formatValue(r.measure.unit, v)}

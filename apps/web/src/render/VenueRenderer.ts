@@ -5,6 +5,11 @@
  *   texture atlas (a ParticleContainer draws from a single texture source).
  * - Venue geometry is drawn from the venue JSON; lanes from the run's lane layout, coloured and
  *   marked by status (open / not open yet / failed).
+ * - Cars (Phase 3) are a second ParticleContainer with rotation: small oriented bodies whose colour
+ *   and shape both show the state (moving, standing/queued, parked, diverted). Roads, aisles, lots,
+ *   stalls, crossings and the public-road boundary come from the run's vehicle layout; barrier
+ *   arms are redrawn from the live barrier states (busy or idle). A stall is occupied when a parked
+ *   car stands on it.
  * - Rendering is on demand: continuously while playing (to extrapolate between snapshots, review
  *   C3), otherwise only when something changed.
  * - No Assets loader (it spins up blob: workers, which the CSP forbids) and no HTMLText (it
@@ -14,16 +19,25 @@
 
 import "pixi.js/unsafe-eval";
 import { Application, Container, Graphics, Particle, ParticleContainer, Rectangle, Sprite, Text, Texture } from "pixi.js";
-import type { LaneLayout, LaneLive } from "@bottleneck/engine";
+import type { BarrierLaneLive, LaneLayout, LaneLive, VehicleLayout } from "@bottleneck/engine";
 import type { Point, Polygon, Venue } from "@bottleneck/schema";
 import { AgentState } from "@bottleneck/engine";
 import { clampLabel, distanceToSegment, fitCamera, pan, screenToWorld, worldToScreen, zoomAt, type Bounds, type Camera } from "../sim/camera.ts";
 import { EXTRAPOLATE_BELOW_SPEED, extrapolationSeconds } from "../sim/extrapolate.ts";
 import { RollingSamples } from "../sim/rolling.ts";
 import type { Snapshot } from "../sim/SimController.ts";
-import { HEATMAP_MAX, LANE_COLORS, STATE_STYLES, heatColor, insideFade, styleIndex, type Shape } from "./palette.ts";
+import { CAR_STYLES, HEATMAP_MAX, LANE_COLORS, ROAD_COLORS, STATE_STYLES, carStyleIndex, heatColor, insideFade, styleIndex, type CarShape, type Shape } from "./palette.ts";
+import { barrierArm, chevron, dashSegments, pointsAlong, publicRoadBoundaries, roadWidth, stallCorners, zebraStripes } from "./vehicleGeometry.ts";
 
 const ATLAS_CELL = 32;
+/** Car atlas cell (px): the body is CAR_BODY_PX long, nose towards +x. */
+const CAR_CELL_W = 64;
+const CAR_CELL_H = 32;
+const CAR_BODY_PX = 56;
+/** Cars are drawn at least this many screen pixels long. */
+const CAR_MIN_PX = 9;
+/** Label at the public-road boundary (the renderer's only text of its own). */
+const PUBLIC_ROAD_LABEL = "Public road | site";
 /** Agent marker size: at least this many metres, and at least MIN_PX screen pixels. */
 const AGENT_METRES = 0.6;
 const MIN_PX = 5;
@@ -75,6 +89,36 @@ function drawShape(g: Graphics, shape: Shape, cx: number, cy: number, r: number,
   }
 }
 
+/** A car body in an atlas cell, nose towards +x: colour and shape both carry the state. */
+function drawCar(g: Graphics, shape: CarShape, ox: number, color: number): void {
+  const x0 = ox + (CAR_CELL_W - CAR_BODY_PX) / 2;
+  const x1 = x0 + CAR_BODY_PX;
+  const y0 = 6;
+  const y1 = CAR_CELL_H - 6;
+  const ym = CAR_CELL_H / 2;
+  const outline = { width: 2, color: 0xffffff, alpha: 0.95 };
+  const nose = x1 - 12;
+  switch (shape) {
+    case "arrow":
+      g.poly([x0, y0, nose, y0, x1, ym, nose, y1, x0, y1]).fill(color).stroke(outline);
+      break;
+    case "stopped":
+      // Square front and a white "pause" mark: standing in a queue.
+      g.rect(x0, y0, CAR_BODY_PX, y1 - y0).fill(color).stroke(outline);
+      g.rect(x0 + 18, y0 + 4, 5, y1 - y0 - 8).fill(0xffffff);
+      g.rect(x0 + 30, y0 + 4, 5, y1 - y0 - 8).fill(0xffffff);
+      break;
+    case "parked":
+      g.roundRect(x0, y0, CAR_BODY_PX, y1 - y0, 4).fill(color);
+      break;
+    case "striped":
+      // Arrow body with a white stripe along it: diverted to another lot.
+      g.poly([x0, y0, nose, y0, x1, ym, nose, y1, x0, y1]).fill(color).stroke(outline);
+      g.rect(x0 + 4, ym - 2.5, nose - x0 - 6, 5).fill(0xffffff);
+      break;
+  }
+}
+
 function ringPoints(ring: Point[]): number[] {
   const out: number[] = [];
   for (const p of ring) out.push(p.x, p.y);
@@ -111,6 +155,14 @@ export class VenueRenderer {
   private readonly world = new Container();
   private readonly venueLayer = new Graphics();
   private readonly laneLayer = new Graphics();
+  private readonly vehicleLayer = new Graphics();
+  private readonly barrierLayer = new Graphics();
+  private cars!: ParticleContainer;
+  private carTextures: Texture[] = [];
+  private carPool: Particle[] = [];
+  private vehicleLayout: VehicleLayout | null = null;
+  private barrierLive = new Map<number, BarrierLaneLive>();
+  private carScale = 0;
   private readonly labelLayer = new Container();
   private particles!: ParticleContainer;
   private stateTextures: Texture[] = [];
@@ -189,7 +241,17 @@ export class VenueRenderer {
       texture: atlas,
       dynamicProperties: { position: true, vertex: true, uvs: true, color: true, rotation: false },
     });
-    this.world.addChild(this.venueLayer, this.laneLayer, this.particles);
+    // Car texture atlas: one cell per car style.
+    const gc = new Graphics();
+    CAR_STYLES.forEach((s, i) => drawCar(gc, s.shape, i * CAR_CELL_W, s.color));
+    const carAtlas = this.app.renderer.generateTexture({ target: gc, frame: new Rectangle(0, 0, CAR_CELL_W * CAR_STYLES.length, CAR_CELL_H), resolution: 2, antialias: true });
+    gc.destroy();
+    this.carTextures = CAR_STYLES.map((_, i) => new Texture({ source: carAtlas.source, frame: new Rectangle(i * CAR_CELL_W, 0, CAR_CELL_W, CAR_CELL_H) }));
+    this.cars = new ParticleContainer({
+      texture: carAtlas,
+      dynamicProperties: { position: true, vertex: true, uvs: true, color: true, rotation: true },
+    });
+    this.world.addChild(this.venueLayer, this.vehicleLayer, this.laneLayer, this.barrierLayer, this.cars, this.particles);
     this.app.stage.addChild(this.world, this.labelLayer);
 
     const c = this.canvas;
@@ -206,8 +268,10 @@ export class VenueRenderer {
   // Scene content
   // ---------------------------------------------------------------------------------------------
 
-  setVenue(venue: Venue, lanes: LaneLayout[]): void {
+  setVenue(venue: Venue, lanes: LaneLayout[], vehicleLayout: VehicleLayout | null = null): void {
     this.lanes = lanes;
+    this.vehicleLayout = vehicleLayout;
+    this.barrierLive = new Map();
     this.laneStates = [];
     this.selectedLane = null;
     this.snapshot = null;
@@ -240,8 +304,24 @@ export class VenueRenderer {
     for (const s of venue.sources) {
       g.circle(s.position.x, s.position.y, 1.6).fill({ color: 0x0072b2, alpha: 0.25 }).stroke({ width: 0.3, color: 0x0072b2 });
     }
+    const payStations = (venue.parkingLots ?? []).flatMap((l) => (l.payStation ? [l.payStation] : []));
+    for (const ps of payStations) g.moveTo(ps.line.a.x, ps.line.a.y).lineTo(ps.line.b.x, ps.line.b.y).stroke({ width: 0.35, color: lineColor, alpha: 0.6 });
+    // Site roads and lots count towards the fitted view; public roads may run off it.
+    if (vehicleLayout) {
+      const grow = (p: Point) => {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      };
+      for (const r of vehicleLayout.roads) if (!r.publicRoad) r.points.forEach(grow);
+      for (const l of vehicleLayout.lots) l.outline.forEach(grow);
+    }
+    this.drawVehicleLayout();
     this.bounds = Number.isFinite(minX) ? { minX, minY, maxX, maxY } : { minX: 0, minY: 0, maxX: 100, maxY: 100 };
-    this.particles.boundsArea = new Rectangle(this.bounds.minX - 50, this.bounds.minY - 50, this.bounds.maxX - this.bounds.minX + 100, this.bounds.maxY - this.bounds.minY + 100);
+    const area = new Rectangle(this.bounds.minX - 300, this.bounds.minY - 300, this.bounds.maxX - this.bounds.minX + 600, this.bounds.maxY - this.bounds.minY + 600);
+    this.particles.boundsArea = area;
+    this.cars.boundsArea = area;
 
     // Labels (screen space, constant size).
     for (const l of this.labels) l.text.destroy();
@@ -260,11 +340,21 @@ export class VenueRenderer {
       add(d.name, c.x, c.y, 0, 13);
     }
     for (const s of venue.sources) add(s.name, s.position.x, s.position.y, -14, 11);
-    for (const el of [...venue.screeningStages, ...venue.gateGroups]) {
+    for (const el of [...venue.screeningStages, ...venue.gateGroups, ...payStations]) {
       const top = el.line.a.y < el.line.b.y ? el.line.a : el.line.b;
       add(el.name, top.x, top.y, -14, 11);
     }
+    if (vehicleLayout) {
+      for (const l of vehicleLayout.lots) {
+        const c = centroid(l.outline);
+        add(l.name, c.x, c.y, 0, 13);
+      }
+      for (const b of vehicleLayout.barriers) add(b.name, b.stopLine.x, b.stopLine.y, 16, 10);
+      const mark = publicRoadBoundaries(vehicleLayout)[0];
+      if (mark) add(PUBLIC_ROAD_LABEL, mark.x, mark.y, -16, 10);
+    }
     this.ensureParticles(0);
+    this.ensureCars(0);
     this.userMovedCamera = false;
     this.fit();
   }
@@ -272,6 +362,13 @@ export class VenueRenderer {
   setLaneStates(states: LaneLive[]): void {
     this.laneStates = states;
     this.drawLanes();
+    this.markDirty();
+  }
+
+  setBarrierStates(states: readonly BarrierLaneLive[]): void {
+    if (!this.vehicleLayout) return;
+    this.barrierLive = new Map(states.map((l) => [l.laneId, l]));
+    this.drawBarriers();
     this.markDirty();
   }
 
@@ -368,6 +465,75 @@ export class VenueRenderer {
   // Drawing
   // ---------------------------------------------------------------------------------------------
 
+  /** Lots, aisles, roads (width from the lane count; dashed centre line or direction chevrons), stalls, crossings and the public-road boundary. */
+  private drawVehicleLayout(): void {
+    const g = this.vehicleLayer;
+    g.clear();
+    const L = this.vehicleLayout;
+    if (!L) {
+      this.drawBarriers();
+      return;
+    }
+    const C = ROAD_COLORS;
+    const d = this.dark;
+    for (const lot of L.lots) {
+      g.poly(lot.outline.flatMap((p) => [p.x, p.y]))
+        .fill({ color: d ? C.lotDark : C.lot, alpha: 0.9 })
+        .stroke({ width: 0.4, color: d ? 0x94a3b8 : 0x475569, alpha: 0.8 });
+    }
+    const line = (pts: readonly { x: number; y: number }[], width: number, color: number) => {
+      const first = pts[0];
+      if (!first || pts.length < 2) return;
+      g.moveTo(first.x, first.y);
+      for (let k = 1; k < pts.length; k++) g.lineTo((pts[k] as Point).x, (pts[k] as Point).y);
+      g.stroke({ width, color, cap: "butt", join: "round" });
+    };
+    for (const a of L.aisles) line(a.points, 6, d ? C.aisleDark : C.aisle);
+    for (const r of L.roads) line(r.points, roadWidth(r, L.laneWidth), r.publicRoad ? (d ? C.publicRoadDark : C.publicRoad) : d ? C.roadDark : C.road);
+    for (const r of L.roads) {
+      if (r.direction === "twoWay") {
+        for (const [x1, y1, x2, y2] of dashSegments(r.points, 3, 3)) g.moveTo(x1, y1).lineTo(x2, y2);
+        g.stroke({ width: 0.2, color: C.marking, alpha: 0.9 });
+      } else {
+        for (const c of pointsAlong(r.points, 12)) {
+          const [ax, ay, tx, ty, bx, by] = chevron(c.x, c.y, c.dx, c.dy, 1.6) as [number, number, number, number, number, number];
+          g.moveTo(ax, ay).lineTo(tx, ty).lineTo(bx, by);
+        }
+        g.stroke({ width: 0.25, color: C.marking, alpha: 0.9 });
+      }
+    }
+    for (const lot of L.lots) for (const st of lot.stalls) g.poly(stallCorners(st)).stroke({ width: 0.12, color: C.stall, alpha: 0.8 });
+    for (const c of L.crossings) for (const ring of zebraStripes(c.a, c.b, c.width)) g.poly(ring).fill({ color: C.crossing, alpha: 0.95 });
+    for (const m of publicRoadBoundaries(L)) {
+      // A thick bar across the site road where it leaves the public road.
+      const h = m.width / 2 + 1;
+      g.moveTo(m.x + m.dy * h, m.y - m.dx * h)
+        .lineTo(m.x - m.dy * h, m.y + m.dx * h)
+        .stroke({ width: 0.8, color: C.boundary, alpha: 0.95 });
+    }
+    this.drawBarriers();
+  }
+
+  /** Barrier arms: an idle lane is a thin bar, a lane serving a car a thick bar with a dot. */
+  private drawBarriers(): void {
+    const g = this.barrierLayer;
+    g.clear();
+    const L = this.vehicleLayout;
+    if (!L) return;
+    const px = 1 / this.camera.scale;
+    for (const b of L.barriers) {
+      b.lanes.forEach((pos, k) => {
+        const busy = this.barrierLive.get(b.laneIds[k] ?? -1)?.inService ?? false;
+        const [x1, y1, x2, y2] = barrierArm(pos, b.heading, L.laneWidth);
+        const color = busy ? ROAD_COLORS.barrierBusy : this.dark ? ROAD_COLORS.barrierIdleDark : ROAD_COLORS.barrierIdle;
+        g.moveTo(x1, y1)
+          .lineTo(x2, y2)
+          .stroke({ width: Math.max(busy ? 0.45 : 0.25, (busy ? 3 : 1.5) * px), color });
+        if (busy) g.circle(pos.x, pos.y, Math.max(0.5, 3 * px)).fill(color);
+      });
+    }
+  }
+
   private drawLanes(): void {
     const g = this.laneLayer;
     g.clear();
@@ -412,16 +578,61 @@ export class VenueRenderer {
     this.particleScale = 0;
   }
 
+  private ensureCars(n: number): void {
+    while (this.carPool.length < n) this.carPool.push(new Particle({ texture: this.carTextures[0] as Texture, anchorX: 0.5, anchorY: 0.5, alpha: 0 }));
+    if (this.cars.particleChildren.length !== n) {
+      this.cars.particleChildren.length = 0;
+      for (let i = 0; i < n; i++) this.cars.particleChildren.push(this.carPool[i] as Particle);
+      this.cars.update();
+    }
+    this.carScale = 0;
+  }
+
+  /** Cars: position (extrapolated like people), heading, and a style per state; Pending, Departed and TurnedAway cars are hidden. */
+  private updateCars(dt: number): void {
+    const snap = this.snapshot;
+    const n = snap ? snap.vehicleCount : 0;
+    if (this.cars.particleChildren.length !== n) this.ensureCars(n);
+    if (!snap || n === 0) return;
+    const b = snap.vehicles;
+    const length = this.vehicleLayout?.carLength ?? 4.5;
+    const scale = Math.max(length, CAR_MIN_PX / this.camera.scale) / CAR_BODY_PX;
+    const rescale = scale !== this.carScale;
+    this.carScale = scale;
+    const parts = this.cars.particleChildren as Particle[];
+    for (let i = 0; i < n; i++) {
+      const p = parts[i] as Particle;
+      const vx = b[2 * n + i] as number;
+      const vy = b[3 * n + i] as number;
+      const si = carStyleIndex(b[6 * n + i] as number, vx, vy);
+      if (si < 0) {
+        p.alpha = 0;
+        continue;
+      }
+      p.texture = this.carTextures[si] as Texture;
+      p.alpha = (CAR_STYLES[si] as (typeof CAR_STYLES)[number]).alpha;
+      if (rescale || p.scaleX !== scale) {
+        p.scaleX = scale;
+        p.scaleY = scale;
+      }
+      p.rotation = Math.atan2(b[5 * n + i] as number, b[4 * n + i] as number);
+      p.x = (b[i] as number) + vx * dt;
+      p.y = (b[n + i] as number) + vy * dt;
+    }
+  }
+
   private updateParticles(now: number): void {
     const snap = this.snapshot;
     if (!snap) {
       if (this.particles.particleChildren.length > 0) this.ensureParticles(0);
+      if (this.cars.particleChildren.length > 0) this.ensureCars(0);
       return;
     }
     const n = snap.agentCount;
     if (this.particles.particleChildren.length !== n) this.ensureParticles(n);
     const b = snap.buffer;
     const dt = this.speed < EXTRAPOLATE_BELOW_SPEED ? extrapolationSeconds((now - snap.receivedAt) / 1000, this.speed, this.playing) : 0;
+    this.updateCars(dt);
     const worldSize = Math.max(AGENT_METRES, MIN_PX / this.camera.scale);
     const baseScale = worldSize / ATLAS_CELL;
     const rescale = baseScale !== this.particleScale;
@@ -473,6 +684,7 @@ export class VenueRenderer {
       l.text.position.set(p.x, p.y);
     }
     this.drawLanes();
+    this.drawBarriers();
     this.markDirty();
   }
 

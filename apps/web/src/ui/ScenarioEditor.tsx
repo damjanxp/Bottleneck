@@ -1,6 +1,29 @@
 import { useState, type ReactNode } from "react";
+import { CAR_SHARE_DEFAULTS } from "@bottleneck/engine";
 import type { Scenario, TimedEvent, Venue } from "@bottleneck/schema";
-import { ARRIVAL_PRESETS, BAG_POLICIES, EVENT_TYPES, editTime, formToScenario, newEventForm, scenarioToForm, type ElementForm, type EventForm, type Problem, type ScenarioForm, type ServiceMode, type TimeField } from "../library/form.ts";
+import {
+  ARRIVAL_PRESETS,
+  BAG_POLICIES,
+  BARRIER_SERVICE_TYPES,
+  DEPARTURE_PRESETS,
+  EVENT_TYPES,
+  OVERFLOW_RULES,
+  PAYMENT_MODES,
+  STALL_CHOICES,
+  editTime,
+  formToScenario,
+  newEventForm,
+  scenarioToForm,
+  venueHasParking,
+  type BarrierForm,
+  type ElementForm,
+  type EventForm,
+  type LotForm,
+  type Problem,
+  type ScenarioForm,
+  type ServiceMode,
+  type TimeField,
+} from "../library/form.ts";
 import { venueElements } from "../library/scenarios.ts";
 import { checkScenario } from "../library/validate.ts";
 import { formatDistribution } from "../sim/format.ts";
@@ -31,6 +54,8 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
   const set = <K extends keyof ScenarioForm>(key: K, value: ScenarioForm[K]) => setForm((f) => ({ ...f, [key]: value }));
   const setTime = (key: "gatesOpen" | "eventStart" | "eventEnd" | "horizon", text: string) => setForm((f) => ({ ...f, [key]: editTime(f[key], text) }));
   const setElement = (id: string, patch: Partial<ElementForm>) => setForm((f) => ({ ...f, elements: f.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
+  const setBarrier = (id: string, patch: Partial<BarrierForm>) => setForm((f) => ({ ...f, barriers: f.barriers.map((b) => (b.id === id ? { ...b, ...patch } : b)) }));
+  const setLot = (id: string, patch: Partial<LotForm>) => setForm((f) => ({ ...f, lots: f.lots.map((l) => (l.id === id ? { ...l, ...patch } : l)) }));
   const setEvent = (key: number, patch: Partial<EventForm>) => setForm((f) => ({ ...f, events: f.events.map((e) => (e.key === key ? { ...e, ...patch } : e)) }));
   const bad = (field: string) => problems.some((p) => p.field === field || p.field.startsWith(`${field}.`));
   const cls = (field: string) => `${input} ${bad(field) ? "border-orange-500 ring-1 ring-orange-500" : ""}`;
@@ -67,6 +92,8 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
   };
 
   const groups = venueElements(venue);
+  const parking = venueHasParking(venue);
+  const lotsOfVenue = venue.parkingLots ?? [];
   const timeInput = (key: "gatesOpen" | "eventStart" | "eventEnd" | "horizon", label: string, f: TimeField, disabled = false) => (
     <Field label={label}>
       <input className={cls(key)} inputMode="decimal" value={f.text} disabled={disabled} onChange={(e) => setTime(key, e.target.value)} />
@@ -127,7 +154,176 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
         <Field label={E.carShare}>
           <input className={cls("carSharePercent")} inputMode="decimal" value={form.carSharePercent} onChange={(e) => set("carSharePercent", e.target.value)} />
         </Field>
+        <p className="self-end text-xs text-slate-600 sm:col-span-2 dark:text-slate-400">
+          {parking ? (
+            <>
+              {E.carShareHint(E.eventTypes[form.eventType].toLowerCase(), Math.round(CAR_SHARE_DEFAULTS[form.eventType] * 100))}{" "}
+              <button type="button" className="underline" onClick={() => set("carSharePercent", String(Math.round(CAR_SHARE_DEFAULTS[form.eventType] * 100)))}>
+                {E.carShareUse}
+              </button>
+            </>
+          ) : (
+            E.carShareNoParking
+          )}
+        </p>
+        <Field label={E.departures}>
+          <select className={cls("departurePreset")} value={form.departurePreset} onChange={(e) => set("departurePreset", e.target.value as ScenarioForm["departurePreset"])}>
+            <option value="">{E.departuresNone}</option>
+            {DEPARTURE_PRESETS.filter((p) => p !== "custom" || (form.departureCustomPoints > 0 && form.keepDeparturePoints)).map((p) => (
+              <option key={p} value={p}>
+                {E.departurePresets[p]}
+              </option>
+            ))}
+          </select>
+        </Field>
       </fieldset>
+
+      {parking && (
+        <fieldset className="grid gap-3 sm:grid-cols-4">
+          <legend className="mb-1 text-sm font-semibold">{E.vehicles}</legend>
+          <Field label={E.occupancy} wide>
+            <input className={cls("occupancy")} placeholder="0.35, 0.35, 0.18, 0.12" value={form.occupancy} onChange={(e) => set("occupancy", e.target.value)} />
+          </Field>
+          {(
+            [
+              ["cardSharePercent", E.cardShare, "70"],
+              ["carExitDelay", E.carExitDelay, "20"],
+              ["carBoardDelay", E.carBoardDelay, "20"],
+              ["carLength", E.carLength, "4.5"],
+              ["carGap", E.carGap, "2.5"],
+              ["aisleSpeed", E.aisleSpeed, "8"],
+              ["parkManoeuvre", E.parkManoeuvre, "6"],
+            ] as const
+          ).map(([key, label, placeholder]) => (
+            <Field key={key} label={label}>
+              <input className={cls(key)} inputMode="decimal" placeholder={placeholder} value={form[key]} onChange={(e) => set(key, e.target.value)} />
+            </Field>
+          ))}
+        </fieldset>
+      )}
+
+      {form.barriers.length > 0 && (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-sm font-semibold">{E.barriers}</legend>
+          <p className="text-xs text-slate-500">{E.barriersIntro}</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-slate-500">
+                <tr>
+                  <th className="py-1 pr-2 font-normal">{E.barrier}</th>
+                  <th className="py-1 pr-2 font-normal">{E.laneCount}</th>
+                  <th className="py-1 pr-2 font-normal">{E.serviceType}</th>
+                  <th className="py-1 font-normal">{E.misread}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {form.barriers.map((b) => {
+                  const vb = venue.vehicleBarriers?.find((x) => x.id === b.id);
+                  const f = `barriers.${b.id}`;
+                  return (
+                    <tr key={b.id} className="border-t border-slate-100 dark:border-slate-800">
+                      <td className="py-1 pr-2">
+                        {b.name} <span className="text-xs text-slate-500">({b.kind === "entry" ? strings.barriers.entry : strings.barriers.exit})</span>
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input className={`${cls(`${f}.laneCount`)} w-16`} inputMode="numeric" placeholder={String(vb?.laneCount ?? "")} aria-label={`${b.name}: ${E.laneCount}`} value={b.laneCount} onChange={(e) => setBarrier(b.id, { laneCount: e.target.value })} />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <select className={input} aria-label={`${b.name}: ${E.serviceType}`} value={b.serviceType} onChange={(e) => setBarrier(b.id, { serviceType: e.target.value as BarrierForm["serviceType"] })}>
+                          <option value="">
+                            {E.venueValue} ({vb ? strings.parameters.serviceTypes[vb.serviceType] : "–"})
+                          </option>
+                          {BARRIER_SERVICE_TYPES.map((t) => (
+                            <option key={t} value={t}>
+                              {strings.parameters.serviceTypes[t]}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-1">
+                        <input className={`${cls(`${f}.misreadPercent`)} w-16`} inputMode="decimal" placeholder={vb?.misread ? String(vb.misread.rate * 100) : "5"} aria-label={`${b.name}: ${E.misread}`} value={b.misreadPercent} onChange={(e) => setBarrier(b.id, { misreadPercent: e.target.value })} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </fieldset>
+      )}
+
+      {form.lots.length > 0 && (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-sm font-semibold">{E.lots}</legend>
+          <p className="text-xs text-slate-500">{E.lotsIntro}</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-slate-500">
+                <tr>
+                  <th className="py-1 pr-2 font-normal">{E.lot}</th>
+                  <th className="py-1 pr-2 font-normal">{E.paymentMode}</th>
+                  <th className="py-1 pr-2 font-normal">{E.stallChoice}</th>
+                  <th className="py-1 font-normal">{E.overflow}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {form.lots.map((l) => {
+                  const vl = venue.parkingLots?.find((x) => x.id === l.id);
+                  const venueText = (v: string | undefined) => `${E.venueValue}${v ? ` (${v})` : ""}`;
+                  return (
+                    <tr key={l.id} className="border-t border-slate-100 align-top dark:border-slate-800">
+                      <td className="py-1 pr-2">{l.name}</td>
+                      <td className="py-1 pr-2">
+                        <select className={input} aria-label={`${l.name}: ${E.paymentMode}`} value={l.paymentMode} onChange={(e) => setLot(l.id, { paymentMode: e.target.value as LotForm["paymentMode"] })}>
+                          <option value="">{venueText(vl?.paymentMode ? strings.parameters.paymentModes[vl.paymentMode] : undefined)}</option>
+                          {PAYMENT_MODES.map((m) => (
+                            <option key={m} value={m}>
+                              {strings.parameters.paymentModes[m]}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-1 pr-2">
+                        <select className={input} aria-label={`${l.name}: ${E.stallChoice}`} value={l.stallChoice} onChange={(e) => setLot(l.id, { stallChoice: e.target.value as LotForm["stallChoice"] })}>
+                          <option value="">{venueText(vl?.stallChoice ? strings.parameters.stallChoices[vl.stallChoice] : undefined)}</option>
+                          {STALL_CHOICES.map((m) => (
+                            <option key={m} value={m}>
+                              {strings.parameters.stallChoices[m]}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-1">
+                        <div className="flex flex-wrap gap-1">
+                          <select className={input} aria-label={`${l.name}: ${E.overflow}`} value={l.overflowRule} onChange={(e) => setLot(l.id, { overflowRule: e.target.value as LotForm["overflowRule"], divertTo: l.divertTo || (form.lots.find((x) => x.id !== l.id)?.id ?? "") })}>
+                            <option value="">{venueText(vl?.overflow ? strings.parameters.overflowRules[vl.overflow.rule] : undefined)}</option>
+                            {OVERFLOW_RULES.filter((r) => r !== "divert" || form.lots.length > 1).map((r) => (
+                              <option key={r} value={r}>
+                                {strings.parameters.overflowRules[r]}
+                              </option>
+                            ))}
+                          </select>
+                          {l.overflowRule === "divert" && (
+                            <select className={cls(`lots.${l.id}.divertTo`)} aria-label={`${l.name}: ${E.divertTo}`} value={l.divertTo} onChange={(e) => setLot(l.id, { divertTo: e.target.value })}>
+                              {form.lots
+                                .filter((x) => x.id !== l.id)
+                                .map((x) => (
+                                  <option key={x.id} value={x.id}>
+                                    {x.name}
+                                  </option>
+                                ))}
+                            </select>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </fieldset>
+      )}
 
       <fieldset className="grid gap-3 sm:grid-cols-4">
         <legend className="mb-1 text-sm font-semibold">{E.timeline}</legend>
@@ -264,7 +460,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
           <div key={ev.key} className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-2 dark:border-slate-800">
             <Field label={strings.editor.eventType}>
               <select className={input} value={ev.kind} onChange={(e) => setEvent(ev.key, { kind: e.target.value as TimedEvent["kind"] })}>
-                {(["laneFail", "laneReopen", "busBurst"] as const).map((k) => (
+                {(lotsOfVenue.length > 0 ? (["laneFail", "laneReopen", "busBurst", "lotClose"] as const) : (["laneFail", "laneReopen", "busBurst"] as const)).map((k) => (
                   <option key={k} value={k}>
                     {E.eventKinds[k]}
                   </option>
@@ -289,6 +485,16 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
                   <input className={`${cls(`events.${ev.key}.count`)} w-20`} inputMode="numeric" value={ev.count} onChange={(e) => setEvent(ev.key, { count: e.target.value })} />
                 </Field>
               </>
+            ) : ev.kind === "lotClose" ? (
+              <Field label={E.lotChoice}>
+                <select className={cls(`events.${ev.key}.groupId`)} value={ev.groupId} onChange={(e) => setEvent(ev.key, { groupId: e.target.value })}>
+                  {lotsOfVenue.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             ) : (
               <>
                 <Field label={E.group}>
@@ -316,6 +522,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
               ["laneFail", E.addFail],
               ["laneReopen", E.addReopen],
               ["busBurst", E.addBurst],
+              ...(lotsOfVenue.length > 0 ? ([["lotClose", E.addLotClose]] as const) : []),
             ] as const
           ).map(([kind, text]) => (
             <button key={kind} type="button" className={btnSmall} onClick={() => setForm((f) => ({ ...f, events: [...f.events, newEventForm(kind, venue, f.fixedStart ? (f.gatesOpen.seconds ?? 0) + 1800 : 1800)] }))}>

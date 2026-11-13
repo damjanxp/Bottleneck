@@ -8,11 +8,13 @@ Draw the site over a map, place pedestrian gates, security lanes, vehicle barrie
 
 **Live demo:** (link added after deployment check)
 
-> **Status:** Phases 0 to 2 are done: the engine simulates walking, density-dependent speed, lane choice, queues that spill back, lane failures and scan retries; the web app runs it live (PixiJS, in a Web Worker) on two built-in Belgrade Fair examples, lets you edit and save scenarios, compare them, and fit service times from scan logs. Node and Chrome give bit-identical results, checked in CI. Next is Phase 3 (vehicles and parking). Phase 2 is waiting for the merge to `main`. See [docs/PROJECT.md](docs/PROJECT.md) for the full status, decisions and roadmap.
+> **Status:** Phases 0 to 2 are done: the engine simulates walking, density-dependent speed, lane choice, queues that spill back, lane failures and scan retries; the web app runs it live (PixiJS, in a Web Worker) on two built-in Belgrade Fair examples, lets you edit and save scenarios, compare them, and fit service times from scan logs. Node and Chrome give bit-identical results, checked in CI. Phase 3 (vehicles, parking and departures) is built in the engine and the examples; its web view is being finished. Phase 2 is waiting for the merge to `main`. See [docs/PROJECT.md](docs/PROJECT.md) for the full status, decisions and roadmap.
 
 ## What you can do
 
-- **Load an example:** a concert (4,500 people, 3 or 5 turnstile lanes, or 5 lanes with a failure) and a fair day (three gates, a bus burst, a gate reduced).
+- **Load an example:** a concert (4,500 people, 3 or 5 turnstile lanes, or 5 lanes with a failure), a fair day (three gates, a bus burst, a gate reduced), and a stand-alone car park.
+- **Cars and parking:** entry and exit barriers (ticket, plate recognition, pay at the barrier), pay machines on foot, a full lot that queues, diverts or turns cars away, and a lot that closes. Fair-day and concert scenarios send part of the crowd by car to car parks beside the venue.
+- **Departures:** give a scenario a departure curve and the exit rush is simulated too: people walk back to their cars, pay, drive to the exit barrier and queue there. Compare "pay at the machines" with "pay at the barrier", or a third exit lane.
 - **Play, pause, seek:** change the speed, drag the scrubber, or press "Jump to peak"; backward seeks restore engine checkpoints.
 - **See the crowd:** people drawn on the map, a density heatmap, lane queues, capacity against demand, and the worst lane named.
 - **Edit scenarios:** a library in your browser (create, duplicate, edit, delete, JSON export and import), validated against the JSON Schema; fail or reopen a lane during playback.

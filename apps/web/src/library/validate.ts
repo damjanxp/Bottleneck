@@ -67,8 +67,11 @@ export function venueProblems(s: Scenario, venue: Venue): Problem[] {
   if (venue.id !== undefined && s.venueId !== venue.id) out.push({ field: "", message: `This scenario belongs to venue “${s.venueId}”, not to “${venue.name}”.` });
   const elements = venueElements(venue);
   const byId = new Map(elements.map((e) => [e.id, e]));
+  // Vehicle barriers, parking lots and pay stations (Phase 3) can be overridden too; the editor does not show them yet.
+  const vehicleIds = new Set([...(venue.vehicleBarriers ?? []).map((b) => b.id), ...(venue.parkingLots ?? []).flatMap((l) => [l.id, ...(l.payStation ? [l.payStation.id] : [])])]);
   for (const id of Object.keys(s.overrides ?? {}).sort()) {
     const el = byId.get(id);
+    if (!el && vehicleIds.has(id)) continue;
     if (!el) out.push({ field: "", message: `There is a change for “${id}”, but the venue has no gate group or screening stage with that id.` });
     else if (el.kind === "screening" && s.overrides?.[id]?.scanFailureRate !== undefined) out.push({ field: `elements.${id}.scanFailurePercent`, message: `${el.name} is a screening stage; only gate groups have a scan failure rate.` });
   }
@@ -76,6 +79,10 @@ export function venueProblems(s: Scenario, venue: Venue): Problem[] {
     const label = `Timed event ${k + 1}`;
     if (e.kind === "busBurst") {
       if (!venue.sources.some((src) => src.id === e.sourceId)) out.push({ field: "", message: `${label}: the venue has no source “${e.sourceId}”.` });
+      return;
+    }
+    if (e.kind === "lotClose") {
+      if (!(venue.parkingLots ?? []).some((l) => l.id === e.lotId)) out.push({ field: "", message: `${label}: the venue has no parking lot “${e.lotId}”.` });
       return;
     }
     const el = byId.get(e.groupId);
