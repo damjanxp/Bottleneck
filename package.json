@@ -21,6 +21,8 @@
     "lint": "eslint .",
     "schema:gen": "node tools/generate-schema-types.mjs",
     "schema:check": "node tools/generate-schema-types.mjs --check",
+    "api:schema:gen": "dotnet run --project apps/api/tools/Bottleneck.SchemaGen",
+    "api:schema:check": "dotnet run --project apps/api/tools/Bottleneck.SchemaGen -- --check",
     "check": "npm run schema:check && npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "devDependencies": {

@@ -12,5 +12,12 @@ test-results/
 .DS_Store
 Thumbs.db
 
+# .NET build output and local API data (uploads)
+bin/
+obj/
+*.user
+TestResults/
+apps/api/src/Bottleneck.Api/storage/
+
 # Local agent tooling
 .claude/

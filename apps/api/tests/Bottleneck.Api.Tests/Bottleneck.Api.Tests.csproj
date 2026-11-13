@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <!-- Test names read better with underscores; async suffixes are noise in tests. -->
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1515;CA1001;CA1861;CA2000;CA1849;xUnit1051</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Bottleneck.Api/Bottleneck.Api.csproj" />
+    <ProjectReference Include="../../src/Bottleneck.Schema/Bottleneck.Schema.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The same fixture files the TypeScript tests load (spec section 8: "loaded by both test suites"). -->
+    <None Include="$(RepoRoot)schema/fixtures/**/*.json" LinkBase="fixtures" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

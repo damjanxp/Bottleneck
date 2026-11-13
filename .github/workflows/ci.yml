@@ -70,3 +70,30 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  api:
+    name: API (.NET build, C# schema check, tests with Testcontainers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: apps/api/global.json
+
+      # NuGet audit runs during restore; with TreatWarningsAsErrors a package with a known advisory fails the build.
+      - name: Restore
+        run: dotnet restore Bottleneck.Api.slnx
+
+      - name: Generated C# schema classes are up to date
+        run: dotnet run --project tools/Bottleneck.SchemaGen --no-restore -- --check
+
+      - name: Build
+        run: dotnet build Bottleneck.Api.slnx --no-restore --configuration Release
+
+      - name: Unit and integration tests (PostgreSQL via Testcontainers; Docker is preinstalled on the runner)
+        run: dotnet test --solution Bottleneck.Api.slnx --no-build --configuration Release
