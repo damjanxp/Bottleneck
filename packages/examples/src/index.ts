@@ -1,6 +1,7 @@
 /**
- * @bottleneck/examples: built-in example venues (pedestrian parts only, Phase 1) with their scenarios.
- * The JSON files are valid against /schema; the test in ../test checks that.
+ * @bottleneck/examples: built-in example venues with their scenarios: the Belgrade Fair venues
+ * (pedestrians only, Phase 1) and a stand-alone car park (cars, barriers, pay machines and the
+ * exit rush, Phase 3). The JSON files are valid against /schema; the tests in ../test check that.
  */
 import type { Scenario, Venue } from "@bottleneck/schema";
 import concertVenue from "../venues/belgrade-fair-concert.json" with { type: "json" };
@@ -11,6 +12,10 @@ import concertLaneFails from "../scenarios/concert-lane-fails.json" with { type:
 import fairDayBaseline from "../scenarios/fair-day-baseline.json" with { type: "json" };
 import fairDayBusBurst from "../scenarios/fair-day-bus-burst.json" with { type: "json" };
 import fairDayGateAReduced from "../scenarios/fair-day-gate-a-reduced.json" with { type: "json" };
+import carParkVenue from "../venues/standalone-car-park.json" with { type: "json" };
+import carParkPayStation from "../scenarios/car-park-pay-station.json" with { type: "json" };
+import carParkPayAtBarrier from "../scenarios/car-park-pay-at-barrier.json" with { type: "json" };
+import carParkPayAtBarrier3Lanes from "../scenarios/car-park-pay-at-barrier-3-lanes.json" with { type: "json" };
 
 export interface ExampleScenario {
   id: string;
@@ -68,6 +73,16 @@ export const exampleVenues: ExampleVenue[] = [
       { json: concert3Lanes, description: "3 turnstile lanes (about 2,700 people/h): expected to jam." },
       { json: concert5Lanes, description: "5 turnstile lanes (about 4,500 people/h): expected to mostly cope." },
       { json: concertLaneFails, description: "5 lanes, one turnstile lane fails 50 minutes before the start." },
+    ],
+  ),
+  build(
+    "standalone-car-park",
+    "A 320-stall car park next to an event hall: two entries from the main road, pay machines on foot, one exit road with a two-lane exit barrier and a zebra crossing. Everyone comes by car (about 2.1 per car); the lot fills before the start and empties after the show (the exit rush).",
+    carParkVenue,
+    [
+      { json: carParkPayStation, description: "About 310 cars for 320 stalls (a few are turned away when it is full). Drivers pay at 4 machines on the way back to the car; 2 exit lanes." },
+      { json: carParkPayAtBarrier, description: "The same evening, but drivers pay at the exit barrier (card or cash): no machine queue, a longer exit queue and a later empty car park." },
+      { json: carParkPayAtBarrier3Lanes, description: "Paying at the exit barrier with a third exit lane: does it win back the time the payment costs?" },
     ],
   ),
 ];

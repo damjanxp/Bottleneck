@@ -7,9 +7,14 @@
  * created (conservation, invariant 7.1-3).
  */
 
-/** The one agent state enum. Vehicle states are reserved for Phase 3 and unused for now. */
+/**
+ * The one agent state enum, shared by people and cars (vehicles.ts keeps the cars' own counts).
+ * People: Pending (not arrived yet, or still in the car they came in), Walking, Queuing, InService,
+ * Inside, Driving (back in their car on the way out), Departed (left the site), TurnedAway.
+ * Cars: Pending, Driving, Parked, Departed, TurnedAway, Diverted (driving to its second lot, A3).
+ */
 export const AgentState = {
-  /** Created, not yet arrived (or, from Phase 3, an occupant still in a car). */
+  /** Created, not yet arrived (or an occupant still in the car, review A4). */
   Pending: 0,
   /** Walking on the flow fields: to a lane decision point, or inside towards a destination. */
   Walking: 1,
@@ -19,11 +24,15 @@ export const AgentState = {
   InService: 3,
   /** Reached a destination: done. */
   Inside: 4,
+  /** A car on the road or in an aisle; a person aboard a car that is leaving. */
   Driving: 5,
+  /** A car in its stall. */
   Parked: 6,
+  /** Left the site: on foot past their source, or in a car that drove off. */
   Departed: 7,
   /** Gave up or could not reach any lane or destination: done. */
   TurnedAway: 8,
+  /** A car redirected once to another lot, while it drives there. */
   Diverted: 9,
 } as const;
 export type AgentState = (typeof AgentState)[keyof typeof AgentState];
@@ -45,6 +54,14 @@ export const Mode = {
   /** Committed nowhere because every lane of its stage has failed; retried each tick. */
   NoLane: 5,
   Done: 6,
+  /** Out of the car: walking straight from the stall to the lot's walking exit (off the walking grid). */
+  ExitCar: 7,
+  /** Departing on foot: walking back to the source they came from. */
+  ToHome: 8,
+  /** Departing by car: walking to the lot's walking exit (after the pay station, if any). */
+  ToLot: 9,
+  /** Departing by car: walking straight from the walking exit to the car (off the grid). */
+  ToCar: 10,
 } as const;
 
 /** Which part of the journey an agent is in. */
@@ -55,6 +72,8 @@ export const Stage = {
   Gates: 1,
   /** Through the gates. */
   Inside: 2,
+  /** On the way out (departures; a driver's visit to the pay station happens at this stage). */
+  Leaving: 3,
 } as const;
 
 /** Every per-agent array of AgentStore, in a fixed order (run checkpoints copy them by name). */
@@ -83,6 +102,11 @@ export const AGENT_ARRAYS = [
   "group",
   "lineJoin",
   "demandCounted",
+  "car",
+  "departTime",
+  "departDue",
+  "tx",
+  "ty",
 ] as const;
 export type AgentArrayName = (typeof AGENT_ARRAYS)[number];
 
@@ -126,6 +150,15 @@ export class AgentStore {
   readonly lineJoin: Float64Array;
   /** Stage + 1 of the last stage at which the agent was counted as demand for an element, 0 if none. */
   readonly demandCounted: Uint8Array;
+  /** The car the person came in (and leaves in), −1 for people on foot. */
+  readonly car: Int32Array;
+  /** Engine time the person wants to leave (departures), Infinity if never. */
+  readonly departTime: Float64Array;
+  /** 1 if the departure time came before the person was inside: they leave on arrival. */
+  readonly departDue: Uint8Array;
+  /** Target of a straight walk off the grid (ExitCar, ToCar), local metres. */
+  readonly tx: Float64Array;
+  readonly ty: Float64Array;
 
   constructor(count: number) {
     this.count = count;
@@ -153,5 +186,10 @@ export class AgentStore {
     this.group = Int32Array.from({ length: count }, (_, i) => i);
     this.lineJoin = new Float64Array(count).fill(NaN);
     this.demandCounted = new Uint8Array(count);
+    this.car = new Int32Array(count).fill(-1);
+    this.departTime = new Float64Array(count).fill(Infinity);
+    this.departDue = new Uint8Array(count);
+    this.tx = new Float64Array(count);
+    this.ty = new Float64Array(count);
   }
 }

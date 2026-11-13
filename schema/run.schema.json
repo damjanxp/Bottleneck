@@ -88,7 +88,9 @@
         "groupSizes",
         "bagPolicy",
         "arrivalCurve",
-        "elements"
+        "elements",
+        "departureCurve",
+        "vehicles"
       ],
       "properties": {
         "seed": {
@@ -229,12 +231,37 @@
           "items": {
             "$ref": "#/definitions/ResolvedElement"
           }
+        },
+        "departureCurve": {
+          "description": "The departure curve the run used (scenario times), or null if nobody leaves.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ResolvedParameters/properties/arrivalCurve/items"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vehicles": {
+          "description": "Car and parking parameters, or null if nobody arrives by car (no vehicle source or parking lot, or carShare 0).",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/VehicleParameters"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
     "ResolvedElement": {
       "title": "ResolvedElement",
-      "description": "A screening stage or gate group as the run used it (overrides and bag policy applied).",
+      "description": "A screening stage, gate group or parking pay station as the run used it (overrides and bag policy applied).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -255,7 +282,8 @@
           "type": "string",
           "enum": [
             "screening",
-            "gate"
+            "gate",
+            "payStation"
           ]
         },
         "laneCount": {
@@ -311,7 +339,9 @@
         "stillOutsideAtStart",
         "arrivedButOutsideAtStart",
         "notYetArrivedAtStart",
-        "density"
+        "density",
+        "departures",
+        "parking"
       ],
       "properties": {
         "agentCount": {
@@ -329,7 +359,7 @@
           "type": "number"
         },
         "countsByState": {
-          "description": "Agents per AgentState (Pending, Walking, Queuing, InService, Inside, Driving, Parked, Departed, TurnedAway, Diverted).",
+          "description": "People per AgentState (Pending, Walking, Queuing, InService, Inside, Driving, Parked, Departed, TurnedAway, Diverted). Cars are counted separately in parking.carCountsByState. A person in a car is Pending (before getting out) or Driving (aboard on the way out).",
           "type": "array",
           "items": {
             "type": "integer",
@@ -483,12 +513,34 @@
               }
             }
           }
+        },
+        "departures": {
+          "description": "Null if the scenario has no departure curve.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/DepartureMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parking": {
+          "description": "Null if nobody arrives by car.",
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ParkingMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
     "LaneReport": {
       "title": "LaneReport",
-      "description": "One lane: a regular lane of a screening stage or gate group, or a gate group's manual lane.",
+      "description": "One lane: a regular lane of a screening stage, gate group or parking pay station, or a gate group's manual lane.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -517,7 +569,8 @@
           "type": "string",
           "enum": [
             "screening",
-            "gate"
+            "gate",
+            "payStation"
           ]
         },
         "laneIndex": {
@@ -761,7 +814,8 @@
           "type": "string",
           "enum": [
             "screening",
-            "gate"
+            "gate",
+            "payStation"
           ]
         },
         "laneCount": {
@@ -828,6 +882,537 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "VehicleParameters": {
+      "title": "VehicleParameters",
+      "description": "Car and parking assumptions a run used (spec 4.3, 4.4, section 5).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "carShare",
+        "carPeople",
+        "occupancy",
+        "cardShare",
+        "carLength",
+        "carGap",
+        "carExitDelay",
+        "carBoardDelay",
+        "aisleSpeed",
+        "barrierApproach",
+        "parkManoeuvre",
+        "barriers",
+        "lots"
+      ],
+      "properties": {
+        "carShare": {
+          "description": "Share of the attendance that arrived by car.",
+          "type": "number",
+          "minimum": 0
+        },
+        "carPeople": {
+          "description": "People who arrived by car (round(carShare × attendance)).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "occupancy": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "cardShare": {
+          "type": "number",
+          "minimum": 0
+        },
+        "carLength": {
+          "type": "number",
+          "minimum": 0
+        },
+        "carGap": {
+          "type": "number",
+          "minimum": 0
+        },
+        "carExitDelay": {
+          "type": "number",
+          "minimum": 0
+        },
+        "carBoardDelay": {
+          "type": "number",
+          "minimum": 0
+        },
+        "aisleSpeed": {
+          "description": "km/h",
+          "type": "number",
+          "minimum": 0
+        },
+        "barrierApproach": {
+          "description": "Metres of road before a barrier widened to its lane count; a car joins a barrier lane when it enters this stretch.",
+          "type": "number",
+          "minimum": 0
+        },
+        "parkManoeuvre": {
+          "description": "Seconds a car blocks the aisle while turning into or out of a stall.",
+          "type": "number",
+          "minimum": 0
+        },
+        "barriers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ResolvedBarrier"
+          }
+        },
+        "lots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ResolvedLot"
+          }
+        }
+      }
+    },
+    "ResolvedBarrier": {
+      "title": "ResolvedBarrier",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "lotId",
+        "laneCount",
+        "serviceType",
+        "serviceTime",
+        "misreadRate",
+        "fallbackTime",
+        "meanBusyTime"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "entry",
+            "exit"
+          ]
+        },
+        "lotId": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/definitions/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "laneCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serviceType": {
+          "$ref": "common.schema.json#/definitions/BarrierServiceType"
+        },
+        "serviceTime": {
+          "$ref": "common.schema.json#/definitions/Distribution"
+        },
+        "misreadRate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fallbackTime": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/definitions/Distribution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meanBusyTime": {
+          "description": "Expected seconds a lane is busy per car, including misread fallbacks.",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "ResolvedLot": {
+      "title": "ResolvedLot",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "stalls",
+        "stallChoice",
+        "overflow",
+        "paymentMode",
+        "payStationId"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "stalls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stallChoice": {
+          "$ref": "common.schema.json#/definitions/StallChoice"
+        },
+        "overflow": {
+          "$ref": "common.schema.json#/definitions/OverflowRule"
+        },
+        "paymentMode": {
+          "$ref": "common.schema.json#/definitions/PaymentMode"
+        },
+        "payStationId": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/definitions/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "DepartureMetrics": {
+      "title": "DepartureMetrics",
+      "description": "Departures (spec 4.4). Times are scenario times.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "departedPeople",
+        "departedCars",
+        "firstDepartureAt",
+        "lastDepartureAt"
+      ],
+      "properties": {
+        "departedPeople": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "departedCars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "firstDepartureAt": {
+          "description": "First person who left the site (on foot or in a car).",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastDepartureAt": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ParkingMetrics": {
+      "title": "ParkingMetrics",
+      "description": "Cars and parking (spec 4.5, Parking). Times are scenario times.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "carCount",
+        "carCountsByState",
+        "carPeople",
+        "turnedAwayCars",
+        "divertedCars",
+        "turnedAwayPeople",
+        "maxSourceBacklog",
+        "lots",
+        "barriers",
+        "barrierLanes"
+      ],
+      "properties": {
+        "carCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "carCountsByState": {
+          "description": "Cars per AgentState: Pending (not yet on the road), Driving, Parked, Departed, TurnedAway, Diverted (driving to its second lot); the other states are always 0.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "carPeople": {
+          "description": "People who came by car.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "turnedAwayCars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "divertedCars": {
+          "description": "Cars redirected to another lot (each at most once).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "turnedAwayPeople": {
+          "description": "Occupants of turned-away cars (also counted as TurnedAway in countsByState).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxSourceBacklog": {
+          "description": "Most cars at once that could not yet enter the road network at their source (the queue reached beyond the model).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "lots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LotReport"
+          }
+        },
+        "barriers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BarrierReport"
+          }
+        },
+        "barrierLanes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/BarrierLaneReport"
+          }
+        }
+      }
+    },
+    "LotReport": {
+      "title": "LotReport",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lotId",
+        "stalls",
+        "parked",
+        "maxOccupancy",
+        "occupancy",
+        "meanSearchTime",
+        "turnedAway",
+        "divertedAway",
+        "divertedIn",
+        "closedAt",
+        "emptyAt",
+        "timeToEmpty"
+      ],
+      "properties": {
+        "lotId": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "stalls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parked": {
+          "description": "Cars that parked in this lot.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxOccupancy": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "occupancy": {
+          "description": "Cars in stalls at the end of each throughputBin, bins from engine time 0.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "meanSearchTime": {
+          "description": "Mean seconds from passing the entry barrier to standing in the stall.",
+          "type": "number",
+          "minimum": 0
+        },
+        "turnedAway": {
+          "description": "Cars this lot turned away (rule leave, or a diverted car arriving full).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "divertedAway": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "divertedIn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "closedAt": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "emptyAt": {
+          "description": "When the last car of the departure rush left the lot (passed its exit barrier); null if no departures or not empty by the end.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timeToEmpty": {
+          "description": "emptyAt minus the event end, in seconds (spec 4.4 headline).",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "BarrierReport": {
+      "title": "BarrierReport",
+      "description": "Queue in front of one barrier group, measured along the road from the stop line to the back of the last queued car (spec 4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "barrierId",
+        "kind",
+        "lotId",
+        "maxQueueCars",
+        "maxQueueMetres",
+        "maxQueueAt",
+        "meanQueueMetres",
+        "reachedPublicRoadAt"
+      ],
+      "properties": {
+        "barrierId": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "entry",
+            "exit"
+          ]
+        },
+        "lotId": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/definitions/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxQueueCars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxQueueMetres": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxQueueAt": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meanQueueMetres": {
+          "description": "Time average of the queue length in metres over the barrier's reporting window: from the first car joining one of its lanes to the last service start, like its lanes' LaneMetrics (sampled every tick).",
+          "type": "number",
+          "minimum": 0
+        },
+        "reachedPublicRoadAt": {
+          "description": "First time a queued car stood on a public road (or could not enter the model at its source); null if never.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "BarrierLaneReport": {
+      "title": "BarrierLaneReport",
+      "description": "One barrier lane, with the same queueing statistics as a pedestrian lane (Wq from joining the lane's approach to service start).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "laneId",
+        "barrierId",
+        "kind",
+        "laneIndex",
+        "metrics",
+        "throughput",
+        "queueLength"
+      ],
+      "properties": {
+        "laneId": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "barrierId": {
+          "$ref": "common.schema.json#/definitions/Id"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "entry",
+            "exit"
+          ]
+        },
+        "laneIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metrics": {
+          "$ref": "#/definitions/LaneMetrics"
+        },
+        "throughput": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "queueLength": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       }
     }

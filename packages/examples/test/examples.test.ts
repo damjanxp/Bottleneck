@@ -48,7 +48,11 @@ describe("example venues", () => {
       });
 
       it("element ids are unique", () => {
-        const ids = [...v.walkableAreas, ...v.obstacles, ...v.sources, ...v.screeningStages, ...v.gateGroups, ...v.destinations].map((e) => e.id);
+        const ids = [
+          ...[...v.walkableAreas, ...v.obstacles, ...v.sources, ...v.screeningStages, ...v.gateGroups, ...v.destinations].map((e) => e.id),
+          ...[...(v.roads ?? []), ...(v.vehicleSources ?? []), ...(v.vehicleBarriers ?? []), ...(v.parkingLots ?? []), ...(v.crossings ?? [])].map((e) => e.id),
+          ...(v.parkingLots ?? []).flatMap((l) => (l.payStation ? [l.payStation.id] : [])),
+        ];
         expect(new Set(ids).size).toBe(ids.length);
       });
 
@@ -86,6 +90,20 @@ describe("example venues", () => {
         }
       });
 
+      it("vehicle element references exist", () => {
+        const roads = new Set((v.roads ?? []).map((r) => r.id));
+        const barriers = new Set((v.vehicleBarriers ?? []).map((b) => b.id));
+        const lots = new Set((v.parkingLots ?? []).map((l) => l.id));
+        for (const b of v.vehicleBarriers ?? []) expect(roads.has(b.roadId), b.id).toBe(true);
+        for (const s of v.vehicleSources ?? []) if (s.lotId !== undefined) expect(lots.has(s.lotId), s.id).toBe(true);
+        for (const l of v.parkingLots ?? []) {
+          for (const id of [...l.entryBarrierIds, ...l.exitBarrierIds]) expect(barriers.has(id), `${l.id} ${id}`).toBe(true);
+          // Walking exits and pay stations are on the walking grid.
+          expect(v.walkableAreas.some((w) => inPoly({ x: l.walkingExit.x, y: l.walkingExit.y + 0.25 }, w.polygon)), l.id).toBe(true);
+          if (l.payStation) for (const p of [l.payStation.line.a, l.payStation.line.b]) expect(v.walkableAreas.some((w) => inPoly(p, w.polygon)), l.payStation.id).toBe(true);
+        }
+      });
+
       it("screening stage references exist", () => {
         const stages = new Set(v.screeningStages.map((s) => s.id));
         for (const g of v.gateGroups) if (g.screeningStageId !== undefined) expect(stages.has(g.screeningStageId), g.id).toBe(true);
@@ -94,7 +112,14 @@ describe("example venues", () => {
       it("scenarios are valid and reference existing elements", () => {
         const validate = validator("scenario.schema.json");
         const groups = new Map(v.gateGroups.map((g) => [g.id, g]));
-        const elementIds = new Set([...groups.keys(), ...v.screeningStages.map((s) => s.id)]);
+        const lots = new Set((v.parkingLots ?? []).map((l) => l.id));
+        const elementIds = new Set([
+          ...groups.keys(),
+          ...v.screeningStages.map((s) => s.id),
+          ...(v.vehicleBarriers ?? []).map((b) => b.id),
+          ...lots,
+          ...(v.parkingLots ?? []).flatMap((l) => (l.payStation ? [l.payStation.id] : [])),
+        ]);
         const sources = new Set(v.sources.map((s) => s.id));
         expect(ex.scenarios.length).toBeGreaterThanOrEqual(2);
         for (const sc of ex.scenarios) {
@@ -103,6 +128,7 @@ describe("example venues", () => {
           for (const key of Object.keys(sc.overrides ?? {})) expect(elementIds.has(key), `${sc.id} override ${key}`).toBe(true);
           for (const e of sc.timedEvents ?? []) {
             if (e.kind === "busBurst") expect(sources.has(e.sourceId), `${sc.id} ${e.sourceId}`).toBe(true);
+            else if (e.kind === "lotClose") expect(lots.has(e.lotId), `${sc.id} ${e.lotId}`).toBe(true);
             else {
               const g = groups.get(e.groupId);
               expect(g, `${sc.id} ${e.groupId}`).toBeDefined();

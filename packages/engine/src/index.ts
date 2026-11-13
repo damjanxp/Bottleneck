@@ -27,7 +27,7 @@ export { Simulation, TICK_SECONDS, type EventHandler, type TickSystem } from "./
 export { EventKind, LaneBank, percentileNearestRank, type LaneBankOptions, type LaneBankState, type LaneCallbacks, type LaneMetrics, type ServiceOutcome, type ServiceRecord } from "./lanes.ts";
 export { SERVICE_TIME_PRESETS, distributionMoments, makeSampler, shiftedLognormalFromMean, type Sampler } from "./sampling.ts";
 export { AGENT_STATE_COUNT, AGENT_STATE_NAMES, AgentState } from "./agents.ts";
-export { PiecewiseLinearCurve, resolveArrivalPoints, type CurvePoint } from "./arrivals.ts";
+export { PiecewiseLinearCurve, resolveArrivalPoints, resolveDeparturePoints, type CurvePoint } from "./arrivals.ts";
 export { DENSITY_CELL, weidmannFactor } from "./density.ts";
 export { CELL_SIZE } from "./geometry.ts";
 export {
@@ -35,10 +35,13 @@ export {
   RUN_DEFAULTS,
   SNAPSHOT_FIELDS,
   SnapshotField,
+  VEHICLE_SNAPSHOT_FIELDS,
+  VehicleSnapshotField,
   createRun,
   hashMetrics,
   restoreRun,
   snapshotLength,
+  vehicleSnapshotLength,
   type LaneLayout,
   type LaneLive,
   type LaneReport,
@@ -51,3 +54,18 @@ export {
   type RunMetrics,
   type RunOptions,
 } from "./run.ts";
+export {
+  BARRIER_SERVICE_TIMES,
+  CAR_SHARE_DEFAULTS,
+  CarPhase,
+  VEHICLE_DEFAULTS,
+  defaultBarrierServiceTime,
+  defaultPayStationServiceTime,
+  paymentMix,
+  type BarrierLaneLive,
+  type LotLive,
+  type VehicleLayout,
+  type VehicleState,
+  type VehicleWorld,
+} from "./vehicles.ts";
+export { LANE_WIDTH, RoadNetwork } from "./roadNetwork.ts";

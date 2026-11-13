@@ -128,6 +128,8 @@ let nextKey = 1;
 export function eventToForm(e: TimedEvent): EventForm {
   const base = { key: nextKey++, at: timeField(e.at), groupId: "", laneNumber: "1", sourceId: "", count: "" };
   if (e.kind === "busBurst") return { ...base, kind: e.kind, sourceId: e.sourceId, count: String(e.count) };
+  // A lot closing keeps its lot id in groupId (the editor has no lot picker yet).
+  if (e.kind === "lotClose") return { ...base, kind: e.kind, groupId: e.lotId };
   return { ...base, kind: e.kind, groupId: e.groupId, laneNumber: String(e.laneIndex + 1) };
 }
 
@@ -324,10 +326,14 @@ export function formToScenario(form: ScenarioForm, base: Scenario, venue: Venue)
       const count = c.number(`events.${e.key}.count`, `${label}: number of people`, e.count, { min: 1, max: 5000, integer: true, required: true });
       if (!e.sourceId) c.add(`events.${e.key}.sourceId`, `${label}: choose where the people appear.`);
       if (count !== undefined && e.sourceId) events.push({ kind: "busBurst", at, sourceId: e.sourceId, count });
+    } else if (e.kind === "lotClose") {
+      if (!e.groupId) c.add(`events.${e.key}.groupId`, `${label}: choose the parking lot.`);
+      else events.push({ kind: "lotClose", at, lotId: e.groupId });
     } else {
       const lane = c.number(`events.${e.key}.laneNumber`, `${label}: lane number`, e.laneNumber, { min: 1, max: 64, integer: true, required: true });
       if (!e.groupId) c.add(`events.${e.key}.groupId`, `${label}: choose the gate group or screening stage.`);
-      if (lane !== undefined && e.groupId) events.push({ kind: e.kind, at, groupId: e.groupId, laneIndex: lane - 1 });
+      const kind = e.kind;
+      if (lane !== undefined && e.groupId) events.push({ kind, at, groupId: e.groupId, laneIndex: lane - 1 });
     }
   });
   const sorted = events.map((e, k) => ({ e, k })).sort((a, b) => a.e.at - b.e.at || a.k - b.k).map((x) => x.e);

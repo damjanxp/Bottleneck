@@ -51,6 +51,37 @@ export function resolveArrivalPoints(curve: DemandCurve, timeline: Timeline): Cu
   }
 }
 
+/**
+ * Departure curves (spec 4.4 and section 5, all assumed), placed relative to the event end E
+ * (timeline.eventEnd, scenario seconds):
+ *
+ * - concert: a few leave early, the rush right after the end: about 81% leave within 30 min after
+ *   E (and 7% before it).
+ * - stadium: about 85% within 20 min after the final whistle.
+ * - fair (open door): spread over the last 3 hours of opening, rising towards closing time.
+ * - conference: spread over the last hour.
+ *
+ * Custom points are taken as they are (scenario times). Each person's departure time is one
+ * inverse-CDF draw (RandomStream.DepartureTime, by group leader, so groups leave together).
+ */
+export function resolveDeparturePoints(curve: DemandCurve, timeline: Timeline): CurvePoint[] {
+  if (curve.points !== undefined && curve.points.length >= 2) return curve.points.map((p) => ({ t: p.t, weight: p.weight }));
+  const e = timeline.eventEnd;
+  const rel = (...pairs: [number, number][]): CurvePoint[] => pairs.map(([t, weight]) => ({ t: e + t, weight }));
+  switch (curve.preset) {
+    case "concert":
+      return rel([-600, 0], [0, 0.4], [300, 1], [1200, 0.9], [1800, 0.35], [3000, 0]);
+    case "stadium":
+      return rel([-300, 0], [0, 0.3], [180, 1], [900, 0.9], [1200, 0.3], [2100, 0]);
+    case "fair":
+      return rel([-10800, 0.2], [-5400, 0.7], [-1800, 1], [0, 0.8], [300, 0]);
+    case "conference":
+      return rel([-3600, 0.2], [-1800, 0.5], [-300, 1], [0, 1], [600, 0]);
+    case "custom":
+      throw new RangeError("A custom departure curve needs at least two points");
+  }
+}
+
 /** Piecewise-linear density with an exact inverse-CDF sampler. */
 export class PiecewiseLinearCurve {
   readonly points: readonly CurvePoint[];

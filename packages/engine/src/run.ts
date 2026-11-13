@@ -42,14 +42,40 @@
  * Its queue is reassigned in arrival order, each person to the open lane of the same element with
  * the lowest walk time + expected wait (or any element of the same stage set if all are failed),
  * keeping their wait clock running.
+ *
+ * Cars (Phase 3, vehicles.ts). If the venue has roads, a vehicle source and a parking lot, the first
+ * round(carShare × attendance) people come by car: consecutive ids, one car per run of 1-4 people
+ * (occupancy distribution). They are Pending while in the car (review A4); the VehicleWorld drives,
+ * queues and parks the car, and carExitDelay seconds after it parks its occupants get out at the
+ * stall, walk straight to the lot's walking exit (off the walking grid) and from there on are
+ * pedestrians like any other (gates, or straight to a destination if the venue has no gates).
+ * People and cars are counted separately: countsByState() for people, carCountsByState() for cars,
+ * each summing to its own total at every tick. Barrier lanes live in the same LaneBank (ids after
+ * the pedestrian lanes). The vehicle tick runs after pedestrian movement.
+ *
+ * Departures (spec 4.4), only if the scenario has a departure curve: each group (and each car's
+ * occupants) draws a departure time. Whoever is inside by then leaves; whoever is not leaves as soon
+ * as they get in. People on foot walk back to the source they came from and are Departed there
+ * (they cross the gate lines without being scanned: the lanes are just points on the walking grid).
+ * Car users walk to their lot's walking exit and straight on to their car; the driver first queues at
+ * the lot's pay station if it has one and the lot's payment mode is payStation. Once everyone is
+ * aboard (state Driving) the car leaves after carBoardDelay, drives to an exit barrier and off the
+ * network; its occupants are then Departed.
+ *
+ * End of a run: everyone done (people Inside or TurnedAway and cars Parked or TurnedAway without
+ * departures; people and cars Departed or TurnedAway with departures: `drained`), the horizon, or
+ * the watchdog (D-023: people walking or queuing, or cars on the move, and nothing changed for
+ * watchdogMinutes while nothing is scheduled: no gate opening, timed event or departure to come).
  */
 
 import type {
   BagPolicy,
+  DepartureMetrics,
   Distribution,
   ElementReport,
   LanePeriod,
   LaneReport,
+  ParkingMetrics,
   RecordedMetrics,
   ResolvedParameters,
   Scenario,
@@ -57,17 +83,19 @@ import type {
   WaitStats,
 } from "@bottleneck/schema";
 import { AGENT_ARRAYS, AGENT_STATE_COUNT, AgentState as AgentStateEnum, AgentStore, Mode as ModeEnum, Stage as StageEnum } from "./agents.ts";
-import { PiecewiseLinearCurve, resolveArrivalPoints } from "./arrivals.ts";
+import { PiecewiseLinearCurve, resolveArrivalPoints, resolveDeparturePoints } from "./arrivals.ts";
 import { DensityGrid } from "./density.ts";
 import { exp } from "./detmath.ts";
 import { sampleCategorical } from "./distributions.ts";
-import type { FlowField } from "./flowField.ts";
+import { buildFlowField, type FlowField } from "./flowField.ts";
 import { Float64Hasher } from "./hash.ts";
 import { EventKind as EventKindEnum, LaneBank, percentileNearestRank, type LaneBankState, type ServiceRecord } from "./lanes.ts";
 import { RandomStream as RandomStreamEnum, toSeed, uniform } from "./rng.ts";
 import { SERVICE_TIME_PRESETS, makeSampler, type Sampler } from "./sampling.ts";
 import { Simulation, TICK_SECONDS as TICK, type EventHandler } from "./simulation.ts";
+import { toLocal } from "./geometry.ts";
 import { buildVenueModel, type LaneElement, type LaneGeometry, type VenueModel } from "./venueModel.ts";
+import { VEHICLE_DEFAULTS, VehicleWorld, defaultPayStationServiceTime, type BarrierLaneLive, type LotLive, type VehicleLayout, type VehicleState } from "./vehicles.ts";
 
 // ---------------------------------------------------------------------------------------------
 // Snapshot layout
@@ -83,6 +111,20 @@ export const SNAPSHOT_FIELDS = 5;
 
 export function snapshotLength(agentCount: number): number {
   return SNAPSHOT_FIELDS * agentCount;
+}
+
+/**
+ * writeVehicleSnapshot() fills a Float32Array the same way for cars, one block of `vehicleCount`
+ * values per field: x, y (venue metres, the centre of the car on its lane), vx, vy (m/s, for
+ * extrapolation), hx, hy (unit heading: kept while stopped, pointing into the stall when parked),
+ * state (an AgentState value; Pending, Departed and TurnedAway cars are not on the map).
+ * Field f of car c: buffer[f·vehicleCount + c].
+ */
+export const VehicleSnapshotField = { X: 0, Y: 1, VX: 2, VY: 3, HX: 4, HY: 5, State: 6 } as const;
+export const VEHICLE_SNAPSHOT_FIELDS = 7;
+
+export function vehicleSnapshotLength(vehicleCount: number): number {
+  return VEHICLE_SNAPSHOT_FIELDS * vehicleCount;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -144,7 +186,7 @@ export interface RunOptions {
 export interface LaneLayout {
   readonly laneId: number;
   readonly elementId: string;
-  readonly elementKind: "screening" | "gate";
+  readonly elementKind: "screening" | "gate" | "payStation";
   readonly laneIndex: number;
   readonly manual: boolean;
   /** Venue coordinates. */
@@ -211,6 +253,18 @@ export interface Run {
   serviceLog(): ServiceRecord[];
   /** The complete dynamic state, for restoreRun() (review C1: replay seeks restore the nearest checkpoint). */
   saveCheckpoint(): RunCheckpoint;
+  /** Number of cars (0 if nobody comes by car). */
+  readonly vehicleCount: number;
+  /** Static drawing data for roads, aisles, lots, stalls, barriers and crossings; null without cars. */
+  readonly vehicleLayout: VehicleLayout | null;
+  /** Cars per AgentState (sums to vehicleCount). */
+  carCountsByState(): number[];
+  /** Car positions etc., layout VehicleSnapshotField (needs vehicleSnapshotLength(vehicleCount) floats). */
+  writeVehicleSnapshot(out: Float32Array): void;
+  /** Live state of every barrier lane. */
+  barrierStates(): BarrierLaneLive[];
+  /** Live state of every parking lot. */
+  lotStates(): LotLive[];
   /** Internal state for tests and tools; not a stable API. */
   readonly debug: RunDebug;
 }
@@ -220,6 +274,7 @@ export interface RunDebug {
   readonly agents: AgentStore;
   readonly bank: LaneBank;
   readonly laneFailed: Uint8Array;
+  readonly vehicles: VehicleWorld | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -302,6 +357,31 @@ class PedestrianRun implements Run {
   private readonly sampleTicks: number;
   private readonly logitWeights: number[] = [];
   private readonly logitLanes: number[] = [];
+  // Cars and departures (Phase 3)
+  readonly vehicleCount: number;
+  readonly vehicleLayout: VehicleLayout | null;
+  private readonly world: VehicleWorld | null;
+  private readonly pedLaneCount: number;
+  private readonly carPeople: number;
+  private readonly carFirst: Int32Array;
+  private readonly carSize: Uint8Array;
+  /** Walking exit of each lot as a point on the walking grid (local). */
+  private readonly lotWalkX: Float64Array;
+  private readonly lotWalkY: Float64Array;
+  /** Flow fields for departures: back to each pedestrian source, and to each lot's walking exit. */
+  private readonly homeFields: (FlowField | null)[];
+  private readonly lotFields: (FlowField | null)[];
+  private readonly departuresOn: boolean;
+  private readonly eventEndAt: number;
+  /** People with a finite departure time, by (time, id). */
+  private readonly depOrder: Int32Array;
+  private depPtr = 0;
+  private firstDepartureAt = NaN;
+  private lastDepartureAt = NaN;
+  private carTurnedAwayPeople = 0;
+  /** People who got out of a car, in the order they did (they are not in `order`). */
+  private readonly released: number[] = [];
+  private readonly crossingWait: boolean;
 
   constructor(venue: Venue, scenario: Scenario, options: RunOptions = {}) {
     // Precedence: the scenario's parameters, then options.defaults, then RUN_DEFAULTS.
@@ -320,10 +400,12 @@ class PedestrianRun implements Run {
     this.sampleTicks = Math.round(RUN_DEFAULTS.queueSampleInterval / TICK_SECONDS);
     this.seed = toSeed(scenario.seed);
 
+    const cardShare = params.cardShare ?? VEHICLE_DEFAULTS.cardShare;
     this.model = buildVenueModel(venue, scenario, {
       slotSpacing: d.slotSpacing,
       manualServiceTime: manualLaneServiceTime,
       screeningServiceTime: bagPolicy === null ? null : BAG_POLICY_SERVICE_TIME[bagPolicy],
+      payStationServiceTime: defaultPayStationServiceTime(cardShare),
     });
     const model = this.model;
 
@@ -341,12 +423,49 @@ class PedestrianRun implements Run {
     const speedSampler = makeSampler(freeSpeed, this.seed, RandomStream.FreeSpeed);
     const sourceIndex: Record<string, number> = {};
     venue.sources.forEach((s, i) => (sourceIndex[s.id] = i));
+    // Cars (review A4): people 0 .. carPeople − 1, one car per run of consecutive ids, sized by the
+    // occupancy distribution (drawn by the car's first occupant). Only on a venue that has roads,
+    // a vehicle source and a parking lot; otherwise carShare is ignored and everyone walks.
+    const vehicleVenue = (venue.parkingLots ?? []).length > 0 && (venue.roads ?? []).length > 0 && (venue.vehicleSources ?? []).some((s) => s.share > 0);
+    const carShare = vehicleVenue ? Math.min(1, Math.max(0, scenario.carShare)) : 0;
+    const carPeople = Math.min(attendance, Math.round(carShare * attendance));
+    this.carPeople = carPeople;
+    const occupancy = [...(params.occupancy ?? VEHICLE_DEFAULTS.occupancy)];
+    const carFirst: number[] = [];
+    const carSize: number[] = [];
+    {
+      let total = 0;
+      for (const w of occupancy) total += w;
+      let i = 0;
+      while (i < carPeople) {
+        const size = occupancy.length > 1 && total > 0 ? 1 + sampleCategorical(uniform(this.seed, RandomStream.CarOccupancy, i, 0), occupancy) : 1;
+        const end = Math.min(carPeople, i + size);
+        for (let j = i; j < end; j++) {
+          agents.group[j] = i;
+          agents.car[j] = carFirst.length;
+        }
+        carFirst.push(i);
+        carSize.push(end - i);
+        i = end;
+      }
+    }
+    this.carFirst = Int32Array.from(carFirst);
+    this.carSize = Uint8Array.from(carSize);
+    const carArrival = new Float64Array(carFirst.length);
     // Groups (review E3): consecutive ids, within the attendance and within each bus burst.
-    formGroups(agents.group, 0, attendance, groupSizes, this.seed);
+    formGroups(agents.group, carPeople, attendance, groupSizes, this.seed);
     let earliest = Infinity;
+    for (let c = 0; c < carFirst.length; c++) {
+      carArrival[c] = curve.sample(uniform(this.seed, RandomStream.ArrivalTime, carFirst[c] as number, 0));
+      if ((carArrival[c] as number) < earliest) earliest = carArrival[c] as number;
+    }
     for (let i = 0; i < n; i++) {
       const leader = agents.group[i] as number;
-      if (i < attendance) {
+      if (i < carPeople) {
+        // In a car: they arrive when they get out of it (A4).
+        agents.arrivalTime[i] = Infinity;
+        agents.source[i] = -1;
+      } else if (i < attendance) {
         if (leader === i) {
           agents.arrivalTime[i] = curve.sample(uniform(this.seed, RandomStream.ArrivalTime, i, 0));
           agents.source[i] = model.sourceShares.length > 0 ? sampleCategorical(uniform(this.seed, RandomStream.SourceChoice, i, 0), model.sourceShares) : -1;
@@ -387,16 +506,33 @@ class PedestrianRun implements Run {
     const tl = scenario.timeline;
     this.timeOffset = earliest < tl.gatesOpen ? Math.floor(earliest / 60) * 60 - 60 : tl.gatesOpen;
     for (let i = 0; i < n; i++) agents.arrivalTime[i] = (agents.arrivalTime[i] as number) - this.timeOffset;
+    for (let c = 0; c < carArrival.length; c++) carArrival[c] = (carArrival[c] as number) - this.timeOffset;
     this.horizon = tl.horizon - this.timeOffset;
     this.gatesOpenAt = tl.gatesOpen - this.timeOffset;
     this.eventStartAt = tl.eventStart === null ? null : tl.eventStart - this.timeOffset;
     const shareInsideAt = params.shareInsideAt ?? (tl.eventStart === null ? tl.gatesOpen + 3600 : tl.eventStart - RUN_DEFAULTS.shareInsideLead);
 
-    // Arrival order: by (time, id).
-    const order = Array.from({ length: n }, (_, i) => i);
+    // Arrival order: by (time, id). People in cars are not in it: they arrive when they get out.
+    const order = Array.from({ length: n - carPeople }, (_, i) => i + carPeople);
     order.sort((a, b) => (agents.arrivalTime[a] as number) - (agents.arrivalTime[b] as number) || a - b);
     this.order = Int32Array.from(order);
     this.counts[AgentState.Pending] = n;
+
+    // --- Departures (spec 4.4): one draw per group (a car's occupants are one group). ---
+    this.departuresOn = scenario.departures !== undefined;
+    this.eventEndAt = tl.eventEnd - this.timeOffset;
+    let departureCurve: { t: number; weight: number }[] | null = null;
+    if (scenario.departures !== undefined) {
+      const dc = new PiecewiseLinearCurve(resolveDeparturePoints(scenario.departures, tl));
+      departureCurve = dc.points.map((p) => ({ t: p.t, weight: p.weight }));
+      for (let i = 0; i < n; i++) {
+        const leader = agents.group[i] as number;
+        agents.departTime[i] = leader === i ? dc.sample(uniform(this.seed, RandomStream.DepartureTime, i, 0)) - this.timeOffset : (agents.departTime[leader] as number);
+      }
+      const dep = Array.from({ length: n }, (_, i) => i);
+      dep.sort((a, b) => (agents.departTime[a] as number) - (agents.departTime[b] as number) || a - b);
+      this.depOrder = Int32Array.from(dep);
+    } else this.depOrder = new Int32Array(0);
 
     // --- Lanes and events ---
     const handlers = new Map<number, EventHandler<number>>([
@@ -415,23 +551,86 @@ class PedestrianRun implements Run {
       { name: "arrivals", update: () => this.arrivals() },
       { name: "lane assignment", update: () => this.assignLanes() },
       { name: "movement", update: () => this.move() },
+      { name: "vehicles", update: () => this.moveVehicles() },
       { name: "density", update: () => this.updateDensity() },
       { name: "metric sampling", update: () => this.sample() },
     ]);
-    this.elementSamplers = model.elements.map((el) => makeSampler(el.serviceTime, this.seed, el.kind === "screening" ? RandomStream.ScreeningTime : RandomStream.ScanTime));
+    this.elementSamplers = model.elements.map((el) => makeSampler(el.serviceTime, this.seed, el.kind === "screening" ? RandomStream.ScreeningTime : el.kind === "payStation" ? RandomStream.PayTime : RandomStream.ScanTime));
     this.retrySamplers = model.elements.map((el) => (el.retryTime ? makeSampler(el.retryTime, this.seed, RandomStream.ScanRetryTime) : null));
     this.manualSampler = makeSampler(manualLaneServiceTime, this.seed, RandomStream.ManualServiceTime);
+
+    // --- Cars (vehicles.ts): barrier lanes come after the pedestrian lanes in the one bank. ---
+    this.pedLaneCount = model.lanes.length;
+    const carLength = params.carLength ?? VEHICLE_DEFAULTS.carLength;
+    const carGap = params.carGap ?? VEHICLE_DEFAULTS.carGap;
+    const carExitDelay = params.carExitDelay ?? VEHICLE_DEFAULTS.carExitDelay;
+    const carBoardDelay = params.carBoardDelay ?? VEHICLE_DEFAULTS.carBoardDelay;
+    const aisleSpeed = params.aisleSpeed ?? VEHICLE_DEFAULTS.aisleSpeed;
+    const parkManoeuvre = params.parkManoeuvre ?? VEHICLE_DEFAULTS.parkManoeuvre;
+    this.world =
+      carFirst.length > 0
+        ? new VehicleWorld(
+            venue,
+            scenario,
+            model.frame,
+            { first: this.carFirst, size: this.carSize, arrival: carArrival },
+            {
+              seed: this.seed,
+              carLength,
+              carGap,
+              exitDelay: carExitDelay,
+              boardDelay: carBoardDelay,
+              aisleSpeed: aisleSpeed / 3.6,
+              approach: VEHICLE_DEFAULTS.barrierApproach,
+              manoeuvre: parkManoeuvre,
+              cardShare,
+              departuresFrom: this.departuresOn ? this.eventEndAt : Infinity,
+              tickSeconds: TICK_SECONDS,
+              sampleTicks: this.sampleTicks,
+              binSeconds: RUN_DEFAULTS.throughputBin,
+              laneBase: model.lanes.length,
+              payElements: model.payElements,
+            },
+          )
+        : null;
+    const world = this.world;
+    this.vehicleCount = world?.carCount ?? 0;
+    this.vehicleLayout = world?.layout ?? null;
+    this.crossingWait = world !== null && world.crossings.length > 0;
+    const pedLanes = model.lanes.length;
     this.bank = new LaneBank(
       this.sim,
       {
-        serviceTime: (agent, lane) => this.serviceTime(agent, lane),
-        outcome: (agent, lane, attempt) => this.outcome(agent, lane, attempt),
-        onServiceStart: (agent, lane, time) => this.onServiceStart(agent, lane, time),
-        onLeave: (agent, lane, time, served) => this.onLeave(agent, lane, time, served),
+        serviceTime: (agent, lane) => (lane >= pedLanes ? (world as VehicleWorld).serviceTime(agent, lane) : this.serviceTime(agent, lane)),
+        outcome: (agent, lane, attempt) => (lane >= pedLanes ? (world as VehicleWorld).outcome(agent, lane, attempt) : this.outcome(agent, lane, attempt)),
+        onServiceStart: (agent, lane, time) => {
+          if (lane < pedLanes) this.onServiceStart(agent, lane, time);
+          else (world as VehicleWorld).onServiceStart(agent, lane, time);
+        },
+        onLeave: (agent, lane, time, served) => (lane >= pedLanes ? (world as VehicleWorld).onLeave(agent, lane, time) : this.onLeave(agent, lane, time, served)),
       },
-      model.lanes.length,
+      model.lanes.length + (world?.barrierLaneCount ?? 0),
       { binSeconds: RUN_DEFAULTS.throughputBin, splitAt: this.eventStartAt ?? Infinity },
     );
+    if (world !== null) {
+      world.attach(this.bank, {
+        release: (car) => this.releaseCar(car),
+        turnedAway: (car) => this.carTurnedAway(car),
+        departed: (car) => this.carDeparted(car),
+      });
+    }
+    // Walking exits on the grid, and the departure flow fields.
+    const lots = venue.parkingLots ?? [];
+    this.lotWalkX = new Float64Array(lots.length);
+    this.lotWalkY = new Float64Array(lots.length);
+    lots.forEach((l, li) => {
+      const p = toLocal(model.frame, l.walkingExit);
+      const cell = model.grid.isWalkableAt(p.x, p.y) ? model.grid.cellAt(p.x, p.y) : model.grid.nearestWalkable(p.x, p.y);
+      this.lotWalkX[li] = cell >= 0 && !model.grid.isWalkableAt(p.x, p.y) ? model.grid.centreX(cell) : p.x;
+      this.lotWalkY[li] = cell >= 0 && !model.grid.isWalkableAt(p.x, p.y) ? model.grid.centreY(cell) : p.y;
+    });
+    this.homeFields = venue.sources.map((_, si) => (this.departuresOn ? buildFlowField(model.grid, [model.grid.cellAt(model.sourceX[si] as number, model.sourceY[si] as number)]) : null));
+    this.lotFields = lots.map((_, li) => (this.departuresOn && world !== null ? buildFlowField(model.grid, [model.grid.cellAt(this.lotWalkX[li] as number, this.lotWalkY[li] as number)]) : null));
     this.laneFailed = new Uint8Array(model.lanes.length);
     this.queueSeries = model.lanes.map(() => []);
     this.throughput = model.lanes.map(() => []);
@@ -449,6 +648,11 @@ class PedestrianRun implements Run {
     }
     for (const e of scenario.timedEvents ?? []) {
       if (e.kind === "busBurst") continue;
+      if (e.kind === "lotClose") {
+        const li = (venue.parkingLots ?? []).findIndex((l) => l.id === e.lotId);
+        if (li >= 0 && this.world !== null) this.addAction(e.at - this.timeOffset, () => (this.world as VehicleWorld).closeLot(li, this.sim.now));
+        continue;
+      }
       const el = model.elements.find((x) => x.id === e.groupId);
       if (el === undefined || e.laneIndex < 0 || e.laneIndex >= el.laneCount) continue;
       const lane = el.laneIds[e.laneIndex] as number;
@@ -511,8 +715,37 @@ class PedestrianRun implements Run {
         retryTime: el.retryTime,
         meanBusyTime: el.meanService,
       })),
+      departureCurve,
+      vehicles:
+        world === null
+          ? null
+          : {
+              carShare,
+              carPeople,
+              occupancy,
+              cardShare,
+              carLength,
+              carGap,
+              carExitDelay,
+              carBoardDelay,
+              aisleSpeed,
+              barrierApproach: VEHICLE_DEFAULTS.barrierApproach,
+              parkManoeuvre,
+              barriers: world.groups.map((g) => ({
+                id: g.id,
+                kind: g.kind,
+                lotId: g.lot >= 0 ? (world.lots[g.lot] as { id: string }).id : null,
+                laneCount: g.laneCount,
+                serviceType: g.serviceType,
+                serviceTime: g.serviceTime,
+                misreadRate: g.misreadRate,
+                fallbackTime: g.fallbackTime,
+                meanBusyTime: g.meanBusy,
+              })),
+              lots: world.lots.map((l) => ({ id: l.id, stalls: l.stallCount, stallChoice: l.stallChoice, overflow: l.overflowRule, paymentMode: l.paymentMode, payStationId: l.payStationId })),
+            },
     };
-    this.debug = { model, agents, bank: this.bank, laneFailed: this.laneFailed };
+    this.debug = { model, agents, bank: this.bank, laneFailed: this.laneFailed, vehicles: world };
     if (n === 0) {
       this.isDone = true;
       this.isDrained = true;
@@ -544,16 +777,19 @@ class PedestrianRun implements Run {
   step(): void {
     if (this.isDone) return;
     this.sim.step();
-    const finished = (this.counts[AgentState.Inside] as number) + (this.counts[AgentState.TurnedAway] as number);
-    if (finished === this.agentCount) {
+    const c = this.counts;
+    // People are done when Inside (or Departed, if they leave) or TurnedAway; cars when Parked (or Departed) or TurnedAway.
+    const finished = (this.departuresOn ? (c[AgentState.Departed] as number) : (c[AgentState.Inside] as number)) + (c[AgentState.TurnedAway] as number);
+    const carsFinished = this.world === null ? 0 : this.world.finishedCount(this.departuresOn);
+    if (finished === this.agentCount && carsFinished === this.vehicleCount) {
       this.isDone = true;
       this.isDrained = true;
     } else if (this.sim.now >= this.horizon) {
       this.isDone = true;
     } else {
-      const active = this.agentCount - finished - (this.counts[AgentState.Pending] as number);
-      // Waiting for the gates to open or for a scheduled lane reopening is not a deadlock.
-      const waitingForTimeline = this.sim.now < this.gatesOpenAt || this.pendingActions > 0;
+      const active = (c[AgentState.Walking] as number) + (c[AgentState.Queuing] as number) + (c[AgentState.InService] as number) + (this.world === null ? 0 : this.world.activeCount());
+      // Waiting for the gates to open, a scheduled timed event or departures still to come is not a deadlock.
+      const waitingForTimeline = this.sim.now < this.gatesOpenAt || this.pendingActions > 0 || this.depPtr < this.depOrder.length;
       if (active > 0 && !waitingForTimeline && this.sim.now - this.lastProgress >= this.watchdog) {
         this.isDone = true;
         this.isDeadlock = true;
@@ -578,6 +814,24 @@ class PedestrianRun implements Run {
       out[3 * n + i] = a.vy[i] as number;
       out[4 * n + i] = a.state[i] as number;
     }
+  }
+
+  carCountsByState(): number[] {
+    return this.world === null ? new Array<number>(AGENT_STATE_COUNT).fill(0) : Array.from(this.world.counts);
+  }
+
+  writeVehicleSnapshot(out: Float32Array): void {
+    const n = this.vehicleCount;
+    if (out.length < VEHICLE_SNAPSHOT_FIELDS * n) throw new RangeError(`Vehicle snapshot buffer needs ${VEHICLE_SNAPSHOT_FIELDS * n} floats, got ${out.length}`);
+    this.world?.writeSnapshot(out, this.model.frame.originX, this.model.frame.originY);
+  }
+
+  barrierStates(): BarrierLaneLive[] {
+    return this.world === null ? [] : this.world.barrierStates();
+  }
+
+  lotStates(): LotLive[] {
+    return this.world === null ? [] : this.world.lotStates();
   }
 
   laneStates(): LaneLive[] {
@@ -655,8 +909,9 @@ class PedestrianRun implements Run {
     a.mode[i] = Mode.ToLine;
     a.ready[i] = 0;
     a.lineJoin[i] = NaN;
-    if (Number.isNaN(a.waitStart[i] as number)) a.waitStart[i] = this.sim.now;
     const geom = this.model.lanes[lane] as LaneGeometry;
+    // The venue-wide wait (meanWait, p95Wait) is about getting in; a pay-station wait is only in its lane's metrics.
+    if (Number.isNaN(a.waitStart[i] as number) && a.stage[i] !== Stage.Leaving) a.waitStart[i] = this.sim.now;
     const stage = (a.stage[i] as number) + 1;
     if (!geom.manual && a.demandCounted[i] !== stage) {
       // First commitment at this stage: one person of demand for the element.
@@ -690,7 +945,7 @@ class PedestrianRun implements Run {
 
   private onServiceStart(agent: number, lane: number, time: number): void {
     const a = this.agents;
-    a.totalWait[agent] = (a.totalWait[agent] as number) + (time - (a.waitStart[agent] as number));
+    if (!Number.isNaN(a.waitStart[agent] as number)) a.totalWait[agent] = (a.totalWait[agent] as number) + (time - (a.waitStart[agent] as number));
     a.waitStart[agent] = NaN;
     const join = a.lineJoin[agent] as number;
     (this.queueWaits[lane] as number[]).push(Number.isNaN(join) ? 0 : time - join);
@@ -730,6 +985,9 @@ class PedestrianRun implements Run {
       a.stage[agent] = Stage.Gates;
       a.stageSet[agent] = el.nextStageSet;
       a.mode[agent] = Mode.Approach;
+    } else if (el.kind === "payStation") {
+      // Paid: on to the car.
+      this.toLot(agent);
     } else {
       a.stage[agent] = Stage.Inside;
       a.mode[agent] = Mode.ToDestination;
@@ -772,13 +1030,36 @@ class PedestrianRun implements Run {
       a.stage[i] = Stage.Entry;
       a.stageSet[i] = 0;
       a.mode[i] = Mode.Approach;
-      const set = m.stageSets[0];
-      if (set === undefined || set.field.distanceAt(m.grid.cellAt(x, y)) === Infinity) {
-        this.turnAway(i);
-        continue;
+      if (!m.hasEntryLanes) {
+        // A venue without gates (a stand-alone car park): straight to a destination.
+        a.stage[i] = Stage.Inside;
+        a.mode[i] = Mode.ToDestination;
+        if (m.destinationField.distanceAt(m.grid.cellAt(x, y)) === Infinity) {
+          this.turnAway(i);
+          continue;
+        }
+      } else {
+        const set = m.stageSets[0];
+        if (set === undefined || set.field.distanceAt(m.grid.cellAt(x, y)) === Infinity) {
+          this.turnAway(i);
+          continue;
+        }
       }
       this.setState(i, AgentState.Walking);
       added.push(i);
+    }
+    // People getting out of their parked cars.
+    if (this.world !== null) this.world.popReleases(now, (car) => this.releaseCar(car));
+    // Departures due now: whoever is inside leaves; whoever is not yet inside leaves on arrival.
+    if (this.departuresOn) {
+      while (this.depPtr < this.depOrder.length) {
+        const i = this.depOrder[this.depPtr] as number;
+        if ((a.departTime[i] as number) > now) break;
+        this.depPtr++;
+        const st = a.state[i] as number;
+        if (st === AgentState.Inside) this.startDeparture(i, added);
+        else if (st !== AgentState.TurnedAway && st !== AgentState.Departed && st !== AgentState.Driving) a.departDue[i] = 1;
+      }
     }
     this.refreshActive(added);
   }
@@ -787,6 +1068,156 @@ class PedestrianRun implements Run {
     this.agents.mode[i] = Mode.Done;
     this.unreachable++;
     this.setState(i, AgentState.TurnedAway);
+    const car = this.agents.car[i] as number;
+    if (car >= 0 && this.world !== null) this.world.occupantLost(car);
+  }
+
+  // --- Cars and departures (Phase 3) ---
+
+  /** A pedestrian (just out of a car, or arrived on foot) starts on the walking grid at its current position. */
+  private enterOnFoot(i: number): void {
+    const a = this.agents;
+    const m = this.model;
+    a.stage[i] = Stage.Entry;
+    a.stageSet[i] = 0;
+    const cell = m.grid.cellAt(a.x[i] as number, a.y[i] as number);
+    if (m.hasEntryLanes) {
+      a.mode[i] = Mode.Approach;
+      if ((m.stageSets[0] as { field: FlowField }).field.distanceAt(cell) === Infinity) this.turnAway(i);
+    } else {
+      // A venue without gates (a stand-alone car park): straight to a destination.
+      a.stage[i] = Stage.Inside;
+      a.mode[i] = Mode.ToDestination;
+      if (m.destinationField.distanceAt(cell) === Infinity) this.turnAway(i);
+    }
+  }
+
+  /** Hook: a car parked carExitDelay seconds ago; its occupants get out at the stall. */
+  private releaseCar(car: number): void {
+    const a = this.agents;
+    const world = this.world as VehicleWorld;
+    const lot = world.lotOfCar(car);
+    const stall = world.stallPosition(car);
+    const first = this.carFirst[car] as number;
+    const now = this.sim.now;
+    for (let i = first; i < first + (this.carSize[car] as number); i++) {
+      if (a.state[i] !== AgentState.Pending) continue;
+      a.x[i] = stall.x;
+      a.y[i] = stall.y;
+      a.vx[i] = 0;
+      a.vy[i] = 0;
+      a.tx[i] = this.lotWalkX[lot] as number;
+      a.ty[i] = this.lotWalkY[lot] as number;
+      a.mode[i] = Mode.ExitCar;
+      a.stage[i] = Stage.Entry;
+      a.arrivalTime[i] = now;
+      this.released.push(i);
+      this.arrived.push(i);
+      this.setState(i, AgentState.Walking);
+    }
+  }
+
+  /** Hook: a car was turned away; its occupants never arrive. */
+  private carTurnedAway(car: number): void {
+    const a = this.agents;
+    const first = this.carFirst[car] as number;
+    for (let i = first; i < first + (this.carSize[car] as number); i++) {
+      if (a.state[i] !== AgentState.Pending) continue;
+      a.mode[i] = Mode.Done;
+      this.carTurnedAwayPeople++;
+      this.setState(i, AgentState.TurnedAway);
+    }
+  }
+
+  /** Hook: a car drove off the network with its occupants aboard. */
+  private carDeparted(car: number): void {
+    const a = this.agents;
+    const first = this.carFirst[car] as number;
+    for (let i = first; i < first + (this.carSize[car] as number); i++) {
+      if (a.state[i] !== AgentState.Driving) continue;
+      this.departed(i);
+    }
+  }
+
+  private departed(i: number): void {
+    const now = this.sim.now;
+    this.agents.mode[i] = Mode.Done;
+    if (Number.isNaN(this.firstDepartureAt)) this.firstDepartureAt = now;
+    this.lastDepartureAt = now;
+    this.setState(i, AgentState.Departed);
+  }
+
+  /**
+   * Person i leaves (spec 4.4): on foot back to their source; by car to the lot's walking exit and
+   * the car, the driver (the car's first occupant) via the pay station if the lot has one and pays there.
+   * `added` collects agents that become active (null if i is already active).
+   */
+  private startDeparture(i: number, added: number[] | null): void {
+    const a = this.agents;
+    const m = this.model;
+    a.departDue[i] = 0;
+    a.stage[i] = Stage.Leaving;
+    a.lane[i] = -1;
+    const cell = m.grid.cellAt(a.x[i] as number, a.y[i] as number);
+    const car = a.car[i] as number;
+    if (car < 0) {
+      const src = a.source[i] as number;
+      const field = src >= 0 ? this.homeFields[src] : null;
+      if (field === null || field === undefined || field.distanceAt(cell) === Infinity) {
+        // Nowhere to walk back to on the grid: they leave from where they are.
+        this.departed(i);
+        return;
+      }
+      a.mode[i] = Mode.ToHome;
+    } else {
+      const world = this.world as VehicleWorld;
+      const lot = world.lots[world.lotOfCar(car)];
+      const el = lot !== undefined && lot.paymentMode === "payStation" ? lot.payElement : -1;
+      const paySet = el >= 0 ? (m.elements[el] as LaneElement).paySet : -1;
+      const payField = paySet >= 0 ? (m.stageSets[paySet] as { field: FlowField }).field : null;
+      if (i === this.carFirst[car] && payField !== null && payField.distanceAt(cell) !== Infinity) {
+        a.stageSet[i] = paySet;
+        a.mode[i] = Mode.Approach;
+      } else this.toLot(i);
+    }
+    this.setState(i, AgentState.Walking);
+    if (added !== null) added.push(i);
+  }
+
+  /** Walk to the car's lot: along the grid to the walking exit, then straight to the car. */
+  private toLot(i: number): void {
+    const a = this.agents;
+    const car = a.car[i] as number;
+    const world = this.world as VehicleWorld;
+    const lot = world.lotOfCar(car);
+    const field = this.lotFields[lot] ?? null;
+    a.stage[i] = Stage.Leaving;
+    if (field !== null && field.distanceAt(this.model.grid.cellAt(a.x[i] as number, a.y[i] as number)) !== Infinity) a.mode[i] = Mode.ToLot;
+    else this.toCar(i);
+  }
+
+  private toCar(i: number): void {
+    const a = this.agents;
+    const stall = (this.world as VehicleWorld).stallPosition(a.car[i] as number);
+    a.tx[i] = stall.x;
+    a.ty[i] = stall.y;
+    a.mode[i] = Mode.ToCar;
+  }
+
+  /** The vehicle tick, after pedestrian movement. */
+  private moveVehicles(): void {
+    if (this.world !== null && this.world.step(this.sim.now, this.sim.tick)) this.lastProgress = this.sim.now;
+  }
+
+  /** True if a step from (x0, y0) to (x1, y1) walks onto a crossing that a stopped car stands across. */
+  private waitsAtCrossing(x0: number, y0: number, x1: number, y1: number): boolean {
+    const w = this.world as VehicleWorld;
+    for (let c = 0; c < w.crossings.length; c++) {
+      if (w.crossingBlocked[c] === 0) continue;
+      const cr = w.crossings[c] as { ax: number; ay: number; bx: number; by: number; half: number };
+      if (segmentDistance(x1, y1, cr.ax, cr.ay, cr.bx, cr.by) <= cr.half && segmentDistance(x0, y0, cr.ax, cr.ay, cr.bx, cr.by) > cr.half) return true;
+    }
+    return false;
   }
 
   /** 2. Lane decisions, jockeying, and the FIFO positions used by movement. */
@@ -970,6 +1401,7 @@ class PedestrianRun implements Run {
           a.mode[i] = Mode.Done;
           a.insideTime[i] = this.sim.now;
           this.setState(i, AgentState.Inside);
+          if (a.departDue[i] === 1) this.startDeparture(i, null);
         }
       } else if (mode === Mode.ToLine) {
         const geom = m.lanes[a.lane[i] as number] as LaneGeometry;
@@ -1007,11 +1439,67 @@ class PedestrianRun implements Run {
       } else if (mode === Mode.Service) {
         const geom = m.lanes[a.lane[i] as number] as LaneGeometry;
         this.straight(i, geom.serviceX, geom.serviceY, v0);
+      } else if (mode === Mode.ExitCar || mode === Mode.ToCar) {
+        // Inside the lot, off the walking grid: a straight walk at free speed.
+        walkedSomewhere = true;
+        if (this.straightOffGrid(i, a.tx[i] as number, a.ty[i] as number, v0)) {
+          if (mode === Mode.ExitCar) this.enterOnFoot(i);
+          else {
+            const car = a.car[i] as number;
+            a.mode[i] = Mode.Done;
+            this.setState(i, AgentState.Driving);
+            (this.world as VehicleWorld).board(car, this.sim.now);
+          }
+        }
+      } else if (mode === Mode.ToHome || mode === Mode.ToLot) {
+        const field = mode === Mode.ToHome ? (this.homeFields[a.source[i] as number] as FlowField) : (this.lotFields[(this.world as VehicleWorld).lotOfCar(a.car[i] as number)] as FlowField);
+        const factor = dens.speedFactor[dens.cellAt(x0, y0)] as number;
+        if (this.follow(i, field, v0 * factor)) walkedSomewhere = true;
+        if (field.distanceAt(grid.cellAt(a.x[i] as number, a.y[i] as number)) === 0) {
+          if (mode === Mode.ToHome) this.departed(i);
+          else this.toCar(i);
+        }
       } else {
         this.still(i);
       }
     }
     if (walkedSomewhere) this.lastProgress = this.sim.now;
+    if (this.crossingWait) this.countOnCrossings();
+  }
+
+  /** Marks the crossings with a pedestrian on them (cars stop for them in the vehicle tick). */
+  private countOnCrossings(): void {
+    const a = this.agents;
+    const w = this.world as VehicleWorld;
+    w.pedOnCrossing.fill(0);
+    for (let k = 0; k < this.activeCount; k++) {
+      const i = this.active[k] as number;
+      const st = a.state[i] as number;
+      const mode = a.mode[i] as number;
+      if ((st !== AgentState.Walking && st !== AgentState.Queuing) || mode === Mode.ExitCar || mode === Mode.ToCar) continue;
+      for (let c = 0; c < w.crossings.length; c++) {
+        const cr = w.crossings[c] as { ax: number; ay: number; bx: number; by: number; half: number };
+        if (segmentDistance(a.x[i] as number, a.y[i] as number, cr.ax, cr.ay, cr.bx, cr.by) <= cr.half) w.pedOnCrossing[c] = 1;
+      }
+    }
+  }
+
+  /** Straight move ignoring the walking grid (inside a parking lot); true once the target is reached. */
+  private straightOffGrid(i: number, tx: number, ty: number, speed: number): boolean {
+    const a = this.agents;
+    const x = a.x[i] as number;
+    const y = a.y[i] as number;
+    const dx = tx - x;
+    const dy = ty - y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const step = speed * TICK_SECONDS;
+    const nx = step >= len ? tx : x + (dx * step) / len;
+    const ny = step >= len ? ty : y + (dy * step) / len;
+    a.vx[i] = (nx - x) / TICK_SECONDS;
+    a.vy[i] = (ny - y) / TICK_SECONDS;
+    a.x[i] = nx;
+    a.y[i] = ny;
+    return step >= len;
   }
 
   private still(i: number): void {
@@ -1023,6 +1511,7 @@ class PedestrianRun implements Run {
   private tryMove(i: number, nx: number, ny: number): boolean {
     if (!this.model.grid.isWalkableAt(nx, ny)) return false;
     const a = this.agents;
+    if (this.crossingWait && this.waitsAtCrossing(a.x[i] as number, a.y[i] as number, nx, ny)) return false;
     a.vx[i] = (nx - (a.x[i] as number)) / TICK_SECONDS;
     a.vy[i] = (ny - (a.y[i] as number)) / TICK_SECONDS;
     a.x[i] = nx;
@@ -1091,7 +1580,8 @@ class PedestrianRun implements Run {
     for (let k = 0; k < this.activeCount; k++) {
       const i = this.active[k] as number;
       const s = a.state[i] as number;
-      if (s === AgentState.Walking || s === AgentState.Queuing || s === AgentState.InService) g.add(a.x[i] as number, a.y[i] as number);
+      // People walking inside a parking lot are off the walking grid and not counted.
+      if ((s === AgentState.Walking || s === AgentState.Queuing || s === AgentState.InService) && a.mode[i] !== Mode.ExitCar && a.mode[i] !== Mode.ToCar) g.add(a.x[i] as number, a.y[i] as number);
     }
     g.finish();
   }
@@ -1163,9 +1653,13 @@ class PedestrianRun implements Run {
     });
     const elements = this.model.elements.map((el) => this.elementReport(el));
 
-    // Agents that have arrived, in arrival order.
+    // Agents that have arrived, in arrival order (people out of cars arrive when they get out).
     const arrived: number[] = [];
     for (let k = 0; k < this.nextArrival; k++) arrived.push(this.order[k] as number);
+    if (this.released.length > 0) {
+      for (const i of this.released) arrived.push(i);
+      arrived.sort((x, y) => (a.arrivalTime[x] as number) - (a.arrivalTime[y] as number) || x - y);
+    }
     const allWaits: number[] = [];
     let waitSum = 0;
     for (const i of arrived) {
@@ -1240,7 +1734,83 @@ class PedestrianRun implements Run {
         mean: Array.from(this.densitySum, (v) => v / dt),
         max: Array.from(this.densityMax),
       },
+      departures: this.departureMetrics(),
+      parking: this.parkingMetrics(),
       parameters: this.parameters,
+    };
+  }
+
+  private departureMetrics(): DepartureMetrics | null {
+    if (!this.departuresOn) return null;
+    const scenarioTime = (t: number) => (Number.isNaN(t) ? null : t + this.timeOffset);
+    return {
+      departedPeople: this.counts[AgentState.Departed] as number,
+      departedCars: this.world === null ? 0 : (this.world.counts[AgentState.Departed] as number),
+      firstDepartureAt: scenarioTime(this.firstDepartureAt),
+      lastDepartureAt: scenarioTime(this.lastDepartureAt),
+    };
+  }
+
+  /** Spec 4.5 Parking, from the vehicle world (times converted to scenario time). */
+  private parkingMetrics(): ParkingMetrics | null {
+    const w = this.world;
+    if (w === null) return null;
+    const r = w.report();
+    const toScenario = (t: number) => (Number.isNaN(t) ? null : t + this.timeOffset);
+    const eventEnd = this.eventEndAt + this.timeOffset;
+    return {
+      carCount: w.carCount,
+      carCountsByState: Array.from(w.counts),
+      carPeople: this.carPeople,
+      turnedAwayCars: r.turnedAwayCars,
+      divertedCars: r.divertedCars,
+      turnedAwayPeople: this.carTurnedAwayPeople,
+      maxSourceBacklog: r.maxBacklog,
+      lots: w.lots.map((l, li) => {
+        const st = (r.lots[li] as { state: Record<string, number>; occupancy: number[] }).state;
+        const occupancy = (r.lots[li] as { occupancy: number[] }).occupancy;
+        const emptyAt = toScenario(st.emptyAt as number);
+        return {
+          lotId: l.id,
+          stalls: l.stallCount,
+          parked: st.parked as number,
+          maxOccupancy: st.maxOccupancy as number,
+          occupancy,
+          meanSearchTime: (st.parked as number) > 0 ? (st.searchSum as number) / (st.parked as number) : 0,
+          turnedAway: st.turnedAway as number,
+          divertedAway: st.divertedAway as number,
+          divertedIn: st.divertedIn as number,
+          closedAt: toScenario(st.closedAt as number),
+          emptyAt,
+          timeToEmpty: emptyAt === null ? null : emptyAt - eventEnd,
+        };
+      }),
+      barriers: w.groups.map((g, gi) => {
+        const q = r.queues[gi] as Record<string, number>;
+        return {
+          barrierId: g.id,
+          kind: g.kind,
+          lotId: g.lot >= 0 ? (w.lots[g.lot] as { id: string }).id : null,
+          maxQueueCars: q.maxCars as number,
+          maxQueueMetres: q.maxMetres as number,
+          maxQueueAt: toScenario(q.maxAt as number),
+          meanQueueMetres: (q.lastAt as number) > (q.firstAt as number) ? ((q.sumAtLast as number) - (q.sumAtFirst as number)) / ((q.lastAt as number) - (q.firstAt as number)) : 0,
+          reachedPublicRoadAt: toScenario(q.reachedAt as number),
+        };
+      }),
+      barrierLanes: r.laneGroup.map((gi, k) => {
+        const g = w.groups[gi] as { id: string; kind: "entry" | "exit" };
+        const laneId = this.pedLaneCount + k;
+        return {
+          laneId,
+          barrierId: g.id,
+          kind: g.kind,
+          laneIndex: r.laneIndexInGroup[k] as number,
+          metrics: this.bank.metrics(laneId),
+          throughput: [...(r.laneThroughput[k] as number[])],
+          queueLength: [...(r.laneQueueSeries[k] as number[])],
+        };
+      }),
     };
   }
 
@@ -1334,8 +1904,18 @@ class PedestrianRun implements Run {
    *     peakUtilisationAt, below85At;
    *   peakHour start, end, arrivals, p95Wait; meanWait, p95Wait; shareInside time, share;
    *   stillOutsideAtStart, arrivedButOutsideAtStart, notYetArrivedAtStart;
-   *   density cols, rows, cellSize, every mean value, every max value.
-   * The parameters are not hashed: they are inputs, stored alongside.
+   *   density cols, rows, cellSize, every mean value, every max value;
+   *   then, only if departures is not null: departedPeople, departedCars, firstDepartureAt,
+   *     lastDepartureAt;
+   *   then, only if parking is not null: carCount, carCountsByState[0..9], carPeople,
+   *     turnedAwayCars, divertedCars, turnedAwayPeople, maxSourceBacklog; for each lot in venue
+   *     order: stalls, parked, maxOccupancy, occupancy.length and its values, meanSearchTime,
+   *     turnedAway, divertedAway, divertedIn, closedAt, emptyAt, timeToEmpty; for each barrier in
+   *     venue order: maxQueueCars, maxQueueMetres, maxQueueAt, meanQueueMetres, reachedPublicRoadAt;
+   *     for each barrier lane in lane id order: laneIndex, the 15 LaneMetrics values (as for
+   *     pedestrian lanes), throughput.length and its values, queueLength.length and its values.
+   * A run without cars and without departures therefore hashes exactly the numbers it did before
+   * Phase 3. The parameters are not hashed: they are inputs, stored alongside.
    */
   metricsHash(): string {
     return hashMetrics(this.metrics());
@@ -1371,6 +1951,10 @@ class PedestrianRun implements Run {
         this.isDone ? 1 : 0,
         this.isDrained ? 1 : 0,
         this.isDeadlock ? 1 : 0,
+        this.depPtr,
+        this.firstDepartureAt,
+        this.lastDepartureAt,
+        this.carTurnedAwayPeople,
       ]),
       counts: this.counts.slice(),
       laneFailed: this.laneFailed.slice(),
@@ -1391,6 +1975,8 @@ class PedestrianRun implements Run {
       demand: packSeries(this.demand),
       densitySum: this.densitySum.slice(),
       densityMax: this.densityMax.slice(),
+      released: Int32Array.from(this.released),
+      vehicles: this.world === null ? null : this.world.save(),
     };
   }
 
@@ -1414,6 +2000,16 @@ class PedestrianRun implements Run {
     this.isDone = sc[9] === 1;
     this.isDrained = sc[10] === 1;
     this.isDeadlock = sc[11] === 1;
+    this.depPtr = sc[12] as number;
+    this.firstDepartureAt = sc[13] as number;
+    this.lastDepartureAt = sc[14] as number;
+    this.carTurnedAwayPeople = sc[15] as number;
+    this.released.length = 0;
+    for (const i of cp.released) this.released.push(i);
+    if (this.world !== null) {
+      if (cp.vehicles === null) throw new RangeError("The checkpoint has no vehicle state");
+      this.world.restore(cp.vehicles);
+    }
     this.counts.set(cp.counts);
     this.laneFailed.set(cp.laneFailed);
     for (const name of AGENT_ARRAYS) {
@@ -1455,7 +2051,7 @@ export interface RunCheckpoint {
   readonly laneCount: number;
   /** Engine time of the checkpoint (seconds from the start of the run). */
   readonly time: number;
-  /** ticks, now, nextSeq, nextArrival, gatesAreOpen, pendingActions, densityTime, lastProgress, unreachable, done, drained, deadlock. */
+  /** ticks, now, nextSeq, nextArrival, gatesAreOpen, pendingActions, densityTime, lastProgress, unreachable, done, drained, deadlock, depPtr, firstDepartureAt, lastDepartureAt, carTurnedAwayPeople. */
   readonly scalars: Float64Array;
   readonly counts: Int32Array;
   readonly laneFailed: Uint8Array;
@@ -1472,6 +2068,10 @@ export interface RunCheckpoint {
   readonly demand: PackedSeries;
   readonly densitySum: Float64Array;
   readonly densityMax: Float64Array;
+  /** People who got out of cars, in order. */
+  readonly released: Int32Array;
+  /** The vehicle world's state, null for a run without cars. */
+  readonly vehicles: VehicleState | null;
 }
 
 /** Lists of numbers concatenated: list k is data[offsets[k] .. offsets[k + 1]). */
@@ -1569,7 +2169,36 @@ export function hashMetrics(m: RunMetrics): string {
   h.add(m.meanWait).add(m.p95Wait).add(m.shareInside.time).add(m.shareInside.share);
   h.add(nullToNaN(m.stillOutsideAtStart)).add(nullToNaN(m.arrivedButOutsideAtStart)).add(nullToNaN(m.notYetArrivedAtStart));
   h.add(m.density.cols).add(m.density.rows).add(m.density.cellSize).addAll(m.density.mean).addAll(m.density.max);
+  const d = m.departures;
+  if (d !== null) h.add(d.departedPeople).add(d.departedCars).add(nullToNaN(d.firstDepartureAt)).add(nullToNaN(d.lastDepartureAt));
+  const p = m.parking;
+  if (p !== null) {
+    h.add(p.carCount).addAll(p.carCountsByState).add(p.carPeople).add(p.turnedAwayCars).add(p.divertedCars).add(p.turnedAwayPeople).add(p.maxSourceBacklog);
+    for (const l of p.lots) {
+      h.add(l.stalls).add(l.parked).add(l.maxOccupancy).add(l.occupancy.length).addAll(l.occupancy).add(l.meanSearchTime);
+      h.add(l.turnedAway).add(l.divertedAway).add(l.divertedIn).add(nullToNaN(l.closedAt)).add(nullToNaN(l.emptyAt)).add(nullToNaN(l.timeToEmpty));
+    }
+    for (const b of p.barriers) h.add(b.maxQueueCars).add(b.maxQueueMetres).add(nullToNaN(b.maxQueueAt)).add(b.meanQueueMetres).add(nullToNaN(b.reachedPublicRoadAt));
+    for (const l of p.barrierLanes) {
+      const x = l.metrics;
+      h.add(l.laneIndex);
+      h.add(x.arrivals).add(x.started).add(x.served).add(x.windowStart).add(x.windowEnd).add(x.meanWait).add(x.p95Wait).add(x.maxWait);
+      h.add(x.meanQueue).add(x.maxQueue).add(x.arrivalRate).add(x.utilisation).add(x.failedTime).add(x.queuedAtWindowEnd).add(x.littleLawError);
+      h.add(l.throughput.length).addAll(l.throughput).add(l.queueLength.length).addAll(l.queueLength);
+    }
+  }
   return h.digest();
+}
+
+/** Distance from (px, py) to the segment a–b. */
+function segmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.min(1, Math.max(0, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+  const x = ax + dx * t - px;
+  const y = ay + dy * t - py;
+  return Math.sqrt(x * x + y * y);
 }
 
 /** Creates a pedestrian run of `scenario` on `venue`. All work that does not change over time (grid, flow fields, personal draws) happens here. */

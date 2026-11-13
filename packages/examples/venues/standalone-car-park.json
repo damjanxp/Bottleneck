@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "id": "standalone-car-park",
+  "name": "Stand-alone car park",
+  "description": "A 320-stall surface car park next to an event hall, drawn by hand (not a real place). Two entries from the main road, one exit road with a two-lane exit barrier, pay machines on the walk between the hall and the car park, and a zebra crossing over the exit road.",
+  "attribution": "Hand-made example",
+  "walkableAreas": [
+    {
+      "id": "plaza",
+      "name": "Plaza between car park and hall",
+      "polygon": {
+        "outer": [
+          { "x": 0, "y": 70 },
+          { "x": 130, "y": 70 },
+          { "x": 130, "y": 140 },
+          { "x": 0, "y": 140 }
+        ]
+      }
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "exit-road-west",
+      "name": "Exit road (no walking)",
+      "polygon": {
+        "outer": [
+          { "x": 0, "y": 77 },
+          { "x": 57, "y": 77 },
+          { "x": 57, "y": 83 },
+          { "x": 0, "y": 83 }
+        ]
+      }
+    },
+    {
+      "id": "exit-road-east",
+      "name": "Exit road (no walking)",
+      "polygon": {
+        "outer": [
+          { "x": 63, "y": 77 },
+          { "x": 130, "y": 77 },
+          { "x": 130, "y": 83 },
+          { "x": 63, "y": 83 }
+        ]
+      }
+    }
+  ],
+  "sources": [],
+  "screeningStages": [],
+  "gateGroups": [],
+  "destinations": [
+    {
+      "id": "hall",
+      "name": "Event hall entrance",
+      "area": {
+        "outer": [
+          { "x": 20, "y": 130 },
+          { "x": 110, "y": 130 },
+          { "x": 110, "y": 140 },
+          { "x": 20, "y": 140 }
+        ]
+      }
+    }
+  ],
+  "roads": [
+    {
+      "id": "main-road",
+      "name": "Main road",
+      "points": [
+        { "x": -30, "y": -100 },
+        { "x": -30, "y": 200 }
+      ],
+      "direction": "twoWay",
+      "laneCount": 1,
+      "freeSpeed": 50,
+      "publicRoad": true
+    },
+    {
+      "id": "entry-north",
+      "name": "North entry road",
+      "points": [
+        { "x": -30, "y": 10 },
+        { "x": 8, "y": 10 }
+      ],
+      "direction": "oneWay",
+      "laneCount": 1
+    },
+    {
+      "id": "entry-south",
+      "name": "South entry road",
+      "points": [
+        { "x": -30, "y": 58 },
+        { "x": 8, "y": 58 }
+      ],
+      "direction": "oneWay",
+      "laneCount": 1
+    },
+    {
+      "id": "exit-road",
+      "name": "Exit road",
+      "points": [
+        { "x": 122, "y": 58 },
+        { "x": 122, "y": 80 },
+        { "x": -30, "y": 80 }
+      ],
+      "direction": "oneWay",
+      "laneCount": 1
+    }
+  ],
+  "vehicleSources": [
+    { "id": "from-north", "name": "Main road from the north", "position": { "x": -30, "y": -95 }, "share": 1 },
+    { "id": "from-south", "name": "Main road from the south", "position": { "x": -30, "y": 195 }, "share": 1 }
+  ],
+  "vehicleBarriers": [
+    { "id": "entry-north-barrier", "name": "North entry barrier", "roadId": "entry-north", "position": { "x": 0, "y": 10 }, "kind": "entry", "laneCount": 1, "serviceType": "ticket" },
+    { "id": "entry-south-barrier", "name": "South entry barrier", "roadId": "entry-south", "position": { "x": 0, "y": 58 }, "kind": "entry", "laneCount": 1, "serviceType": "ticket" },
+    { "id": "exit-barrier", "name": "Exit barrier", "roadId": "exit-road", "position": { "x": 110, "y": 80 }, "kind": "exit", "laneCount": 2, "serviceType": "ticket" }
+  ],
+  "parkingLots": [
+    {
+      "id": "car-park",
+      "name": "Car park",
+      "outline": {
+        "outer": [
+          { "x": 0, "y": 0 },
+          { "x": 130, "y": 0 },
+          { "x": 130, "y": 68 },
+          { "x": 0, "y": 68 }
+        ]
+      },
+      "stallRows": [
+        { "a": { "x": 14, "y": 7 }, "b": { "x": 114, "y": 7 }, "count": 40, "side": "left" },
+        { "a": { "x": 14, "y": 13 }, "b": { "x": 114, "y": 13 }, "count": 40, "side": "right" },
+        { "a": { "x": 14, "y": 23 }, "b": { "x": 114, "y": 23 }, "count": 40, "side": "left" },
+        { "a": { "x": 14, "y": 29 }, "b": { "x": 114, "y": 29 }, "count": 40, "side": "right" },
+        { "a": { "x": 14, "y": 39 }, "b": { "x": 114, "y": 39 }, "count": 40, "side": "left" },
+        { "a": { "x": 14, "y": 45 }, "b": { "x": 114, "y": 45 }, "count": 40, "side": "right" },
+        { "a": { "x": 14, "y": 55 }, "b": { "x": 114, "y": 55 }, "count": 40, "side": "left" },
+        { "a": { "x": 14, "y": 61 }, "b": { "x": 114, "y": 61 }, "count": 40, "side": "right" }
+      ],
+      "aisles": [
+        {
+          "id": "aisle-1",
+          "points": [
+            { "x": 8, "y": 10 },
+            { "x": 122, "y": 10 }
+          ]
+        },
+        {
+          "id": "aisle-2",
+          "points": [
+            { "x": 8, "y": 26 },
+            { "x": 122, "y": 26 }
+          ]
+        },
+        {
+          "id": "aisle-3",
+          "points": [
+            { "x": 8, "y": 42 },
+            { "x": 122, "y": 42 }
+          ]
+        },
+        {
+          "id": "aisle-4",
+          "points": [
+            { "x": 8, "y": 58 },
+            { "x": 122, "y": 58 }
+          ]
+        },
+        {
+          "id": "aisle-west",
+          "points": [
+            { "x": 8, "y": 10 },
+            { "x": 8, "y": 58 }
+          ]
+        },
+        {
+          "id": "aisle-east",
+          "points": [
+            { "x": 122, "y": 10 },
+            { "x": 122, "y": 58 }
+          ]
+        }
+      ],
+      "entryBarrierIds": ["entry-north-barrier", "entry-south-barrier"],
+      "exitBarrierIds": ["exit-barrier"],
+      "walkingExit": { "x": 60, "y": 70 },
+      "payStation": { "id": "pay-machines", "name": "Pay machines", "line": { "a": { "x": 80, "y": 105 }, "b": { "x": 40, "y": 105 } }, "laneCount": 4, "queueLength": 12 },
+      "stallChoice": "nearestWalkingExit",
+      "overflow": { "rule": "leave" },
+      "paymentMode": "payStation"
+    }
+  ],
+  "crossings": [{ "id": "zebra", "name": "Zebra crossing over the exit road", "a": { "x": 60, "y": 78 }, "b": { "x": 60, "y": 82 }, "width": 4 }]
+}
