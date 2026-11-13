@@ -23,27 +23,27 @@ _Last updated: 2026-11-13_
 
 | | |
 |---|---|
-| **Current phase** | Phase 3: vehicles, parking and departures, **in progress** on the `phase-3` branch: the engine, the schema and the examples are built and tested; the web view of cars and parking is still being built (see [section 6](#phase-3-vehicles-parking-and-departures)). Phases 0 and 1 are merged; Phase 2 is complete on its branch and its merge to `main` is still pending. |
+| **Current phase** | Phase 3: vehicles, parking and departures, **complete and merged into `main` locally** (engine, schema, examples and web view; see [section 6](#phase-3-vehicles-parking-and-departures)). Phases 0, 1 and 2 are merged into `main` and were pushed to GitHub on 2026-11-12. |
 | **Next phase** | Phase 4: .NET backend and jobs |
-| **Git state** | Phase 3 commits are **local only, not pushed**: the owner pushes together with Claude. |
+| **Git state** | Phase 3 commits are **local only, not pushed** (`main` is ahead of `origin/main`): the owner pushes together with Claude. Until then GitHub CI and Vercel have not run on Phase 3; the same checks were run locally (`npm run check`: 263 tests; `npm run test:e2e`: 6 passed, 1 skipped). |
 | **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys |
 | **CI** | GitHub Actions: schema check, lint, typecheck, unit and validation tests, build on every push; a second job runs the Playwright browser tests (Chromium) |
 | **How the work is done** | Work is orchestrated with subagents: the main agent plans and reviews, and subagents do focused pieces (code, tests, docs). Everything lands on a `phase-N` branch and passes `npm run check` before merging. |
 
-**What exists after Phase 2** (on the `phase-2` branch, not yet merged to `main`):
+**What exists after Phase 2** (merged to `main`):
 - **Pedestrian engine, examples, simulation view and Playwright tests** from Phase 1 (decisions D-014 to D-031).
 - **Scenario library and editor** in the browser, validated against the JSON Schema (D-032, D-033); interactive lane failures (D-035).
 - **Comparison and batches** in background workers with common random numbers and paired confidence intervals (D-034); `@bottleneck/analysis` (statistics and scan-log fitting).
 - **Scan logs:** the engine's service log, CSV export, import, fit and apply (D-037 to D-039).
 - **README with a GIF** (`docs/media/demo.gif`, `docs/media/screenshot.png`), recorded by `apps/web/e2e/record-demo.spec.ts` (skipped unless `RECORD_DEMO=1`).
 
-**What exists in Phase 3** (on the `phase-3` branch, not merged):
+**What exists after Phase 3** (merged to `main` locally, not pushed):
 - **Schema:** roads, vehicle sources, vehicle barriers, parking lots and crossings in the venue; car parameters, departures and `lotClose` in the scenario (D-040).
 - **Engine:** a road graph with routing, car-following, barriers on the shared lane core, parking with reservations, overflow rules, departures with an exit rush, and the parking metrics (D-041 to D-051).
 - **Examples:** a stand-alone 320-stall car park (pay machines, or pay at the barrier, or pay at the barrier with 3 exit lanes) and car parks at Belgrade Fair (fair day with cars, a car park that closes, a concert with cars and departures, paying at the machines or at the barrier), with qualitative tests (D-052).
-- **Pending:** the web view (cars on the map, parking panels, departure curve in the scenario editor) is being built separately; it is not part of this status yet.
+- **Web view:** cars, roads, lots, stalls, barriers, crossings and the public-road edge on the map; parking headline card, lot and barrier tables with charts; "Jump to departures" and "Close lot now"; car fields, departure curve, barrier and lot overrides in the scenario editor; parking rows in the comparison; a Playwright test of the car park example (D-053).
 
-**Remaining before Phase 2 is closed:** the owner's review of the README and GIF, then the merge of `phase-2` into `main`. Phase 1's two [human] checks (see [section 4](#phase-1-pedestrian-simulation-on-a-built-in-venue)) are also still open.
+**Still open:** the owner's [human] checks (below), and pushing Phase 3 to GitHub together with the owner.
 
 ### What the owner needs to do now
 
@@ -429,6 +429,20 @@ Each record has four short parts: context, decision, alternatives, consequences.
 - **Alternatives:** Changing the existing scenarios to use cars (would change asserted outcomes); a separate venue for the car examples (the spec wants the car parks at the Fair).
 - **Consequences:** The fair day and the concert are now venues with cars; whether to show them is the web view's choice (a scenario without a car share looks as before).
 
+### D-053 The web view of cars and parking
+- **Context:** Phase 3's engine produces cars, lots, barriers and departures; the browser must show them without slowing the pedestrian view, and within the strict CSP. The frontend will be redesigned later, so the aim is clear and working, not polished.
+- **Decision:**
+  - **Data path:** the worker sends people and cars as a **pair** of Float32Array snapshots (`{people, cars}`), double-buffered; if no pair is free, the snapshot is dropped, never queued (D-029 now covers the pair). A venue without cars sends a zero-length car buffer, which is copied instead of transferred. The load message adds `vehicleCount`, `vehicleLayout` and `departurePeakStart`; stats add car counts and live barrier and lot states.
+  - **Car markers:** four styles that differ in **shape as well as colour**: driving (arrow nose), standing (a driving car below 0.3 m/s; square front with a pause mark), parked (grey), diverted (arrow with a stripe). Pending, Departed and TurnedAway cars are not drawn; people inside a car are not drawn either. A stall shows as taken when a parked car stands on it (the engine has no per-stall state).
+  - **Phases on the clock:** "Departures" starts at the first point of the departure curve that has weight; "Jump to departures" seeks to the busiest 15 minutes of that curve.
+  - **"Close lot now"** records a `lotClose` timed event in the working copy and replays exactly up to now, like the interactive lane failures (D-035).
+  - **Headlines:** time until empty is that of the slowest lot that had cars. On a venue without gates or screening (the stand-alone car park), the pedestrian headlines and comparison rows are hidden, because "650 people still outside" would be meaningless there.
+  - **Comparison:** all car measures are lower-is-better; yes/no measures ("reached the public road") show the share of seeds.
+  - **Editor:** a barrier's misread % is written as the override `scanFailureRate`; every new editor field produces schema-valid scenarios.
+  - **Scan logs:** the export leaves out barrier lanes (`scanLogFromRun` uses only `run.lanes`); pay-station services appear as `scan_ok` rows.
+- **Alternatives:** One combined snapshot array (would change the people layout the existing code relies on); drawing every stall's state (needs engine support for little gain before the redesign).
+- **Consequences:** Known gaps, left for the redesign or later: with `carShare` 0 a venue's roads and lots are not drawn (the engine's vehicle layout is null then); the live barrier queue in metres comes from the metrics about once a second; barriers have no failed state; roads have no lane dividers; pay stations have no rows in the editor's element table; the comparison does not overlay lot occupancy across scenarios; the "+1 lane" button also appears for pay machines.
+
 ---
 
 ## 3. Review notes triage
@@ -520,7 +534,7 @@ Every check from spec section 9, sorted into the phase where the work actually h
 - [x] [test] Checkpoints restore bit-identically with vehicles, translating the venue gives a bit-identical hash (`vehicles.test.ts`, "determinism with cars")
 - [x] [test] Belgrade Fair with car parks: conservation, no unreachable people, no deadlock, drained, cars parked, a visible exit queue after the concert, time to empty reported, pay at the machines against pay at the barrier (`exampleRuns.test.ts`)
 - [ ] [human] **The performance target with vehicles is measured on the reference machine** (10,000 pedestrians and 2,000 cars). Our own numbers (Node, development machine): tick mean 2.07 ms, p95 5.52 ms, of which the vehicle step p95 is about 0.4 ms (section 6). The frame time in the browser is the part we have not seen, like the Phase 1 item above.
-- [ ] Web items, **pending** (another agent is building them): cars drawn on the map, parking and barrier panels, the departure curve and car parameters in the scenario editor, the example picker showing the car-park examples, a Playwright check of the car view
+- [x] [test] Web view of cars and parking: the car park example loads, cars drive and park, "Jump to departures" shows cars leaving, and after running to the end the time until empty and the longest exit queue equal a Node run; charts open; no console or CSP errors (`apps/web/e2e/parking.spec.ts`, D-053)
 
 ### Phase 4: .NET backend and jobs
 - [ ] [test] Integration tests (Testcontainers): a missing or wrong edit key is rejected; rotating the key invalidates the old one; concurrent updates are detected
@@ -676,11 +690,11 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
 - **3a. Schema:** roads, vehicle sources, barriers, lots and crossings; scenario car parameters, departures and `lotClose` (D-040).
 - **3b. Engine:** road graph and routing, car-following, barriers on the shared lane core, parking with reservations, overflow, counting of people and cars, departures (D-041 to D-048); metrics (D-051).
 - **3c. Examples:** a stand-alone car park (three scenarios) and the Belgrade Fair car parks (four scenarios) (D-052).
-- **3d. Web:** cars on the map, parking and departure views in the editor. Built separately.
+- **3d. Web:** cars on the map, parking panels, departure and car fields in the editor, parking rows in the comparison (D-053).
 - *Risks:* gridlock of cars (mitigated by reservations, D-043); a plate system that is not faster than tickets (it turned out to be a finding, D-049); run time with 2,000 cars (measured below); example outcomes of Phase 1 changing when the venues grew (checked: identical, D-052).
 
-**Summary** (Phase 3 so far; **not merged**, and its commits are local, not pushed: the owner pushes together with Claude)
-- **Built:** 3a to 3c. The web view (3d) is pending.
+**Summary** (2026-11-13; merged into `main` **locally**, not pushed: the owner pushes together with Claude)
+- **Built:** 3a to 3d. Local checks: `npm run check` (263 tests) and `npm run test:e2e` (6 passed, 1 skipped: the demo recorder) pass. The web view was looked at in the browser on the car park example: entry queue backing up onto the main road before the start, cars parking, the exit rush with queues at the pay machines and the exit barrier, and the comparison pay machines → pay at the barrier (49 min 21 s → 1 h 05 min until empty; exit queue 12 m → 192 m). Not looked at: the Belgrade Fair car scenarios in the browser, dark mode, phone width.
 - **Measured** (Node, development machine):
   - **10,515 pedestrians and 2,000 cars:** tick mean **2.07 ms**, p95 **5.52 ms**; the vehicle step on its own has a p95 of about **0.4 ms**. The target is 12 ms.
   - The four Belgrade Fair car scenarios take about 3 s each headless; the whole example suite (all 13 scenarios and the car-park tests) about 26 s.
@@ -705,7 +719,7 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
   What they show: on the fair day, **both car parks cope** and the pedestrians' waits stay normal (peak p95 86 s against 85 s without cars); the long exit queue is only at the north car park, where drivers pay at the barrier. Closing the north car park makes its cars **divert** to the south one (381 cars), the south fills up (480 of 480), and 253 cars are turned away; the south pay machines then have a mean wait of about 588 s. At the **concert**, the lot fills up and 123 cars are turned away; the exit rush builds a queue of up to **256 m (139 cars)** at the exit barrier even with 3 lanes and machines, and **paying at the barrier empties the lot 39 minutes later and almost doubles the mean queue** (133 m against 73 m). Everyone departs or is turned away, nobody is unreachable, no deadlock, Little's law below 1e-9 on every barrier and machine lane.
   The concert's pedestrians still cope with 5 gate lanes (360 people outside at the start, up from 177 without cars, because the car park's walk-ins arrive together in the peak).
 - **Existing examples unchanged:** the six Phase 1 scenarios give the same numbers to the last bit (D-052).
-- **Deferred:** the web view (3d); the [human] performance check in the browser; scenarios with plate recognition at the Belgrade Fair car parks (the stand-alone example and the tests cover plate against ticket).
+- **Deferred:** the [human] performance check in the browser; the web-view gaps listed in D-053; scenarios with plate recognition at the Belgrade Fair car parks (the stand-alone example and the tests cover plate against ticket).
 - **Known limitations:** all vehicle defaults are assumptions (D-040, D-044); cars have no acceleration and no overtaking (D-042); the car parks and roads of the Fair are hand-drawn, not surveyed; occupants walk in a straight line inside a lot (off the walking grid); a lot has no one-way aisle rules beyond the drawn direction of roads.
 
 ---
