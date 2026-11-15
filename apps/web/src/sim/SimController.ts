@@ -3,6 +3,7 @@
  * renderer (returning the previous buffer to the worker), and fans out stats to the UI.
  */
 
+import type { RunMetrics } from "@bottleneck/engine";
 import type { Scenario, Venue } from "@bottleneck/schema";
 import type { LoadedInfo, MetricsSummary, StatsMessage, WorkerRequest, WorkerResponse } from "../workerProtocol.ts";
 
@@ -16,6 +17,14 @@ export interface Snapshot {
   time: number;
   /** performance.now() when it arrived. */
   receivedAt: number;
+}
+
+/** What a run record needs from the worker's current run. */
+export interface RunRecordParts {
+  scenario: Scenario;
+  metrics: RunMetrics;
+  hash: string;
+  done: boolean;
 }
 
 export interface SeekState {
@@ -42,6 +51,7 @@ export class SimController {
   private nextSeekId = 1;
   private nextRequestId = 1;
   private readonly scanLogWaiters = new Map<number, (r: { csv: string; rows: number }) => void>();
+  private readonly recordWaiters = new Map<number, (r: RunRecordParts) => void>();
   private seekState: SeekState | null = null;
   latest: Snapshot | null = null;
   /** Wall time of the last completed seek (ms), for the perf overlay. */
@@ -115,6 +125,13 @@ export class SimController {
     this.send({ type: "scanLog", requestId });
     return p;
   }
+  /** Asks the worker for the current run's full metrics, hash and scenario (for a run record). */
+  runRecord(): Promise<RunRecordParts> {
+    const requestId = this.nextRequestId++;
+    const p = new Promise<RunRecordParts>((resolve) => this.recordWaiters.set(requestId, resolve));
+    this.send({ type: "runRecord", requestId });
+    return p;
+  }
   cancelSeek(): void {
     this.send({ type: "cancelSeek" });
   }
@@ -183,6 +200,12 @@ export class SimController {
         const resolve = this.scanLogWaiters.get(msg.requestId);
         this.scanLogWaiters.delete(msg.requestId);
         resolve?.({ csv: msg.csv, rows: msg.rows });
+        break;
+      }
+      case "runRecord": {
+        const resolve = this.recordWaiters.get(msg.requestId);
+        this.recordWaiters.delete(msg.requestId);
+        resolve?.({ scenario: msg.scenario, metrics: msg.metrics, hash: msg.hash, done: msg.done });
         break;
       }
       case "selfCheckResult":

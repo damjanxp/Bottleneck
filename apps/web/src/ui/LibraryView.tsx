@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
-import { exampleVenues } from "@bottleneck/examples";
 import type { Scenario } from "@bottleneck/schema";
 import type { EditorRequest } from "../App.tsx";
 import type { CompareEntry } from "../compare/plan.ts";
-import { builtInChoices, usedScenarioIds, userChoices, venueById, type ScenarioChoice } from "../library/catalog.ts";
+import { builtInChoices, isRemoteVenue, knownVenues, usedScenarioIds, userChoices, venueById, venueTitle as titleOf, type ScenarioChoice } from "../library/catalog.ts";
+import { useRemoteVenues } from "../library/remoteVenues.ts";
 import { exportFileName, parseScenarioFile, scenarioToJson } from "../library/files.ts";
 import { blankScenario, copyName, duplicateScenario, newScenarioId } from "../library/scenarios.ts";
 import { strings } from "../strings.ts";
@@ -28,6 +28,7 @@ export function LibraryView({ venueId, library, request, onOpen, onCompare }: { 
   const [message, setMessage] = useState<{ ok: boolean; lines: string[] } | null>(null);
   const [lastRequest, setLastRequest] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  useRemoteVenues(); // re-render when a shared venue loads or changes
   const venue = venueById(venueId);
 
   // A draft handed over by another section (a fitted scan log, a comparison entry): open it in the editor.
@@ -39,7 +40,8 @@ export function LibraryView({ venueId, library, request, onOpen, onCompare }: { 
   if (!venue) return null;
   const builtIns = builtInChoices(venueId);
   const mine = userChoices(library.entries, venueId);
-  const venueTitle = exampleVenues.find((v) => v.id === venueId)?.title ?? venueId;
+  const venueTitle = titleOf(venueId);
+  const remote = isRemoteVenue(venueId);
 
   const startEdit = (scenario: Scenario, isNew: boolean) => {
     setMessage(null);
@@ -54,7 +56,7 @@ export function LibraryView({ venueId, library, request, onOpen, onCompare }: { 
     const validate = await loadScenarioValidator();
     const r = parseScenarioFile(
       picked.text,
-      exampleVenues.map((v) => v.venue),
+      knownVenues().map((v) => v.venue),
       validate,
       usedScenarioIds(library.entries),
       () => newScenarioId(),
@@ -180,7 +182,7 @@ export function LibraryView({ venueId, library, request, onOpen, onCompare }: { 
       </section>
       <section className={card} aria-labelledby="builtin-heading">
         <h3 id="builtin-heading" className="text-sm font-semibold text-slate-500">
-          {L.builtIn}
+          {remote ? strings.share.serverScenarios : L.builtIn}
         </h3>
         <ul className="mt-1">{builtIns.map(row)}</ul>
       </section>

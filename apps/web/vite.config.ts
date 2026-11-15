@@ -11,6 +11,12 @@ const vercel = JSON.parse(readFileSync(new URL("../../vercel.json", import.meta.
 };
 const securityHeaders = Object.fromEntries((vercel.headers.find((h) => h.source === "/(.*)")?.headers ?? []).map((h) => [h.key, h.value]));
 
+/** Same-origin routes of the API (Caddy proxies the same paths, deploy/Caddyfile). */
+function apiProxy(target: string) {
+  return { "/api": { target }, "/health": { target } };
+}
+const previewProxy = process.env.API_PROXY ? apiProxy(process.env.API_PROXY) : {};
+
 /**
  * `virtual:scenario-validator`: the JSON Schema validator for scenarios, compiled by Ajv at build
  * time (standalone mode), because the CSP forbids the `new Function` Ajv uses at run time (D-033).
@@ -39,5 +45,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), scenarioValidatorPlugin()],
   worker: { format: "es" },
   build: { target: "es2023", sourcemap: true },
-  preview: { headers: securityHeaders, port: 4173, strictPort: true },
+  // `vite preview` behaves like static hosting (no backend), unless API_PROXY names a running API
+  // (e.g. API_PROXY=http://localhost:5080 npx vite preview --port 4174): then it proxies like Caddy.
+  preview: { headers: securityHeaders, port: 4173, strictPort: true, proxy: previewProxy },
+  // `npm run dev` talks to a locally running API (apps/api, `dotnet run --launch-profile http`) on the
+  // same origin, like Caddy does in production. Without it the app works as on static hosting.
+  server: { proxy: apiProxy("http://localhost:5080") },
 });

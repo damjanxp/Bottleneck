@@ -37,7 +37,9 @@ export type WorkerRequest =
    */
   | { type: "replaceScenario"; scenario: Scenario; time: number; seekId: number }
   /** The scan log of the current run so far (normally a finished run), as CSV. */
-  | { type: "scanLog"; requestId: number };
+  | { type: "scanLog"; requestId: number }
+  /** The current run's full metrics and hash with the scenario it ran (to save a finished run to the server). */
+  | { type: "runRecord"; requestId: number };
 
 /** Lane metrics for the side panel: everything in RunMetrics except the big density arrays. */
 export type MetricsSummary = Omit<RunMetrics, "density" | "parameters">;
@@ -113,7 +115,8 @@ export type WorkerResponse =
   | { type: "metrics"; generation: number; metrics: MetricsSummary }
   | { type: "seekProgress"; generation: number; seekId: number; fraction: number }
   | { type: "seekDone"; generation: number; seekId: number; cancelled: boolean; time: number; durationMs: number }
-  | { type: "scanLog"; requestId: number; csv: string; rows: number };
+  | { type: "scanLog"; requestId: number; csv: string; rows: number }
+  | { type: "runRecord"; requestId: number; scenario: Scenario; metrics: RunMetrics; hash: string; done: boolean };
 
 /** Strips the parts of RunMetrics that the UI does not need every second. */
 export function summariseMetrics(m: RunMetrics): MetricsSummary {

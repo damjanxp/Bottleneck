@@ -370,6 +370,11 @@ scope.onmessage = (event) => {
         post({ type: "scanLog", requestId: msg.requestId, csv: toScanLogCsv(rows), rows: rows.length });
         break;
       }
+      case "runRecord": {
+        if (!run || !scenario) break;
+        post({ type: "runRecord", requestId: msg.requestId, scenario, metrics: run.metrics(), hash: run.metricsHash(), done: run.done });
+        break;
+      }
     }
   } catch (error) {
     playing = false;
