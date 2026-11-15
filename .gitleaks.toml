@@ -1,0 +1,12 @@
+# Secret scan (Fixed rule F14), run by the `secrets` job in .github/workflows/ci.yml over the whole
+# history. Extends gitleaks' default rules; the allowlist only names values that are not secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Metric names and storage-key names that the generic-api-key rule mistakes for keys"
+regexes = [
+  '''peakHourP95Wait''',
+  '''parking/turnedAwayCars''',
+  '''bottleneck\.scenarios\.v1''',
+]

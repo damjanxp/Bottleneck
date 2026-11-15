@@ -106,10 +106,12 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
     }
   };
 
+  // Each control gets aria-label: a control inside a <label> would otherwise be named with its own
+  // value too ("Seeds 20"), which is noisy for screen readers and for tests.
   const numberField = (label: string, value: number, set: (n: number) => void, min: number, max: number, step = 1) => (
     <label className={labelText}>
       {label}
-      <input className={`${input} w-24`} type="number" min={min} max={max} step={step} value={value} onChange={(e) => set(Number(e.target.value))} />
+      <input aria-label={label} className={`${input} w-24`} type="number" min={min} max={max} step={step} value={value} onChange={(e) => set(Number(e.target.value))} />
     </label>
   );
 
@@ -128,7 +130,7 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
             <div className="flex flex-wrap items-end gap-3">
               <label className={labelText}>
                 {J.scenario}
-                <select className={`${input} min-w-[16rem]`} value={option?.key} onChange={(e) => setKey(e.target.value)}>
+                <select aria-label={J.scenario} className={`${input} min-w-[16rem]`} value={option?.key} onChange={(e) => setKey(e.target.value)}>
                   {options.map((o) => (
                     <option key={o.key} value={o.key}>
                       {o.label}
@@ -138,7 +140,7 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
               </label>
               <label className={labelText}>
                 {J.kind}
-                <select className={input} value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
+                <select aria-label={J.kind} className={input} value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
                   <option value="batch">{J.kinds.batch}</option>
                   <option value="laneSweep">{J.kinds.laneSweep}</option>
                   <option value="gateOpeningSweep">{J.kinds.gateOpeningSweep}</option>
@@ -151,6 +153,7 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
                 <label className={labelText}>
                   {J.element}
                   <select
+                    aria-label={J.element}
                     className={input}
                     value={element?.id ?? ""}
                     onChange={(e) => {
@@ -172,7 +175,7 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
                 {numberField(J.targetMinutes, targetMinutes, setTargetMinutes, 0, 600, 0.5)}
                 <label className={labelText}>
                   {J.metric}
-                  <select className={input} value={metric} onChange={(e) => setMetric(e.target.value as SweepMetric)}>
+                  <select aria-label={J.metric} className={input} value={metric} onChange={(e) => setMetric(e.target.value as SweepMetric)}>
                     {SWEEP_METRICS.map((m) => (
                       <option key={m} value={m}>
                         {METRIC_LABEL[m]}
@@ -187,7 +190,7 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
               <div className="flex flex-wrap items-end gap-3">
                 <label className={labelText}>
                   {J.candidates}
-                  <input className={`${input} min-w-[18rem]`} value={candidates} onChange={(e) => setCandidates(e.target.value)} />
+                  <input aria-label={J.candidates} className={`${input} min-w-[18rem]`} value={candidates} onChange={(e) => setCandidates(e.target.value)} />
                 </label>
                 {numberField(J.targetShare, targetShare, setTargetShare, 1, 100)}
                 {numberField(J.seedsPerPoint, seedsPerPoint, setSeedsPerPoint, 1, 30)}
@@ -236,7 +239,7 @@ function RuleField({ rule, setRule }: { rule: SweepRule; setRule: (r: SweepRule)
   return (
     <label className={labelText} title={J.ruleHint}>
       {J.rule}
-      <select className={input} value={rule} onChange={(e) => setRule(e.target.value as SweepRule)}>
+      <select aria-label={J.rule} className={input} value={rule} onChange={(e) => setRule(e.target.value as SweepRule)}>
         <option value="mean">{J.rules.mean}</option>
         <option value="ci">{J.rules.ci}</option>
       </select>

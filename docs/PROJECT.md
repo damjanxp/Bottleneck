@@ -19,15 +19,15 @@ The specification it builds on lives next to it: [spec/Bottleneck-specification-
 
 ## 1. Status
 
-_Last updated: 2026-11-15 (paused at the owner's request)_
+_Last updated: 2026-11-15_
 
 | | |
 |---|---|
-| **Current phase** | Phase 4: .NET backend and jobs, **in progress, paused**. Backend done and green on CI; frontend for it unfinished (see [Phase 4 status](#phase-4-status-paused-2026-11-15)). |
-| **Done** | Phases 0–3 are merged into `main` and pushed; CI is green on `main` and Vercel deploys it. |
-| **Git state** | `main`: Phases 0–3, pushed. `phase-4`: backend, pushed, CI green (all three jobs). `phase-4-frontend-wip`: the unfinished frontend for Phase 4, pushed, **not verified**. |
-| **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys |
-| **CI** | GitHub Actions: schema check, lint, typecheck, unit and validation tests, build on every push; a second job runs the Playwright browser tests (Chromium) |
+| **Current phase** | Phase 4: .NET backend and jobs. **Code done and merged**; only the VPS deployment (4f) is open, and it needs the owner. Next: Phase 5, the venue editor. |
+| **Done** | Phases 0–3 and Phase 4 (4a–4e) are merged into `main` and pushed; Vercel deploys `main` (static, without the server). |
+| **Git state** | `main`: everything, pushed. `phase-4` is merged; `phase-4-frontend-wip` is merged and can be deleted. |
+| **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys. The server part runs only with Docker Compose (`npm run stack:up`) until there is a VPS. |
+| **CI** | GitHub Actions: `check` (schema check, lint, typecheck, unit and validation tests, build), `secrets` (gitleaks over the whole history), `e2e` (Playwright, Chromium) and `api` (.NET tests with Testcontainers and the real sidecar) |
 | **How the work is done** | Work is orchestrated with subagents: the main agent plans and reviews, and subagents do focused pieces (code, tests, docs). Everything lands on a `phase-N` branch and passes `npm run check` before merging. |
 
 **What exists after Phase 2** (merged to `main`):
@@ -37,51 +37,29 @@ _Last updated: 2026-11-15 (paused at the owner's request)_
 - **Scan logs:** the engine's service log, CSV export, import, fit and apply (D-037 to D-039).
 - **README with a GIF** (`docs/media/demo.gif`, `docs/media/screenshot.png`), recorded by `apps/web/e2e/record-demo.spec.ts` (skipped unless `RECORD_DEMO=1`).
 
-**What exists after Phase 3** (merged to `main` locally, not pushed):
+**What exists after Phase 3** (merged to `main`):
 - **Schema:** roads, vehicle sources, vehicle barriers, parking lots and crossings in the venue; car parameters, departures and `lotClose` in the scenario (D-040).
 - **Engine:** a road graph with routing, car-following, barriers on the shared lane core, parking with reservations, overflow rules, departures with an exit rush, and the parking metrics (D-041 to D-051).
-- **Examples:** a stand-alone 320-stall car park (pay machines, or pay at the barrier, or pay at the barrier with 3 exit lanes) and car parks at Belgrade Fair (fair day with cars, a car park that closes, a concert with cars and departures, paying at the machines or at the barrier), with qualitative tests (D-052).
-- **Web view:** cars, roads, lots, stalls, barriers, crossings and the public-road edge on the map; parking headline card, lot and barrier tables with charts; "Jump to departures" and "Close lot now"; car fields, departure curve, barrier and lot overrides in the scenario editor; parking rows in the comparison; a Playwright test of the car park example (D-053).
+- **Examples:** a stand-alone 320-stall car park and car parks at Belgrade Fair, with qualitative tests (D-052).
+- **Web view:** cars, roads, lots, stalls, barriers and crossings on the map; parking cards, tables and charts; "Jump to departures" and "Close lot now"; car fields in the editor; parking rows in the comparison (D-053).
 
-**Still open:** the owner's [human] checks (below).
+**What exists after Phase 4** (merged to `main`):
+- **Engine sidecar** (`apps/sidecar`): a stateless Node service running the engine, one Worker per run (D-054).
+- **API** (`apps/api`): ASP.NET Core on .NET 10 with PostgreSQL; schema validation and migrations (D-055); sharing without logins (D-056); ETag concurrency (D-057); limits, rate limits, retention (D-058); image uploads with SkiaSharp (D-059); OpenAPI with a Scalar reference at `/scalar` (off in the Compose stack unless `API_DOCS_ENABLED=true`).
+- **Job runner:** 20-seed batches, lane sweeps and gate-opening sweeps; survives restarts; cancellable; same hashes as the browser (D-060, D-061).
+- **Deployment:** Docker Compose with Caddy, encrypted backups (D-062); pinned SDK and strict builds (D-063); gitleaks in CI.
+- **Web:** "Share & server" tab when a server is present: publish, edit and share links, scenarios on the server, server jobs with a sweep chart, stored runs (D-064).
 
-### Phase 4 status (paused 2026-11-15)
-
-**Done on `phase-4`** (pushed; GitHub CI green on all three jobs: Node checks, Playwright, and .NET with Testcontainers and the real engine sidecar):
-- **API** (`apps/api`): ASP.NET Core on .NET 10, PostgreSQL via EF Core with jsonb documents; every write validated against `/schema` with a version-migration pipeline; generated C# classes with a CI staleness check; sharing without logins (read token, 256-bit edit key stored as SHA-256, constant-time compare, atomic rotation); ETag/If-Match concurrency; rate limits and quotas; image uploads re-encoded with SkiaSharp after a header size check; Serilog without secrets; OpenAPI + Scalar; health checks; retention cleanup.
-- **Engine sidecar** (`apps/sidecar`): stateless Node service running the engine in worker threads; same metrics hash as the browser.
-- **Job runner:** 20-seed batches (mean ± 95% CI), lane sweeps (smallest lane count meeting a target wait), gate-opening sweeps (latest opening for 95% inside by the start); the database is the queue; jobs survive restarts and can be cancelled; job runs hash identically to browser runs.
-- **Docker Compose stack:** db, sidecar, api and Caddy (same-origin `/api`, headers generated from `vercel.json`, non-root read-only containers, encrypted nightly backups; backup → wipe → restore tested locally). `npm run stack:up` runs it on http://localhost:8080.
-- **Strict builds:** .NET SDK 10.0.404 and analysis level pinned; the API image builds with warnings as errors.
-
-**Not done:**
-1. **Frontend for the backend** (on `phase-4-frontend-wip`, unfinished and unverified): API client, publish/share links (`/v/{id}#k=…` edit, `#t=…` read-only), server jobs panel and sweep chart. Next step: finish it, then lint, unit tests, `test:e2e`, and the full-stack Playwright spec against `npm run stack:up`.
-2. **Local Docker checks:** Docker Desktop crashed on 2026-11-15 ("unable to start"), so the API image build with the pinned SDK and the full-stack browser test have not been run locally since. CI covers the .NET tests.
-3. **Decision records and learning notes for Phase 4** (D-054 onwards). The design notes are collected below so nothing is lost.
-4. **Merge `phase-4` into `main`**, then **deploy to a VPS**, which needs the owner (server, SSH access, domain).
-
-**Phase 4 design notes (to become decision records):**
-- **Sidecar:** framework-free Node `http`; one `worker_threads` Worker per run, so timeouts and client disconnects really stop a run; `CONCURRENCY` (default 1) with an immediate 503 when busy; esbuild bundles engine + schemas into `dist/server.mjs`; Ajv validation; `seed` replaces `scenario.seed`, `overrides` merge per element and field (a lane sweep is one request); RFC 7807 errors (400, 404, 405, 413, 422, 503, 504); never logs bodies.
-- **Validation (.NET):** JsonSchema.Net (full draft-07, matches Ajv); NJsonSchema generates C# for typed reads only (it cannot express pure `oneOf` unions, so those are widened); documents stay JSON/jsonb. Caps: venue 1 MB, scenario 256 KB, client run 256 KB, depth 32, 200,000 values; validate → migrate → validate.
-- **Images:** SkiaSharp instead of ImageSharp (ImageSharp 3.2+ needs a licence key at build time; 3.1.12 has security advisories); own PNG/JPEG header parser checks 4096 px before decoding; 5 MB cap; at most 2 decodes at once.
-- **Concurrency:** an app-managed `Revision` as a strong ETag (not xmin, so activity tracking doesn't break editors' ETags); If-Match required (428 without, 412 on conflict).
-- **Credentials:** venue id 128 bits; read token 256 bits in `X-Read-Token` or `?t=` (query strings are never logged); edit key 256 bits only in `X-Edit-Key`; 404/401/403 semantics; rotation is one conditional UPDATE (one winner).
-- **Status codes:** 409 per-venue count limits, 507 storage quotas and the global venue cap, 413 size caps, 422 schema/version/image errors, 429 with Retry-After (fixed windows per IP; forwarded headers trusted only from the Caddy network).
-- **Retention:** unpinned venues with no activity for 90 days are deleted with their files.
-- **Job runner:** jobs table claimed with `FOR UPDATE SKIP LOCKED`; a Channel only wakes the runner (plus a 30 s poll); Running → Queued at startup and shutdown; finished runs reused on resume via `job_run_index`; a venue snapshot per job; cancel aborts the in-flight HTTP request; work budget (runs × simulated hours) and queue caps checked up front; results from different engine versions never mixed; server batches use the browser's seed derivation; sweeps use common random numbers; "meets the target" defaults to the mean and also reports the CI-based answer (with 2–5 seeds per point the CI rule mostly reflects the seed count).
-- **Cross-language determinism:** a Node-generated fixture of expected hashes (`api:hashes:check` fails if stale) and .NET tests that run the real sidecar and compare.
-- **Compose:** only Caddy publishes ports; `backend` network is internal; all containers non-root with read-only root filesystems and all capabilities dropped; secrets redacted from access logs; RPO 24 h, RTO 1 h target; gpg-encrypted backups with an rclone off-box copy (rclone and public-key gpg not yet tested).
-- **Builds:** `AnalysisLevel` floated with the SDK, so CI's newer SDK raised CA1873; it is now pinned (`10.0-recommended`) and CI and Docker use SDK 10.0.404.
-- **Tests:** default Vitest timeout raised to 30 s (many tests run whole simulations); the sidecar test client uses fresh connections (a pooled keep-alive socket was closed by the in-process server while a synchronous engine run blocked the event loop).
+**Still open:** the VPS deployment (4f) and the owner's [human] checks (below).
 
 ### What the owner needs to do now
 
-1. **Live jam check** (Phase 1 [human]): after the merge, open the Vercel URL, press Play on the concert example and see a queue form within 2 minutes; confirm that the "Engine self-check" line says **✓ Match: bit-identical to Node**. Send me the URL and I will put it in the README (it currently says "link added after deployment check").
+1. **Live jam check** (Phase 1 [human]): open the Vercel URL, press Play on the concert example and see a queue form within 2 minutes; confirm that the "Engine self-check" line says **✓ Match: bit-identical to Node**. Send me the URL and I will put it in the README (it currently says "link added after deployment check").
 2. **`?perf=1` numbers** (Phase 1 [human]): on the machine you consider the reference machine, run with `?perf=1`, 8×, the concert example for about a minute, and send me frame p95, worker tick p95, CPU, browser and agent count.
 3. **Confirm the README and the GIF** (Phase 2 [human]): look at `README.md` on GitHub and at `docs/media/demo.gif`; tell me if anything is unclear or wrong.
-4. **Restart Docker Desktop** (it crashed on 2026-11-15): quit it from the tray and start it again; if it still fails, run `wsl --shutdown` and start it again.
-5. **For deployment (later):** a VPS with Docker (2 vCPU, 4 GB RAM), SSH access, and a domain or subdomain pointed at it.
-6. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026). Everything works on 20.19 for now, but some newer tools, such as Vitest 5, already require 22 or later.
+4. **For the VPS deployment (4f, the second CV milestone):** a VPS with Docker (2 vCPU, 4 GB RAM), SSH access for me, and a domain or subdomain pointed at it; for off-box backups, an rclone remote (for example an S3-compatible bucket) and a gpg public key whose private half only you keep.
+5. **Try the server locally if you like:** `npm run stack:up`, then open http://localhost:8080, pick "Share & server", publish, and run a lane sweep. `npm run stack:down` stops it. Docker Desktop needs about 4 GB free; the 7 `eventpark-*` containers of your other project were stopped (not removed) on 2026-11-15 to free memory, start them again when you need them.
+6. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026).
 
 ---
 
@@ -298,7 +276,8 @@ Each record has four short parts: context, decision, alternatives, consequences.
 
 ### D-033 JSON Schema validation in the browser: Ajv standalone code generated at build time
 - **Context:** Scenarios must be validated against the JSON Schema before saving or importing. Ajv compiles a schema with `new Function`, which the strict CSP (no `unsafe-eval`, D-009) forbids.
-- **Decision:** Ajv's **standalone** mode runs the compilation at build time: a small Vite plugin (`apps/web/vite.config.ts`) serves the virtual module `virtual:scenario-validator`, built by `apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/scenario`. The one runtime helper it needs (`ucs2length`) is inlined, and the build fails if the code still needs `require` or code generation. The app loads it lazily (a 65 kB chunk, 7 kB gzipped) when saving, importing or checking stored entries. On top of the schema, `library/validate.ts` checks what the schema cannot see (element ids, lane numbers against the lane count, sources, timeline order) and turns everything into plain sentences. The editor's own fields are parsed by `library/form.ts` with messages per field.
+- **Decision:** Ajv's **standalone** mode runs the compilation at build time: a small Vite plugin (`apps/web/vite.config.ts`) serves the virtual module `virtual:scenario-validator`, built by `apps/web/src/api/          API client, link and credential handling, job requests and results, polling, run records (pure, tested)
+apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/scenario`. The one runtime helper it needs (`ucs2length`) is inlined, and the build fails if the code still needs `require` or code generation. The app loads it lazily (a 65 kB chunk, 7 kB gzipped) when saving, importing or checking stored entries. On top of the schema, `library/validate.ts` checks what the schema cannot see (element ids, lane numbers against the lane count, sources, timeline order) and turns everything into plain sentences. The editor's own fields are parsed by `library/form.ts` with messages per field.
 - **Tests:** Vitest checks that the generated validator accepts and rejects the same documents as Ajv itself, that every built-in scenario round-trips through the editor form unchanged, and that every kind of editor output is schema-valid (`library.test.ts`).
 - **Alternatives:** Hand-written validation only (drifts from the schema); Ajv at run time with `unsafe-eval` (weakens the CSP); a committed generated file (needs a freshness check; the build-time plugin cannot go stale).
 - **Consequences:** The browser and (from Phase 4) the backend validate against the same schema files. Changing `/schema` changes the validator on the next build with no extra step.
@@ -474,6 +453,87 @@ Each record has four short parts: context, decision, alternatives, consequences.
 - **Alternatives:** One combined snapshot array (would change the people layout the existing code relies on); drawing every stall's state (needs engine support for little gain before the redesign).
 - **Consequences:** Known gaps, left for the redesign or later: with `carShare` 0 a venue's roads and lots are not drawn (the engine's vehicle layout is null then); the live barrier queue in metres comes from the metrics about once a second; barriers have no failed state; roads have no lane dividers; pay stations have no rows in the editor's element table; the comparison does not overlay lot occupancy across scenarios; the "+1 lane" button also appears for pay machines.
 
+### D-054 Backend shape: ASP.NET Core for persistence and orchestration, a Node sidecar for the engine (D2, D7)
+- **Context:** Fixed rule F18 asks for ASP.NET Core on .NET 10 with PostgreSQL. The engine is TypeScript and must give the same metrics hash everywhere (F8). Rewriting it in C# would mean two engines to keep bit-identical.
+- **Decision:** `apps/api` (ASP.NET Core, EF Core, PostgreSQL with jsonb documents) stores venues, scenarios, runs and uploads, enforces sharing and limits, and runs jobs. It never simulates: it calls `apps/sidecar`, a stateless internal Node service (framework-free `http`) that runs the real engine. One `worker_threads` Worker per run, so a timeout or a disconnected client really stops it; `CONCURRENCY` (default 1) with an immediate 503 when busy; esbuild bundles engine and schemas into `dist/server.mjs`; Ajv validates the body; `seed` replaces `scenario.seed` and `overrides` merge per element and field (one request per sweep point); errors are RFC 7807 (400, 404, 405, 413, 422, 503, 504); bodies are never logged.
+- **Alternatives:** Porting the engine to C# (two engines, determinism risk); running Node inside the API process via a JS engine for .NET (another JavaScript engine to prove bit-identical); a message broker between them (the database is enough as a queue, D-060).
+- **Consequences:** The README says what .NET does: orchestration and persistence (review D7). The sidecar is on the internal `backend` network only (D-062).
+
+### D-055 Validating documents on the server
+- **Context:** F21: the backend validates every write against `/schema`, with `schemaVersion` and migrations; review D5 asks for jsonb caps and validation around migrations.
+- **Decision:** JsonSchema.Net (full draft-07, the same answers as Ajv; a test runs every shared fixture through both). NJsonSchema generates C# classes only for typed reads (`npm run api:schema:gen`, `api:schema:check` in CI); it cannot express pure `oneOf` unions, so those are widened, and documents stay JSON/jsonb rather than being round-tripped through the classes. Caps before parsing: venue 1 MB, scenario 256 KB, client-reported run 256 KB, depth 32, 200,000 values. Pipeline: validate → migrate step by step → validate again; a newer version than the server knows is a 422 with a clear message; a gap or duplicate in the migration chain fails at startup.
+- **Alternatives:** Validating with the generated classes (would drop unknown-but-valid shapes); validating only after migrating (a bad old document would be reported against the wrong version).
+- **Consequences:** The C# classes can lag behind the schema only until CI runs; adding a schema version needs a migration step or the API will not start.
+
+### D-056 Sharing without logins: ids, keys and their links (F19, D3)
+- **Context:** Spec section 8: no accounts; a public id, a read token, an edit key whose hash is stored, constant-time comparison, the edit key only in `X-Edit-Key`, links with the secret in the fragment.
+- **Decision:** Venue ids are 128-bit lowercase base32 (26 characters). The read token and the edit key are 256-bit base64url (43 characters). Only SHA-256 of the edit key is stored; comparisons use `CryptographicOperations.FixedTimeEquals`. The read token travels in `X-Read-Token` (or `?t=`, which the API accepts and never logs; the web client never uses it); the edit key only in `X-Edit-Key`. Missing credential → 401, wrong one → 403, unknown venue → 404, and a token of one venue never opens another. Rotation is one conditional `UPDATE … WHERE edit_key_hash = old`, so of two simultaneous rotations exactly one wins. The edit key is shown once at creation and on rotation; it cannot be recovered.
+- **Links:** `/v/{id}#k={editKey}` (edit) and `/v/{id}#t={readToken}` (read-only). On arrival the page moves the secret into `sessionStorage` for that venue (a reload in the same tab still works) and removes the fragment with `history.replaceState`, so it is not left in the history, a screenshot or a copied URL. No cookies anywhere.
+- **Alternatives:** Accounts (out of scope); the edit key in the path or query (ends up in logs and Referer); bcrypt for the key (pointless for a 256-bit random secret, and slow on every request).
+- **Consequences:** Whoever has the edit link owns the venue. Losing it means losing edit access; rotating needs the current key.
+
+### D-057 Concurrent edits: an app-managed revision as a strong ETag
+- **Context:** Two people with the edit link can overwrite each other.
+- **Decision:** Every venue and scenario row has a `Revision` the app increments on each write; GET returns it as a strong ETag, PUT and DELETE need it in `If-Match` (428 without, 412 when it changed). The update is conditional on the revision, so of two simultaneous PUTs with the same ETag exactly one succeeds. The web app offers "reload theirs" or "overwrite with mine" after a 412.
+- **Alternatives:** PostgreSQL's `xmin` (changes on every row update, including the activity timestamp the retention job needs, which would break every editor's ETag); last-write-wins.
+- **Consequences:** Recording activity (D-058) does not touch the revision, which a test checks.
+
+### D-058 Limits, status codes and retention (D1, D4)
+- **Context:** The server is public and has no logins, so it must protect itself.
+- **Decision:**
+  - **Rate limits** (fixed windows per client IP): 600 requests/min overall, 60 writes/min, 10 new venues/hour, 20 uploads per 10 min; 429 with `Retry-After`. The client IP comes from `X-Forwarded-For` only when the request comes from the Caddy network (`ForwardLimit` 1), so it cannot be spoofed from outside.
+  - **Counts and quotas:** 100 scenarios, 50 client-reported runs, 20 uploads (25 MB) per venue; 2,000 venues and 2 GB of uploads in total. Status codes: 409 for per-venue count limits, 507 for storage quotas and the global venue cap, 413 for size caps, 422 for schema, version, image and job validation errors.
+  - **Retention:** a venue that is not pinned and has had no activity for 90 days is deleted with its files (checked every 6 hours, 100 at a time). Reads and writes record activity without changing the ETag.
+  - **Logs:** Serilog, structured; headers and query strings that carry secrets are never logged (a test scans the log output for the keys it used).
+- **Alternatives:** Token buckets per venue (the fixed window per IP is simpler and enough for a portfolio-scale service); keeping everything forever (the disk is finite).
+- **Consequences:** The full-stack browser test publishes one venue per run, well under 10 per hour.
+
+### D-059 Image uploads with SkiaSharp (F20, D5)
+- **Context:** F20: PNG or JPEG by magic bytes, at most 5 MB and 4096 px, re-encoded, stored outside the web root. The review asked to check the ImageSharp licence first.
+- **Decision:** SkiaSharp. ImageSharp 3.2 and later need a licence key at build time, and 3.1.12 has published security advisories. The type comes from the magic bytes, never from the request. A small header parser of our own reads the PNG `IHDR` or the JPEG frame header and refuses anything over 4096 px per side **before** decoding (a "decompression bomb" never reaches the decoder); at most 2 decodes run at once. The image is re-encoded (PNG stays PNG, JPEG at quality 90), which drops all metadata, and is stored under a random name in a volume outside the web root, served with fixed `Content-Type`, `nosniff` and a restrictive CSP.
+- **Alternatives:** ImageSharp 3.1 (advisories), 3.2 (licence), Magick.NET (much larger attack surface).
+- **Consequences:** Only PNG and JPEG; anything else is a 422.
+
+### D-060 The job runner: the database is the queue (D1, D2, E6)
+- **Context:** Batches and sweeps take minutes; they must survive restarts, be cancellable and not let one visitor use the whole machine.
+- **Decision:**
+  - **Queue:** a `jobs` table; the runner claims the oldest queued job with `FOR UPDATE SKIP LOCKED`. A `Channel` only wakes the runner when a job is submitted (plus a 30 s poll), it is not the queue. At startup and shutdown, `Running` jobs go back to `Queued`. Finished runs are kept per job index (`job_run_index`), so a resumed job does not redo them. `(venueId, requestId)` is unique: resubmitting returns the existing job.
+  - **Kinds:** a **batch** (default 20 seeds, at most 100): mean and 95% CI of every headline metric, using the browser's seed derivation, so the server's batch equals the browser's; a **lane sweep** (one gate group, a range of lane counts, 2 to 30 seeds per point): the smallest lane count whose metric meets the target wait; a **gate-opening sweep** (a list of opening times): the latest opening that still gets the target share inside by the start. Sweeps use common random numbers (the same seeds at every point, D-034).
+  - **"Meets the target":** by default the **mean** must meet it; the result also gives the answer by the 95% CI (its upper bound for a wait, its lower bound for a share). With 2 to 5 seeds per point the CI rule mostly reflects the seed count, so it is reported, not used as the headline.
+  - **Limits:** one run at a time; 3 active jobs per venue, 50 overall, 20 stored per venue (409 above); a work budget of 200 runs and 400 simulated hours per job, checked when it is submitted (422); 120 s per run. Creating and cancelling need the edit key, reading needs the read token. Cancelling aborts the run in flight (the HTTP request to the sidecar, and so its Worker).
+  - **Snapshots and versions:** a job copies the venue when it is submitted, so editing the venue later does not change a running job. Every run stores the sidecar's `engineVersion`; results from different engine versions are never combined.
+- **Alternatives:** Hangfire or Quartz (another schema and dashboard for one table's worth of work); RabbitMQ (a broker to operate, D2).
+- **Consequences:** Throughput is one run at a time by design (raise `MaxParallelRuns` and the sidecar's `CONCURRENCY` together on a bigger machine).
+
+### D-061 Cross-language determinism of jobs
+- **Context:** The checklist asks that a job run and a browser run with the same seed give the same metrics hash.
+- **Decision:** A Node-generated fixture (`apps/api/test`, `npm run api:hashes:gen`) holds the expected hashes of chosen scenarios, seeds and overrides, computed with the engine directly; `api:hashes:check` (in `npm test`) fails if it is stale. The .NET tests start the real sidecar in a container (Testcontainers), run jobs through the API and compare each stored run's hash with the fixture. The browser side was already proven equal to Node (D-031). The C# ports of the Student t table, the summary statistics and the seed derivation are tested against `packages/analysis` and the web app.
+- **Alternatives:** Re-running the engine from the .NET tests through Node directly (would not test the sidecar path).
+- **Consequences:** A deliberate engine change needs `api:hashes:gen` as well as the self-check hash.
+
+### D-062 Deployment: Docker Compose behind Caddy, encrypted backups (D6)
+- **Context:** One small VPS (2 vCPU, 4 GB), HTTPS, backups with a stated RPO and RTO.
+- **Decision:** Compose services `db` (PostgreSQL 17), `sidecar`, `api` and `caddy`. Only Caddy publishes ports; the `backend` network is internal. Caddy serves the web build (falling back to `index.html`, so `/v/{id}` links work), proxies `/api` and `/health` on the **same origin** (so the CSP's `connect-src 'self'` holds and CORS is not needed), applies the security headers generated from `vercel.json` (`deploy/gen-headers.mjs`, checked by `npm run stack:check`) and redacts secrets from its access log. Every container runs as non-root with a read-only root filesystem and all capabilities dropped. Backups: a nightly `pg_dump` plus the uploads volume, encrypted with gpg and copied off the machine with rclone; RPO 24 h, RTO target 1 h. `npm run stack:up` runs the stack locally on http://localhost:8080.
+- **Alternatives:** Nginx (Caddy's automatic HTTPS is one line); Kubernetes (far too much for one machine); managed PostgreSQL (costs money, F13 spirit).
+- **Consequences:** Backup → wipe → restore was tested locally; the rclone copy and public-key gpg are not tested until there is a VPS.
+
+### D-063 Strict and reproducible .NET builds; robust tests on a busy machine
+- **Context:** CI's newer .NET SDK raised analyser warning CA1873 that the local SDK did not, because `AnalysisLevel` floated with the SDK. Some simulation tests timed out on a loaded machine; the sidecar test client failed intermittently.
+- **Decision:** `global.json` pins SDK 10.0.404, `AnalysisLevel` is `10.0-recommended`, and the API image builds with warnings as errors; CI and Docker use the same SDK. The default Vitest timeout is 30 s (many tests run whole simulations). The sidecar test client opens a fresh connection per request: a pooled keep-alive socket was being closed by the in-process server while a synchronous engine run blocked its event loop.
+- **Consequences:** Upgrading the SDK is a deliberate change in one file.
+
+### D-064 The web app with a server: detecting the API, publishing, and jobs
+- **Context:** The same build runs on Vercel (no backend) and behind Caddy (with one). The frontend will be redesigned, so the aim is working and clear.
+- **Decision:**
+  - **Detection:** at start the page asks `/health/ready` on its own origin; only a plain-text `Healthy` (not an HTML fallback page) counts. Without it the app looks exactly as before: no "Share & server" section, no errors.
+  - **Client:** `src/api/client.ts`, pure with an injected `fetch`; errors become an `ApiError` with a kind (unauthorized, conflict, rate-limited with `retryAfterSeconds`, invalid with field errors, limit, read-only…). A read-only link refuses writes before sending anything.
+  - **Publish:** "Share & server" publishes the open venue and its saved scenarios, then shows the edit link once (with a warning) and the share link. A shared venue joins the catalogue as "… (shared)", so every section (simulation, comparison, editor) can use it; scenarios saved there go to the server with If-Match, and a 412 offers reload or overwrite (D-057). A read-only link disables every write control.
+  - **Jobs:** the panel builds batch, lane-sweep and gate-opening-sweep requests, polls with backoff (1 s, ×1.5, at most 15 s, starting short again whenever the job moves; a 429 waits `Retry-After`), shows progress, cancels, and draws a sweep chart with the target line. Results say "computed on the server (trusted)".
+  - **Client-reported runs:** a finished browser run can be saved as a run record (`origin: "clientReported"`). The API caps it at 256 KB, so long time series are dropped when needed (and the UI says so); the metrics hash stays that of the full run, so anyone can check it by re-running. Stored runs list their origin, so a client-reported result is never shown as trusted.
+  - **Dev and preview:** `npm run dev` proxies `/api` and `/health` to a local API on port 5080; `vite preview` stays static unless `API_PROXY` is set.
+- **Alternatives:** A separate admin page (more routes for the redesign to undo); WebSockets for job progress (spec 6.4 says polling; one more thing for Caddy and the rate limiter).
+- **Consequences:** On Vercel a `/v/{id}` link returns Vercel's 404, since there is no server there; links are only made by a deployment with the API. Known gaps for the redesign: image uploads have no UI yet (the API supports them; the venue editor of Phase 5 will use them); the shared venue's own document cannot be edited in the browser until the Phase 5 editor.
+
 ---
 
 ## 3. Review notes triage
@@ -505,19 +565,19 @@ What happened to each point in [keep-in-mind.md](spec/keep-in-mind.md). "Adopt" 
 | C4 | Undo: inverse commands vs immutable documents | **Adopt**: undo stores previous document references (cheap with structural sharing), not inverse commands | Phase 5 |
 | C5 | Next.js adds little | **Adopt**: D-002 | done |
 | C6 | Accessibility and mobile | **Adopt**: table alternatives for charts, keyboard-accessible editor tools, `aria-live` headline number, canvas hidden by default below about 768 px | Phase 1 partly done (`aria-live` headline number); table alternatives for charts and the mobile canvas rule still open |
-| D1 | Limit the job runner | **Adopt**: one job at a time, per-venue and global queue caps, work budget (seeds × points × simulated hours), per-run timeout, jobs need the edit key | Phase 4 |
-| D2 | .NET to Node contract | **Adopt**: a stateless internal HTTP sidecar; the database is the real queue (`Channel<T>` only wakes the runner); unique (venueId, requestId); Running→Queued on startup; `engineVersion` stored per result | Phase 4 |
-| D3 | CSP, constant-time compare, atomic key rotation, no cookies | **Adopt**: CSP already in place (D-009); the rest in Phase 4 | Phases 0, 4 |
-| D4 | Rate limits behind Caddy | **Adopt**: forwarded headers configured; concrete limits and global caps written down in Phase 4 | Phase 4 |
-| D5 | Upload pixel caps, jsonb caps, validate around migrations, ImageSharp licence | **Adopt**; the licence is checked before use (fallback: SkiaSharp) | Phase 4 |
-| D6 | Backups RPO/RTO, encryption, include uploads | **Adopt** | Phase 4 |
+| D1 | Limit the job runner | **Adopt**: one job at a time, per-venue and global queue caps, work budget (seeds × points × simulated hours), per-run timeout, jobs need the edit key | **done in Phase 4** (D-060) |
+| D2 | .NET to Node contract | **Adopt**: a stateless internal HTTP sidecar; the database is the real queue (`Channel<T>` only wakes the runner); unique (venueId, requestId); Running→Queued on startup; `engineVersion` stored per result | **done in Phase 4** (D-054, D-060) |
+| D3 | CSP, constant-time compare, atomic key rotation, no cookies | **Adopt**: CSP already in place (D-009); the rest in Phase 4 | **done** (D-009, D-056) |
+| D4 | Rate limits behind Caddy | **Adopt**: forwarded headers configured; concrete limits and global caps written down in Phase 4 | **done in Phase 4** (D-058) |
+| D5 | Upload pixel caps, jsonb caps, validate around migrations, ImageSharp licence | **Adopt**; the licence is checked before use (fallback: SkiaSharp) | **done in Phase 4**: SkiaSharp (D-055, D-059) |
+| D6 | Backups RPO/RTO, encryption, include uploads | **Adopt** | **done in Phase 4** (D-062); off-box copy untested until the VPS |
 | D7 | README: .NET is orchestration and persistence | **Adopt** | Phase 4/6 |
 | E1 | Capacity in people/hour next to peak demand; first time under 85% utilisation | **Adopt** | done in Phase 1 (D-025) |
 | E2 | Turnstile 4 s is slow: card 3 s vs QR 4.5 s, 50/50 | **Adopt** as the new assumed default (mixed distribution) | done in Phase 1 (D-024) |
 | E3 | Arrivals too smooth: groups of 1–5, late tail | **Adopt**: groups choose the same lane; concert preset gets ~20% of arrivals in the last 15 min | done in Phase 1 (D-018; the concert example uses its own curve, D-028) |
 | E4 | Bag-policy field; car share per preset | **Adopt**: bag policy (none / clear bag / full search) sets screening time (Phase 1); car share fair 55%, concert 35%, stadium 30% (Phase 3) | **done**: bag policy in Phase 1 (D-024); car share defaults exported as `CAR_SHARE_DEFAULTS` in Phase 3 (D-046) |
 | E5 | Payment defaults pessimistic | **Adopt**: card/cash mix for pay-at-barrier and pay stations | **done in Phase 3** (D-044, D-049) |
-| E6 | "Latest gate opening for 95% inside" first in comparison | **Adopt** once sweeps exist | Phase 4 |
+| E6 | "Latest gate opening for 95% inside" first in comparison | **Adopt** once sweeps exist | sweep **done in Phase 4** (D-060); putting it first in the comparison view is left for the Phase 6 showcase |
 | E7 | README: replace defaults with measured throughput | **Adopt** | Phase 6 |
 | F1 | Too many documents | **Replaced** by D-001 (one document) | done |
 | F2 | Cut order if time runs out | **Adopt**: Phase 8 → Phase 7 → heatmap and scrubber → jockeying and logit choice → editor extras → VPS backups | always |
@@ -568,11 +628,11 @@ Every check from spec section 9, sorted into the phase where the work actually h
 - [x] [test] Web view of cars and parking: the car park example loads, cars drive and park, "Jump to departures" shows cars leaving, and after running to the end the time until empty and the longest exit queue equal a Node run; charts open; no console or CSP errors (`apps/web/e2e/parking.spec.ts`, D-053)
 
 ### Phase 4: .NET backend and jobs
-- [ ] [test] Integration tests (Testcontainers): a missing or wrong edit key is rejected; rotating the key invalidates the old one; concurrent updates are detected
-- [ ] [test] A 20-seed batch returns mean and 95% CI; a job can be cancelled; a queued job survives an API restart
-- [ ] [test] A lane sweep on the concert example returns the smallest lane count that meets the target wait
-- [ ] [test] A job run and a browser run with the same seed produce the same metrics hash
-- [ ] [test] A wrong file type or oversized image is rejected; exceeding a rate limit returns 429
+- [x] [test] Integration tests (Testcontainers): a missing or wrong edit key is rejected; rotating the key invalidates the old one; concurrent updates are detected (`apps/api/tests/…/SharingTests.cs`: missing and wrong key, rotation, concurrent rotations; `DocumentTests.cs`: concurrent venue updates, simultaneous updates with the same ETag let exactly one through)
+- [x] [test] A 20-seed batch returns mean and 95% CI; a job can be cancelled; a queued job survives an API restart (`Jobs/JobTests.cs`; also: an interrupted running job resumes without redoing finished runs, D-060)
+- [x] [test] A lane sweep on the concert example returns the smallest lane count that meets the target wait (`JobTests.cs`: `concert-3-lanes`, 2 to 5 lanes, 2 seeds per point, peak-hour p95 wait ≤ 10 min → **4 lanes**; a gate-opening sweep on `concert-5-lanes` → latest opening for 90% inside is **60 min before the start**)
+- [x] [test] A job run and a browser run with the same seed produce the same metrics hash (`JobTests.cs` against a Node-generated fixture, `apps/api/test/expected-hashes.test.ts`; browser = Node by D-031; D-061)
+- [x] [test] A wrong file type or oversized image is rejected; exceeding a rate limit returns 429 (`UploadTests.cs`, `OperationsTests.cs`)
 - [ ] [human] The app is live on the VPS over HTTPS; one backup restore has been tested. **Second CV milestone.**
 
 ### Phase 5: Venue editor
@@ -615,14 +675,14 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
 | F11 | Physical rules: walkable areas only; one agent per lane; failed lane serves none | 7.1-4 | [test] | ✅ Phase 1 (`run.test.ts`) |
 | F12 | Little's law within 3% on every lane | 7.1-5 | [test] | ✅ Phase 1 (lane core, fixture run, examples) |
 | F13 | No paid API required; AI draft off by default | 7.1-8 | [test] | Phase 8 |
-| F14 | No secrets in the client or the repository | 7.1-9 | [CI] secret scan + review | Phase 4 adds a scanner |
+| F14 | No secrets in the client or the repository | 7.1-9 | [CI] secret scan + review | ✅ Phase 4: gitleaks over the whole history in CI (`.gitleaks.toml`); the API logs no secrets (D-058) |
 | F15 | UI never freezes; engine off the main thread | 7.2 | [human] + [test] | ✅ engine in a Web Worker (Phase 1); [human] performance check open |
 | F16 | Validation tests (queueing family) and Little's law on every CI run | 7.2 | [CI] | ✅ queueing family and Little's law run in CI (Phase 1) |
-| F17 | Security rules for keys, uploads, rate limits, headers; threat model | 7.2, 8 | [test] | CSP ✅; rest in Phase 4 |
-| F18 | ASP.NET Core on .NET 10; PostgreSQL via EF Core with jsonb documents | 8 | — | Phase 4 |
-| F19 | Sharing without logins: public id, readToken, editKeyHash, 256-bit key, constant-time compare, `X-Edit-Key` header, fragment link | 8 | [test] | Phase 4 |
-| F20 | Uploads: PNG/JPEG by magic bytes, ≤ 5 MB, ≤ 4096 px, re-encoded, stored outside the web root | 8 | [test] | Phase 4 |
-| F21 | Shared JSON Schema in `/schema`, generated types checked in CI, backend validates writes, `schemaVersion` with migrations | 8 | [CI] `schema:check` + [test] | TS ✅; C# in Phase 4 |
+| F17 | Security rules for keys, uploads, rate limits, headers; threat model | 7.2, 8 | [test] | ✅ CSP (Phase 0); keys, uploads, rate limits, headers on the API and Caddy (Phase 4, D-056 to D-059, D-062) |
+| F18 | ASP.NET Core on .NET 10; PostgreSQL via EF Core with jsonb documents | 8 | — | ✅ Phase 4 (D-054) |
+| F19 | Sharing without logins: public id, readToken, editKeyHash, 256-bit key, constant-time compare, `X-Edit-Key` header, fragment link | 8 | [test] | ✅ Phase 4 (D-056; `SharingTests.cs`, `UnitTests.cs`, `api.test.ts`) |
+| F20 | Uploads: PNG/JPEG by magic bytes, ≤ 5 MB, ≤ 4096 px, re-encoded, stored outside the web root | 8 | [test] | ✅ Phase 4 (D-059; `UploadTests.cs`) |
+| F21 | Shared JSON Schema in `/schema`, generated types checked in CI, backend validates writes, `schemaVersion` with migrations | 8 | [CI] `schema:check` + [test] | ✅ TS (Phase 0); C# classes with `api:schema:check` and server-side validation and migrations (Phase 4, D-055) |
 | F22 | Learning notes every phase (now in section 7 of this document, D-001) | 11 | [human] | ✅ Phase 0 |
 
 ---
@@ -752,6 +812,31 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
 - **Existing examples unchanged:** the six Phase 1 scenarios give the same numbers to the last bit (D-052).
 - **Deferred:** the [human] performance check in the browser; the web-view gaps listed in D-053; scenarios with plate recognition at the Belgrade Fair car parks (the stand-alone example and the tests cover plate against ticket).
 - **Known limitations:** all vehicle defaults are assumptions (D-040, D-044); cars have no acceleration and no overtaking (D-042); the car parks and roads of the Fair are hand-drawn, not surveyed; occupants walk in a straight line inside a lot (off the walking grid); a lot has no one-way aisle rules beyond the drawn direction of roads.
+
+
+### Phase 4: .NET backend and jobs
+
+**Plan** (2026-11-13)
+- **4a. Sidecar:** a stateless Node service that runs the engine (D-054).
+- **4b. API:** ASP.NET Core on .NET 10 with PostgreSQL: venues, scenarios, runs, uploads; validation and migrations (D-055); sharing without logins (D-056); ETag concurrency (D-057); limits, rate limits and retention (D-058); image uploads (D-059).
+- **4c. Jobs:** batches, lane sweeps and gate-opening sweeps, with the database as the queue (D-060), hashing like the browser (D-061).
+- **4d. Deployment:** Docker Compose behind Caddy, encrypted backups (D-062); strict builds (D-063); a secret scan in CI (F14).
+- **4e. Web:** API detection, publish and share links, server jobs with a sweep chart, saving browser runs (D-064).
+- **4f. VPS:** the app live over HTTPS with a tested restore. Needs the owner (server, SSH, domain).
+- *Risks:* the engine giving a different hash under the sidecar (ruled out by D-061); an image licence surprise (it happened: ImageSharp, D-059); a public server without logins being abused (limits, D-058).
+
+**Summary** (2026-11-15; 4a to 4e merged into `main` and pushed; 4f waits for the owner)
+- **Built:** 4a to 4e. The work was paused once (Docker Desktop crashed, 2026-11-15) and resumed the same day.
+- **Checks:**
+  - `npm run check` passes (including 30 tests of the web API client, link handling, polling and job results).
+  - CI's .NET job runs the API tests with Testcontainers (PostgreSQL and the real sidecar): sharing, concurrency, documents, uploads, rate limits, retention, health, and the job tests.
+  - `npm run test:e2e` (static hosting): 6 passed, 2 skipped (the demo recorder and the stack test), so the app without a server behaves as before.
+  - **Full stack** (`npm run stack:up`, then `E2E_STACK_URL=http://localhost:8080 npx playwright test stack`): passes in 22 s. Publish the concert venue, open the read-only link (fragment removed, every write disabled), open the edit link (fragment removed), run a 3-seed server batch, see its runs marked trusted, delete the venue. `npm run stack:check`: the 6 security headers match `vercel.json`. The API image built locally with the pinned SDK.
+  - **Looked at in the browser:** a lane sweep on the concert (2 to 5 lanes, 2 seeds per point, peak-hour p95 wait ≤ 10 min) from the "Share & server" tab: 2 lanes 1 h 07 min, 3 lanes 27 min, **4 lanes 7 min 13 s ± 8 s (the answer, by the mean and by the interval)**, 5 lanes 4 min 51 s; the chart shows the target line; no console errors.
+  - Secret scan: gitleaks over the whole history finds nothing after allowlisting three non-secret names (`.gitleaks.toml`).
+- **Fixed while finishing:** the job form's controls were named with their own value ("Seeds 20") because they sit inside their `<label>`; they now have an `aria-label`. Playwright no longer builds and serves the static app when `E2E_STACK_URL` is set.
+- **Deferred:** **4f** (VPS, HTTPS, a restore on the server: the second CV milestone); the rclone off-box copy and public-key gpg (need the VPS); a UI for image uploads (comes with the Phase 5 editor); putting the gate-opening answer first in the comparison view (review E6, Phase 6).
+- **Known limitations:** one run at a time on the server (D-060); `/v/{id}` links only work on a deployment with the API (D-064); the sweep chart's legend shows "--" until hovered; "Stored runs" needs "Refresh" after a job finishes.
 
 ---
 
@@ -1004,20 +1089,69 @@ A departure curve gives each group (a car's occupants are one group) a time to l
 5. **Occupants of a car only exist as walking people after it parks. How is conservation still exact?**
    They are created with the car (consecutive ids, drawn at creation) and held as Pending, so people are conserved from the start; cars have their own state counts that sum to the number of cars. A turned-away car turns its occupants into TurnedAway, not into unreachable people. Two counts, each exact at every tick, checked on every example.
 
+### Phase 4: the server, sharing and jobs, in plain language
+
+#### Two services, one engine
+The simulation must give the same answer to the last bit everywhere. So the .NET API never simulates: it stores documents, checks keys and limits, and organises jobs, and when it needs a run it sends the scenario to a small Node service (the **sidecar**) that runs the very same engine code as the browser. The sidecar is **stateless**: each request is "run this scenario with this seed and these overrides", the answer is the metrics and their hash. Each run gets its own Worker thread, so when the API gives up (a timeout, a cancelled job) the run really stops instead of burning CPU in the background.
+
+#### Sharing without accounts
+There are no logins. A venue gets three things: a public **id** (128 random bits), a **read token** and an **edit key** (256 random bits each). Whoever has the edit key can change the venue; whoever has the read token can look. The server stores only a **hash** of the edit key (like a password, but a random 256-bit key needs no slow hashing: nobody can guess it), and compares in **constant time**, so the time an answer takes does not reveal how many characters were right. The links put the secret after `#` (the **fragment**), which the browser never sends to any server and never puts in the Referer; the page reads it, keeps it in this tab's session storage and removes it from the address bar.
+
+#### Not losing someone's edit
+Two people with the edit link might change the same scenario at once. Each document has a **revision** number; reading it returns the number as an **ETag**, and saving must send it back in **If-Match**. If someone saved in between, the numbers differ and the server answers **412**: the page then offers to reload their version or overwrite it. The save is one conditional database update, so even two saves in the same millisecond cannot both win. This is **optimistic concurrency**: no locks while someone is editing, only a check when they save.
+
+#### The database is the queue
+A job (20 seeds, or a sweep over lane counts) can take minutes and must survive a restart. It is a row in a `jobs` table. The runner takes the oldest queued row with `SELECT … FOR UPDATE SKIP LOCKED` (if several runners ever existed, each would skip rows another one holds), marks it running and works through its runs, storing each finished run. If the API stops, running jobs become queued again at the next start and continue where they were: finished runs are not redone. An in-memory channel only **wakes** the runner when something is submitted; if it is lost, a 30-second poll finds the job anyway. Every job is checked against a **work budget** before it is accepted (number of runs × simulated hours), so one request cannot occupy the machine for a day.
+
+#### Sweeps: asking "how many lanes?"
+A **lane sweep** runs the same scenario with 2, 3, 4… lanes at one gate, a few seeds each, with the **same seeds at every point** (common random numbers, Phase 2), and reports the smallest lane count whose wait meets the target. A **gate-opening sweep** does the same with the opening time and reports the latest opening that still gets, say, 95% inside by the start. "Meets the target" is decided on the **mean** by default; the answer using the confidence interval is shown too, but with only 2 to 5 seeds per point the interval is wide, so that answer mostly says "run more seeds".
+
+#### Same answer in three places
+The browser was proven equal to Node in Phase 1. For the server, a script computes the expected hashes of chosen runs with the engine directly and saves them as a fixture; the .NET tests start the real sidecar in a container, run jobs through the API and compare each stored run's hash with the fixture. If the engine changes on purpose, the fixture must be regenerated, and a check fails until it is.
+
+#### Defending a public server
+Every input is limited before it is trusted: body size and JSON depth before parsing, the schema before storing, the image's width and height read from its header before decoding (a tiny file can claim to be 100,000 × 100,000 pixels), and a re-encode that drops anything hidden in the file. Requests are counted per IP in fixed windows (too many → 429 with `Retry-After`); the IP is taken from the proxy's header only if the request really came from the proxy. Only the reverse proxy (Caddy) is reachable from outside; the database and the sidecar sit on an internal network; every container runs without root and with a read-only filesystem. Backups are encrypted before they leave the machine, and a restore was rehearsed.
+
+#### Interview questions (Phase 4)
+
+1. **Why does the .NET backend call a Node service instead of running the simulation itself?**
+   Determinism: the metrics hash must match the browser bit for bit, and the only way to be sure is to run the same code. .NET does what it is good at (persistence, security, orchestration); a stateless sidecar runs the engine, each run in its own Worker so it can really be stopped.
+
+2. **How do you share an editable document without accounts, and keep the key safe?**
+   A 256-bit random edit key, stored only as a SHA-256 hash, compared in constant time, sent only in a header, put in links after `#` so it never reaches a server or a Referer, and removed from the address bar on arrival. Rotation is one conditional update, so exactly one of two simultaneous rotations wins.
+
+3. **What is optimistic concurrency and why use a revision rather than `xmin`?**
+   Read with an ETag, write with If-Match; a mismatch is 412 and the user chooses. `xmin` changes on every row update, including the "last active" timestamp the retention job writes, which would break the ETag of every open editor; an app-managed revision changes only when the document does.
+
+4. **Why use the database as the job queue, and what does `SKIP LOCKED` do?**
+   The jobs must survive restarts and the data is already in PostgreSQL, so a table is the most reliable queue with nothing extra to run. `FOR UPDATE SKIP LOCKED` lets a worker claim a row without waiting for rows another worker holds. The in-memory channel is only a wake-up signal.
+
+5. **How do you stop an image upload from taking down the server?**
+   Check the type by magic bytes, cap the file size, read the pixel size from the header and refuse before decoding, limit how many decodes run at once, and re-encode what passes so only clean pixels are stored, outside the web root.
+
+6. **With 3 seeds per point, should a sweep decide on the mean or the confidence interval?**
+   Report both. The CI rule is the cautious one, but with so few seeds its width mostly reflects the seed count, so the headline uses the mean and the CI answer tells you whether more seeds are worth it.
+
+
 ---
 
 ## 8. Reference
 
 ### Repository layout
 ```
-.github/workflows/ci.yml   CI: job `check` (schema check, lint, typecheck, test, build) and job `e2e` (Playwright)
+.github/workflows/ci.yml   CI: jobs `check` (schema check, lint, typecheck, test, build), `secrets` (gitleaks), `e2e` (Playwright) and `api` (.NET tests)
+.gitleaks.toml             secret-scan config: default rules plus an allowlist of non-secret names
 apps/web/                  Vite + React + Tailwind site; engine runs in src/engine.worker.ts
 apps/web/src/render/       PixiJS renderer; src/sim/ holds the controller, checkpoints, camera; src/ui/ the React components
 apps/web/src/library/      scenario library logic: storage, editor form, validation, files, catalogue (pure, tested)
 apps/web/src/compare/      comparison and batch logic: seeds and jobs, measures and differences, table rows, chart data, worker pool
 apps/web/src/scanlog/      applying a fitted scan log to a new scenario
 apps/web/src/validation/   build-time (Ajv standalone) scenario validator, served as virtual:scenario-validator (D-033)
-apps/web/e2e/              Playwright tests (determinism, smoke, replay, compare, library) and record-demo (media recording, skipped unless RECORD_DEMO=1)
+apps/web/e2e/              Playwright tests (determinism, smoke, replay, compare, library, parking; stack: only with E2E_STACK_URL) and record-demo (media recording, skipped unless RECORD_DEMO=1)
+apps/api/                  ASP.NET Core API (src/Bottleneck.Api), schema validation and generated C# (src/Bottleneck.Schema), tests (tests/, Testcontainers), expected-hash fixture (test/)
+apps/sidecar/              stateless Node service that runs the engine for the API (bundled to dist/server.mjs)
+deploy/                    Caddyfile, Caddy image, header generator and check, backup and restore scripts, dev.env
+docker-compose.yml         the stack: db, sidecar, api, caddy
 packages/engine/           simulation engine (pure TS) and its tests in test/
 packages/analysis/         statistics (mean and 95% CI, paired differences) and scan-log generation, import and fitting, with tests
 packages/examples/         built-in venues (venues/: Belgrade Fair fair day and concert with car parks, a stand-alone car park) and scenarios (scenarios/) as JSON, plus their tests in test/
@@ -1044,3 +1178,9 @@ playwright.config.ts       Playwright setup (production build under the producti
 | `npm run lint` / `npm run typecheck` | ESLint / TypeScript |
 | `npm run schema:gen` | regenerate types after editing `/schema` |
 | `npm run check` | everything the CI `check` job runs (not the browser tests) |
+| `npm run stack:up` / `stack:down` / `stack:reset` | build and start the full stack (db, sidecar, api, Caddy) on http://localhost:8080 / stop it / stop it and delete its data |
+| `npm run stack:check` | checks the running stack's security headers against `vercel.json` |
+| `E2E_STACK_URL=http://localhost:8080 npx playwright test stack` | the full-stack browser test (publish, links, a server batch); needs `stack:up` first |
+| `dotnet test apps/api/Bottleneck.Api.slnx` | the API tests (need Docker for Testcontainers; SDK 10.0.404, see `apps/api/global.json`) |
+| `npm run api:schema:gen` / `api:schema:check` | regenerate / check the C# classes generated from `/schema` |
+| `npm run api:hashes:gen` | regenerate the expected-hash fixture after a deliberate engine change |

@@ -39,6 +39,8 @@ test("publish a venue, open the share and edit links, run a server batch", async
   await expect(page.getByRole("heading", { name: /Publish “.+” to the server/ })).toBeVisible();
   await page.getByRole("button", { name: "Publish", exact: true }).click();
 
+  // The first example scenario goes along by default; a refused scenario would show "Published, but…".
+  await expect(page.getByText("Published with 1 scenario.")).toBeVisible();
   const editField = page.getByTestId("edit-link");
   await expect(editField).toBeVisible();
   await expect(page.getByText(/shown only once/)).toBeVisible();

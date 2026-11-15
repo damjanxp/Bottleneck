@@ -41,6 +41,19 @@ jobs:
       - name: Build the web app
         run: npm run build
 
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the whole history, not only the last commit
+
+      # Fixed rule F14. The image is pinned; config and allowlist in .gitleaks.toml.
+      - name: Scan the repository and its history for secrets
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.28.0 git /repo --config /repo/.gitleaks.toml --no-banner --redact
+
   e2e:
     name: Browser tests (Playwright, Chromium)
     runs-on: ubuntu-latest
