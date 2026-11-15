@@ -2,6 +2,7 @@ import { Suspense, lazy, useRef, useState } from "react";
 import { fitScanLog, parseScanLogCsv, type ScanLogFit } from "@bottleneck/analysis";
 import type { Scenario } from "@bottleneck/schema";
 import { allChoices, venueById } from "../library/catalog.ts";
+import { useRemoteVenues } from "../library/remoteVenues.ts";
 import { newScenarioId } from "../library/scenarios.ts";
 import type { LibraryEntry } from "../library/storage.ts";
 import { applyFit } from "../scanlog/applyFit.ts";
@@ -28,6 +29,7 @@ export function ScanLogView({ venueId, entries, onApply }: { venueId: string; en
   const [baseKey, setBaseKey] = useState<string>("");
   const [note, setNote] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  useRemoteVenues(); // re-render when a shared venue loads or changes
   const venue = venueById(venueId);
   const choices = allChoices(entries, venueId);
   const base = choices.find((c) => c.key === baseKey) ?? choices[0];

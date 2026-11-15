@@ -21,6 +21,15 @@
     "lint": "eslint .",
     "schema:gen": "node tools/generate-schema-types.mjs",
     "schema:check": "node tools/generate-schema-types.mjs --check",
+    "api:schema:gen": "dotnet run --project apps/api/tools/Bottleneck.SchemaGen",
+    "api:schema:check": "dotnet run --project apps/api/tools/Bottleneck.SchemaGen -- --check",
+    "api:hashes:gen": "vitest run apps/api/test -u",
+    "api:hashes:check": "vitest run apps/api/test",
+    "stack:up": "docker compose --env-file deploy/dev.env up -d --build --wait",
+    "stack:down": "docker compose --env-file deploy/dev.env down",
+    "stack:reset": "docker compose --env-file deploy/dev.env down -v",
+    "stack:logs": "docker compose --env-file deploy/dev.env logs -f --tail 100",
+    "stack:check": "node deploy/check-headers.mjs http://localhost:8080",
     "check": "npm run schema:check && npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "devDependencies": {

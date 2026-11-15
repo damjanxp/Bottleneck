@@ -41,6 +41,19 @@ jobs:
       - name: Build the web app
         run: npm run build
 
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the whole history, not only the last commit
+
+      # Fixed rule F14. The image is pinned; config and allowlist in .gitleaks.toml.
+      - name: Scan the repository and its history for secrets
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.28.0 git /repo --config /repo/.gitleaks.toml --no-banner --redact
+
   e2e:
     name: Browser tests (Playwright, Chromium)
     runs-on: ubuntu-latest
@@ -70,3 +83,45 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  api:
+    name: API (.NET build, C# schema check, tests with Testcontainers and the engine sidecar)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          # Pinned to the same SDK as the API Dockerfile; global.json (10.0.100, latestFeature) resolves to it.
+          dotnet-version: 10.0.404
+
+      # The job tests run the real engine sidecar (apps/sidecar), built from the engine source by the test fixture.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Node packages (for the engine sidecar)
+        run: npm ci
+        working-directory: .
+
+      - name: Build the engine sidecar
+        run: npm run build -w @bottleneck/sidecar
+        working-directory: .
+
+      # NuGet audit runs during restore; with TreatWarningsAsErrors a package with a known advisory fails the build.
+      - name: Restore
+        run: dotnet restore Bottleneck.Api.slnx
+
+      - name: Generated C# schema classes are up to date
+        run: dotnet run --project tools/Bottleneck.SchemaGen --no-restore -- --check
+
+      - name: Build
+        run: dotnet build Bottleneck.Api.slnx --no-restore --configuration Release
+
+      - name: Unit and integration tests (PostgreSQL via Testcontainers; Docker is preinstalled on the runner)
+        run: dotnet test --solution Bottleneck.Api.slnx --no-build --configuration Release

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Bottleneck.Schema</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The single source of truth: the same files the TypeScript side uses, embedded (not copied). -->
+    <EmbeddedResource Include="$(RepoRoot)schema/*.schema.json" LogicalName="schema/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

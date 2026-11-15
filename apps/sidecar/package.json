@@ -1,0 +1,23 @@
+{
+  "name": "@bottleneck/sidecar",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Stateless internal HTTP service that runs the simulation engine headless for the .NET API's job runner.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node dist/server.mjs",
+    "dev": "node scripts/build.mjs && node dist/server.mjs",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@bottleneck/engine": "0.0.1",
+    "@bottleneck/schema": "0.0.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
+  },
+  "devDependencies": {
+    "@bottleneck/examples": "0.0.1",
+    "esbuild": "^0.25.0"
+  }
+}

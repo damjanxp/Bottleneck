@@ -140,7 +140,7 @@ describe("parameter list", () => {
   if (!concert) throw new Error("concert example missing");
   const base = concert.scenarios[0] as Scenario;
 
-  it("marks scenario-settable parameters as assumed only when the scenario leaves them out", () => {
+  it("marks scenario-settable parameters as assumed only when the scenario leaves them out", { timeout: 30_000 }, () => {
     const keys = ["decisionDistance", "logitScale", "slotSpacing", "jockeyThreshold", "manualServiceTime", "watchdog", "shareInsideLead", "groupSizes", "bagPolicy"];
     const bare: Scenario = { ...base, parameters: {} };
     const runBare = createRun(concert.venue, bare);

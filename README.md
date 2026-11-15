@@ -8,7 +8,7 @@ Draw the site over a map, place pedestrian gates, security lanes, vehicle barrie
 
 **Live demo:** (link added after deployment check)
 
-> **Status:** Phases 0 to 2 are done: the engine simulates walking, density-dependent speed, lane choice, queues that spill back, lane failures and scan retries; the web app runs it live (PixiJS, in a Web Worker) on two built-in Belgrade Fair examples, lets you edit and save scenarios, compare them, and fit service times from scan logs. Node and Chrome give bit-identical results, checked in CI. Phase 3 (vehicles, parking and departures) is built in the engine and the examples; its web view is being finished. Phase 2 is waiting for the merge to `main`. See [docs/PROJECT.md](docs/PROJECT.md) for the full status, decisions and roadmap.
+> **Status:** Phases 0 to 4 are done. The engine simulates walking, density-dependent speed, lane choice, queues that spill back, lane failures and scan retries, and cars: roads, barriers, parking, overflow and the exit rush. The web app runs it live (PixiJS, in a Web Worker) on built-in Belgrade Fair examples and a stand-alone car park, lets you edit, save and compare scenarios, and fit service times from scan logs. An optional server (ASP.NET Core + PostgreSQL, run with Docker Compose) adds sharing links and server-side batches and sweeps. Node, Chrome and the server give bit-identical results, checked in CI. Next: the venue editor (Phase 5) and a public deployment of the server. See [docs/PROJECT.md](docs/PROJECT.md) for the full status, decisions and roadmap.
 
 ## What you can do
 
@@ -21,6 +21,7 @@ Draw the site over a map, place pedestrian gates, security lanes, vehicle barrie
 - **Compare scenarios** (up to 4) with common random numbers, so differences come from the change and not from luck, with the differences written out in words ("better" / "worse" / "no clear difference").
 - **Run a batch of 5 seeds** and see every headline number as a mean with a 95% confidence interval.
 - **Scan logs:** export a run's scan log as CSV, import a log, fit the service time and the arrival pattern, and apply them to a new scenario.
+- **With the server** ("Share & server" tab): publish a venue and get a private edit link and a read-only share link (no accounts; the key stays after `#` in the link); run 20-seed batches, **lane sweeps** ("how many lanes keep the p95 wait under 10 minutes?") and **gate-opening sweeps** ("how late can the gates open and still get 95% inside by the start?") on the server, with a chart of the answer.
 
 ![The concert example at the busiest time](docs/media/screenshot.png)
 
@@ -31,7 +32,7 @@ Draw the site over a map, place pedestrian gates, security lanes, vehicle barrie
 - **Examples:** [`packages/examples`](packages/examples) holds the built-in venues and scenarios as schema-valid JSON; a test simulates each one and checks that, for example, 3 lanes jam and 5 lanes cope.
 - **Schema:** venue, scenario and run formats are written once as JSON Schema in [`/schema`](schema). Types are generated from them, and CI fails if they are stale.
 - **Analysis:** [`packages/analysis`](packages/analysis) holds the statistics (confidence intervals, paired differences) and the scan-log fitting, shared by the comparison and the scan-log tools.
-- **Later:** an ASP.NET Core (.NET 10) API with PostgreSQL for sharing, plus server-side batch runs and lane sweeps (Phase 4).
+- **Server (optional):** an ASP.NET Core (.NET 10) API with PostgreSQL (EF Core, jsonb documents) does **orchestration and persistence**: it stores venues, scenarios and runs, validates every write against the same JSON Schema, handles share links and edit keys (hashed, constant-time compared), concurrency (ETags), rate limits, quotas and image uploads, and runs a job queue in the database. It never simulates itself: a small stateless Node **sidecar** runs the very same engine, so a server run has the same hash as a browser run. Docker Compose runs it all behind Caddy with backups.
 
 ## Run it locally
 
@@ -50,7 +51,14 @@ npx playwright install chromium   # once
 npm run test:e2e                  # builds, serves with `vite preview`, runs the tests
 ```
 
-CI runs both: `npm run check` and `npm run test:e2e` (as a separate job). The demo GIF above was recorded with `RECORD_DEMO=1 npx playwright test record-demo` (a spec that is skipped otherwise) and converted with ffmpeg.
+The full stack (PostgreSQL, sidecar, API and Caddy) runs with Docker:
+
+```bash
+npm run stack:up     # http://localhost:8080, with the "Share & server" tab
+npm run stack:down
+```
+
+CI runs `npm run check`, a secret scan (gitleaks), `npm run test:e2e`, and the API tests (.NET, with Testcontainers and the real sidecar), each as its own job. The demo GIF above was recorded with `RECORD_DEMO=1 npx playwright test record-demo` (a spec that is skipped otherwise) and converted with ffmpeg.
 
 ## Documentation
 

@@ -1,0 +1,63 @@
+{
+  "generatedBy": "apps/api/test/expected-hashes.test.ts (npm run api:hashes:gen)",
+  "derivedSeeds": {
+    "base": 1,
+    "count": 20,
+    "seeds": [
+      1,
+      3758470246,
+      1907203739,
+      2476882089,
+      1512866241,
+      747361021,
+      232233139,
+      3976740399,
+      1113123528,
+      3462736295,
+      1210553069,
+      756122640,
+      796933592,
+      3797411123,
+      1205312117,
+      3125610867,
+      3029645480,
+      1206672889,
+      3746652774,
+      3033053052
+    ]
+  },
+  "runs": [
+    {
+      "venue": "standalone-car-park",
+      "scenario": "car-park-pay-station",
+      "seed": 1,
+      "overrides": null,
+      "metricsHash": "eed0fa5056525b65"
+    },
+    {
+      "venue": "standalone-car-park",
+      "scenario": "car-park-pay-station",
+      "seed": 3758470246,
+      "overrides": null,
+      "metricsHash": "2efce9df3c064b34"
+    },
+    {
+      "venue": "standalone-car-park",
+      "scenario": "car-park-pay-station",
+      "seed": 1907203739,
+      "overrides": null,
+      "metricsHash": "06ca04c1b03d5d41"
+    },
+    {
+      "venue": "belgrade-fair-concert",
+      "scenario": "concert-3-lanes",
+      "seed": 1,
+      "overrides": {
+        "gate-main": {
+          "laneCount": 4
+        }
+      },
+      "metricsHash": "77dafec7e2f06500"
+    }
+  ]
+}

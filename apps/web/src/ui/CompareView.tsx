@@ -1,5 +1,4 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { exampleVenues } from "@bottleneck/examples";
 import type { Scenario } from "@bottleneck/schema";
 import type { ComparePreset } from "../App.tsx";
 import type { RunResult } from "../batchProtocol.ts";
@@ -7,7 +6,8 @@ import { MAX_ENTRIES, MAX_SEEDS, planJobs, venueIds, type CompareEntry, type Job
 import { RunPool, poolSize } from "../compare/runPool.ts";
 import { capacityRows, endNotes, measureRows } from "../compare/table.ts";
 import { formatValue, VERDICT_WORDS } from "../compare/measures.ts";
-import { builtInChoices, userChoices, venueById } from "../library/catalog.ts";
+import { builtInChoices, knownVenues, userChoices, venueById } from "../library/catalog.ts";
+import { useRemoteVenues } from "../library/remoteVenues.ts";
 import type { LibraryEntry } from "../library/storage.ts";
 import { formatCount, formatPercent } from "../sim/format.ts";
 import { elementName } from "../sim/parameters.ts";
@@ -32,7 +32,13 @@ interface RunState {
 }
 
 /** Comparison of up to four scenarios, and multi-seed batches (spec 6.3). */
-export function CompareView({ venueId, entries: libraryEntries, preset, onSave }: { venueId: string; entries: readonly LibraryEntry[]; preset: ComparePreset | null; onSave: (s: Scenario) => void }) {
+/** E6: the answer of a finished server gate-opening sweep for this venue, shown first. */
+export interface CompareLeadLine {
+  main: string;
+  detail: string;
+}
+
+export function CompareView({ venueId, entries: libraryEntries, preset, onSave, leadLine = null }: { venueId: string; entries: readonly LibraryEntry[]; preset: ComparePreset | null; onSave: (s: Scenario) => void; leadLine?: CompareLeadLine | null }) {
   const [adhoc, setAdhoc] = useState<CompareEntry[]>([]);
   const [slots, setSlots] = useState<string[]>(() => builtInChoices(venueId).slice(0, 2).map((c) => c.key));
   const [seeds, setSeeds] = useState(1);
@@ -41,6 +47,7 @@ export function CompareView({ venueId, entries: libraryEntries, preset, onSave }
   const [lastPreset, setLastPreset] = useState<number | null>(null);
   const [autoRun, setAutoRun] = useState(false);
   const poolRef = useRef<RunPool | null>(null);
+  const remote = useRemoteVenues();
 
   // A request from another section ("+1 lane", "Batch: 5 seeds", "Compare"): set it up and run it.
   if (preset && preset.nonce !== lastPreset) {
@@ -55,7 +62,9 @@ export function CompareView({ venueId, entries: libraryEntries, preset, onSave }
   const options: (CompareEntry & { venueId: string })[] = useMemo(() => {
     const fromChoices = [...builtInChoices(), ...userChoices(libraryEntries)].map((c) => ({ key: c.key, label: c.label, scenario: c.scenario, venueId: c.venueId }));
     return [...adhoc.map((a) => ({ ...a, venueId: a.scenario.venueId })), ...fromChoices];
-  }, [adhoc, libraryEntries]);
+    // `remote`: a shared venue's scenarios come from builtInChoices() via the remote-venue store.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adhoc, libraryEntries, remote]);
   const chosen = slots.map((k) => options.find((o) => o.key === k)).filter((o): o is (typeof options)[number] => o !== undefined);
   const venuesDiffer = venueIds(chosen).length > 1;
   const unknownVenues = venueIds(chosen).filter((id) => !venueById(id));
@@ -93,12 +102,18 @@ export function CompareView({ venueId, entries: libraryEntries, preset, onSave }
   const setSlot = (k: number, key: string) => setSlots((s) => s.map((x, i) => (i === k ? key : x)));
   const optionGroups: { label: string; items: typeof options }[] = [
     { label: C.fromSimulation, items: options.filter((o) => o.key.startsWith("adhoc:")) },
-    ...exampleVenues.map((v) => ({ label: `${v.title}: ${strings.library.builtIn}`, items: options.filter((o) => o.key.startsWith("builtin:") && o.venueId === v.id) })),
-    ...exampleVenues.map((v) => ({ label: `${v.title}: ${strings.library.mine}`, items: options.filter((o) => o.key.startsWith("user:") && o.venueId === v.id) })),
+    ...knownVenues().map((v) => ({ label: `${v.title}: ${v.remote ? strings.share.serverScenarios : strings.library.builtIn}`, items: options.filter((o) => (o.key.startsWith("builtin:") || o.key.startsWith("server:")) && o.venueId === v.id) })),
+    ...knownVenues().map((v) => ({ label: `${v.title}: ${strings.library.mine}`, items: options.filter((o) => o.key.startsWith("user:") && o.venueId === v.id) })),
   ].filter((g) => g.items.length > 0);
 
   return (
     <div className="flex flex-col gap-4">
+      {leadLine && (
+        <section className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10" aria-label={strings.share.jobs.leadLineLabel} data-testid="gate-sweep-lead">
+          <p className="text-base font-semibold">{leadLine.main}</p>
+          <p className="text-xs text-slate-600 dark:text-slate-400">{leadLine.detail}</p>
+        </section>
+      )}
       <section className={card} aria-labelledby="compare-heading">
         <h2 id="compare-heading" className="text-lg font-semibold">
           {C.heading}
@@ -186,7 +201,11 @@ export function CompareView({ venueId, entries: libraryEntries, preset, onSave }
               </>
             )}
             {run.status === "cancelled" && <span>{C.cancelled}</span>}
-            {run.status === "done" && run.finishedAt !== null && <span>{C.finished(done, ((run.finishedAt - run.startedAt) / 1000).toFixed(1), run.workers)}</span>}
+            {run.status === "done" && run.finishedAt !== null && (
+              <span>
+                {C.finished(done, ((run.finishedAt - run.startedAt) / 1000).toFixed(1), run.workers)} {strings.share.computedInBrowser}
+              </span>
+            )}
           </div>
         )}
       </section>

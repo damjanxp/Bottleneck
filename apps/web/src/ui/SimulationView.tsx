@@ -10,7 +10,7 @@ import { formatBytesPerSecond, formatCount, formatDuration, formatRelativeClock 
 import { MAX_LANES, headlines, laneLabel, withExtraLane, worstLane } from "../sim/headline.ts";
 import { describeParameters, elementName } from "../sim/parameters.ts";
 import { barrierRows, eventPhase, lotRows, parkingHeadlines, withLotClosed } from "../sim/parking.ts";
-import { SimController, type SeekState } from "../sim/SimController.ts";
+import { SimController, type RunRecordParts, type SeekState } from "../sim/SimController.ts";
 import { strings } from "../strings.ts";
 import type { LoadedInfo, MetricsSummary, StatsMessage } from "../workerProtocol.ts";
 import { downloadText } from "./browserFiles.ts";
@@ -50,6 +50,8 @@ export interface SimulationViewProps {
   onCompare(entries: CompareEntry[], seeds: number): void;
   /** Save the working copy (lane events recorded during playback), into the selected scenario or as a new one. */
   onSaveWorking(scenario: Scenario, intoSelected: boolean): void;
+  /** Present only for a shared venue opened with its edit link: saves the finished run to the server; resolves with a message. */
+  onSaveRun?: (parts: RunRecordParts) => Promise<string>;
 }
 
 /**
@@ -62,7 +64,7 @@ interface WorkingCopy {
   added: number;
 }
 
-export function SimulationView({ venue, scenario, label, ownScenario, active, onCompare, onSaveWorking }: SimulationViewProps) {
+export function SimulationView({ venue, scenario, label, ownScenario, active, onCompare, onSaveWorking, onSaveRun }: SimulationViewProps) {
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [loaded, setLoaded] = useState<LoadedInfo | null>(null);
   const [stats, setStats] = useState<StatsMessage | null>(null);
@@ -78,6 +80,8 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
   const [workingState, setWorkingState] = useState<WorkingCopy | null>(null);
   const [applyingSeek, setApplyingSeek] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [savingRun, setSavingRun] = useState(false);
+  const [runSaved, setRunSaved] = useState<{ ok: boolean; text: string } | null>(null);
   const [reducedMotion] = useState(prefersReducedMotion);
   const [perf] = useState(perfEnabled);
 
@@ -286,6 +290,21 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
     }
   };
 
+  const onSaveRunClick = async () => {
+    const c = controllerRef.current;
+    if (!c || !onSaveRun) return;
+    setSavingRun(true);
+    setRunSaved(null);
+    try {
+      const parts = await c.runRecord();
+      setRunSaved({ ok: true, text: await onSaveRun(parts) });
+    } catch (e) {
+      setRunSaved({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSavingRun(false);
+    }
+  };
+
   const onScrub = (value: number) => {
     setScrub(value);
     if (scrubTimer.current) clearTimeout(scrubTimer.current);
@@ -372,6 +391,16 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
             <button type="button" className={btn} onClick={() => void onExportScanLog()} disabled={!done || exporting || seek !== null} title={strings.runActions.exportScanLogHint}>
               {strings.runActions.exportScanLog}
             </button>
+            {onSaveRun && (
+              <button type="button" className={btn} onClick={() => void onSaveRunClick()} disabled={!done || savingRun || seek !== null} title={strings.share.saveRun.hint}>
+                {savingRun ? strings.share.saveRun.busy : strings.share.saveRun.button}
+              </button>
+            )}
+            {runSaved && (
+              <span className={`text-xs ${runSaved.ok ? "text-emerald-800 dark:text-emerald-300" : "text-orange-800 dark:text-orange-300"}`} role={runSaved.ok ? "status" : "alert"}>
+                {runSaved.text}
+              </span>
+            )}
             {!done && loaded && (
               <span className="text-xs text-slate-500">
                 {strings.runActions.runToEndFirst}{" "}

@@ -4,7 +4,7 @@
 //   node tools/generate-schema-types.mjs --check  fail if that file is out of date (used in CI)
 //
 // The schemas are the single source of truth (spec section 8, "Shared schema"). C# classes are
-// generated from the same files in Phase 4.
+// generated from the same files by apps/api/tools/Bottleneck.SchemaGen (npm run api:schema:gen / api:schema:check).
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";

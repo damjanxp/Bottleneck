@@ -13,10 +13,13 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
   use: { baseURL: "http://localhost:4173", trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "npm run build && npm run preview",
-    url: "http://localhost:4173",
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
-  },
+  // Against the full stack (E2E_STACK_URL, stack.spec.ts) Caddy serves the app, so no local server.
+  webServer: process.env.E2E_STACK_URL
+    ? undefined
+    : {
+        command: "npm run build && npm run preview",
+        url: "http://localhost:4173",
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
+      },
 });
