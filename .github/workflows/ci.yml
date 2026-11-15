@@ -83,7 +83,8 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          global-json-file: apps/api/global.json
+          # Pinned to the same SDK as the API Dockerfile; global.json (10.0.100, latestFeature) resolves to it.
+          dotnet-version: 10.0.404
 
       # The job tests run the real engine sidecar (apps/sidecar), built from the engine source by the test fixture.
       - uses: actions/setup-node@v4

@@ -137,7 +137,7 @@ public sealed class JobRunner(
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var n = await db.Jobs.Where(j => j.Status == JobStatus.Running)
             .ExecuteUpdateAsync(s => s.SetProperty(j => j.Status, JobStatus.Queued), ct);
-        if (n > 0) log.LogInformation("Requeued {Count} interrupted jobs", n);
+        if (n > 0 && log.IsEnabled(LogLevel.Information)) log.LogInformation("Requeued {Count} interrupted jobs", n);
         return n;
     }
 
@@ -176,7 +176,8 @@ public sealed class JobRunner(
                 await FinishAsync(jobId, JobStatus.Cancelled, null, null, null, CancellationToken.None);
                 return;
             }
-            log.LogInformation("Job {JobId} ({Kind}) started, attempt {Attempt}", jobId, job.Kind, job.Attempts);
+            if (log.IsEnabled(LogLevel.Information))
+                log.LogInformation("Job {JobId} ({Kind}) started, attempt {Attempt}", jobId, job.Kind, job.Attempts);
 
             var venue = JsonNode.Parse(job.VenueSnapshot)!.AsObject();
             var plan = JobPlan.FromStored(JsonNode.Parse(job.Request)!.AsObject(), venue);
@@ -220,7 +221,8 @@ public sealed class JobRunner(
                         }
                         catch (OperationCanceledException) when (ct.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
                         {
-                            log.LogInformation("Job {JobId}: in-flight run {Index} aborted by cancel", jobId, spec.Index);
+                            if (log.IsEnabled(LogLevel.Information))
+                                log.LogInformation("Job {JobId}: in-flight run {Index} aborted by cancel", jobId, spec.Index);
                             throw;
                         }
                         lock (engineLock)
@@ -240,23 +242,27 @@ public sealed class JobRunner(
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await db.Jobs.Where(j => j.Id == jobId && j.Status == JobStatus.Running)
                     .ExecuteUpdateAsync(s => s.SetProperty(j => j.Status, JobStatus.Queued), CancellationToken.None);
-                log.LogInformation("Job {JobId} returned to the queue at shutdown", jobId);
+                if (log.IsEnabled(LogLevel.Information))
+                    log.LogInformation("Job {JobId} returned to the queue at shutdown", jobId);
                 throw;
             }
             catch (OperationCanceledException) when (jobCts.IsCancellationRequested)
             {
                 await FinishAsync(jobId, JobStatus.Cancelled, null, null, engineVersion, CancellationToken.None);
-                log.LogInformation("Job {JobId} cancelled after {Done} of {Total} runs", jobId, values.Count, plan.TotalRuns);
+                if (log.IsEnabled(LogLevel.Information))
+                    log.LogInformation("Job {JobId} cancelled after {Done} of {Total} runs", jobId, values.Count, plan.TotalRuns);
                 return;
             }
 
             var resultJson = JobAggregator.Build(plan, values.ToDictionary(kv => kv.Key, kv => kv.Value), engineVersion ?? "unknown");
             await FinishAsync(jobId, JobStatus.Succeeded, DocumentPipeline.Serialize(resultJson), null, engineVersion, CancellationToken.None);
-            log.LogInformation("Job {JobId} succeeded ({Total} runs)", jobId, plan.TotalRuns);
+            if (log.IsEnabled(LogLevel.Information))
+                log.LogInformation("Job {JobId} succeeded ({Total} runs)", jobId, plan.TotalRuns);
         }
         catch (SidecarRunException ex)
         {
-            log.LogWarning("Job {JobId} failed: {Error}", jobId, ex.Message);
+            if (log.IsEnabled(LogLevel.Warning))
+                log.LogWarning("Job {JobId} failed: {Error}", jobId, ex.Message);
             await FinishAsync(jobId, JobStatus.Failed, null, ex.Message, null, CancellationToken.None);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

@@ -62,7 +62,7 @@ public sealed class SecretsTests
     {
         // Guard against a refactor back to == or SequenceEqual on secrets.
         var source = File.ReadAllText(Path.Combine(TestPaths.ApiSource, "Security", "Secrets.cs"));
-        Assert.Equal(2, Regex.Matches(source, @"CryptographicOperations\.FixedTimeEquals").Count);
+        Assert.Equal(2, Regex.Count(source, @"CryptographicOperations\.FixedTimeEquals"));
         Assert.DoesNotContain("SequenceEqual", source, StringComparison.Ordinal);
     }
 }

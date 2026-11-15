@@ -18,7 +18,8 @@ public sealed class DatabaseMigrator(IServiceProvider services, ILogger<Database
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
         if (pending.Count == 0) return;
-        log.LogInformation("Applying {Count} database migrations", pending.Count);
+        if (log.IsEnabled(LogLevel.Information))
+            log.LogInformation("Applying {Count} database migrations", pending.Count);
         await db.Database.MigrateAsync(cancellationToken);
     }
 
@@ -57,7 +58,8 @@ public sealed class RetentionCleaner(AppDbContext db, UploadStorage storage, IOp
             }
             if (ids.Count < o.BatchSize) break;
         }
-        if (deleted > 0) log.LogInformation("Retention cleanup deleted {Count} inactive venues", deleted);
+        if (deleted > 0 && log.IsEnabled(LogLevel.Information))
+            log.LogInformation("Retention cleanup deleted {Count} inactive venues", deleted);
         return deleted;
     }
 }

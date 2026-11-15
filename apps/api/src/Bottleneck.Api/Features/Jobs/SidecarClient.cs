@@ -74,7 +74,8 @@ public sealed class SidecarClient(HttpClient http, IOptions<SidecarOptions> opti
 
             if (attempt >= o.MaxRetries)
                 throw new SidecarRunException($"The engine sidecar is {retryReason}; gave up after {attempt + 1} attempts.");
-            log.LogInformation("Sidecar {Reason}; retrying in {Delay} ms", retryReason, delay);
+            if (log.IsEnabled(LogLevel.Information))
+                log.LogInformation("Sidecar {Reason}; retrying in {Delay} ms", retryReason, delay);
             await Task.Delay(delay, ct);
             delay = Math.Min(delay * 2, Math.Max(delay, o.MaxRetryDelayMs));
         }
