@@ -1,5 +1,6 @@
 using System.Net;
 using Bottleneck.Api.Data;
+using Bottleneck.Api.Features.Jobs;
 using Bottleneck.Api.Features.Runs;
 using Bottleneck.Api.Features.Scenarios;
 using Bottleneck.Api.Features.Uploads;
@@ -36,6 +37,8 @@ builder.Services.AddSerilog((services, lc) =>
 builder.Services.Configure<LimitsOptions>(config.GetSection(LimitsOptions.Section));
 builder.Services.Configure<UploadOptions>(config.GetSection(UploadOptions.Section));
 builder.Services.Configure<RetentionOptions>(config.GetSection(RetentionOptions.Section));
+builder.Services.Configure<SidecarOptions>(config.GetSection(SidecarOptions.Section));
+builder.Services.Configure<JobOptions>(config.GetSection(JobOptions.Section));
 var rateLimits = config.GetSection(RateLimitOptions.Section).Get<RateLimitOptions>() ?? new RateLimitOptions();
 var forwarding = config.GetSection(ForwardingOptions.Section).Get<ForwardingOptions>() ?? new ForwardingOptions();
 var cors = config.GetSection(CorsSettings.Section).Get<CorsSettings>() ?? new CorsSettings();
@@ -67,6 +70,18 @@ builder.Services.AddSingleton<ImageProcessor>();
 builder.Services.AddScoped<RetentionCleaner>();
 builder.Services.AddHostedService<RetentionService>();
 
+// ---- Jobs: batches and sweeps through the engine sidecar (spec 6.4, review D1/D2)
+var sidecarOptions = config.GetSection(SidecarOptions.Section).Get<SidecarOptions>() ?? new SidecarOptions();
+builder.Services.AddHttpClient<SidecarClient>(c =>
+{
+    c.BaseAddress = new Uri(sidecarOptions.BaseUrl.TrimEnd('/') + "/");
+    // The sidecar enforces the run budget itself (504); this only catches a sidecar that never answers.
+    c.Timeout = TimeSpan.FromSeconds(sidecarOptions.RunTimeoutSeconds + 30);
+});
+builder.Services.AddSingleton<JobSignal>();
+builder.Services.AddSingleton<JobCancellations>();
+builder.Services.AddHostedService<JobRunner>();
+
 // ---- Sharing without logins: an authorization policy per capability (spec section 8)
 builder.Services.AddScoped<IAuthorizationHandler, VenueAccessHandler>();
 builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, VenueAuthorizationResultHandler>();
@@ -96,7 +111,7 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
 
 // ---- Health checks and OpenAPI
 builder.Services.AddHealthChecks().AddDbContextCheck<AppDbContext>("database", tags: ["ready"]);
-builder.Services.AddOpenApi(o => o.AddDocumentTransformer<CredentialSchemesTransformer>());
+builder.Services.AddOpenApi(o => o.AddDocumentTransformer<CredentialSchemesTransformer>().AddOperationTransformer<CredentialRequirementTransformer>());
 
 var app = builder.Build();
 
@@ -128,6 +143,7 @@ var venue = app.MapVenueEndpoints();
 venue.MapScenarioEndpoints();
 venue.MapRunEndpoints();
 venue.MapUploadEndpoints();
+venue.MapJobEndpoints();
 
 app.Run();
 

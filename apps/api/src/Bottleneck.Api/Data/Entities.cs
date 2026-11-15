@@ -63,6 +63,8 @@ public sealed class Run
     public required string EngineVersion { get; set; }
     public long Seed { get; set; }
     public required string MetricsHash { get; set; }
+    /// <summary>Position of the run in its job's plan (point × seeds + seed index); lets a restarted job resume.</summary>
+    public int? JobRunIndex { get; set; }
     public int SchemaVersion { get; set; }
     /// <summary>The run record (/schema run) as jsonb.</summary>
     public required string Record { get; set; }
@@ -94,9 +96,9 @@ public enum JobStatus
 }
 
 /// <summary>
-/// Placeholder for the job runner (next wave; triage D1/D2). The table is the real queue:
-/// the runner claims the oldest Queued row, a Channel only wakes it up, and on startup Running rows
-/// go back to Queued. (VenueId, RequestId) is unique, so resubmitting the same request is idempotent.
+/// A batch or sweep (spec 6.4; triage D1/D2). The table is the real queue: the runner claims the oldest
+/// Queued row (FOR UPDATE SKIP LOCKED), a Channel only wakes it up, and on startup Running rows go back to
+/// Queued. (VenueId, RequestId) is unique, so resubmitting the same request is idempotent.
 /// </summary>
 public sealed class Job
 {
@@ -104,11 +106,15 @@ public sealed class Job
     public required string VenueId { get; set; }
     /// <summary>Client-chosen idempotency key, unique per venue.</summary>
     public required string RequestId { get; set; }
-    /// <summary>"batch" or "sweep".</summary>
+    /// <summary>"batch", "laneSweep" or "gateOpeningSweep".</summary>
     public required string Kind { get; set; }
+    /// <summary>The stored scenario the job was submitted from, if any (the request holds a snapshot either way).</summary>
+    public string? ScenarioId { get; set; }
     public JobStatus Status { get; set; }
-    /// <summary>The submitted request (scenario, seeds, sweep range) as jsonb.</summary>
+    /// <summary>The normalized request (scenario snapshot, seeds, sweep range) as jsonb.</summary>
     public required string Request { get; set; }
+    /// <summary>The venue document as it was when the job was submitted, so every run of the job uses the same venue.</summary>
+    public required string VenueSnapshot { get; set; }
     /// <summary>Runs finished so far, and runs in total (the work budget from D1).</summary>
     public int CompletedRuns { get; set; }
     public int TotalRuns { get; set; }

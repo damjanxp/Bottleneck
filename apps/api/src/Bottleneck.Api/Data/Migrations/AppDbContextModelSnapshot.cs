@@ -84,6 +84,11 @@ namespace Bottleneck.Api.Data.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("result");
 
+                    b.Property<string>("ScenarioId")
+                        .HasMaxLength(26)
+                        .HasColumnType("character varying(26)")
+                        .HasColumnName("scenario_id");
+
                     b.Property<DateTimeOffset?>("StartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("started_at");
@@ -103,6 +108,11 @@ namespace Bottleneck.Api.Data.Migrations
                         .HasMaxLength(26)
                         .HasColumnType("character varying(26)")
                         .HasColumnName("venue_id");
+
+                    b.Property<string>("VenueSnapshot")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("venue_snapshot");
 
                     b.HasKey("Id")
                         .HasName("pk_jobs");
@@ -138,6 +148,10 @@ namespace Bottleneck.Api.Data.Migrations
                         .HasMaxLength(26)
                         .HasColumnType("character varying(26)")
                         .HasColumnName("job_id");
+
+                    b.Property<int?>("JobRunIndex")
+                        .HasColumnType("integer")
+                        .HasColumnName("job_run_index");
 
                     b.Property<string>("MetricsHash")
                         .IsRequired()
@@ -182,11 +196,13 @@ namespace Bottleneck.Api.Data.Migrations
                     b.HasKey("Id")
                         .HasName("pk_runs");
 
-                    b.HasIndex("JobId")
-                        .HasDatabaseName("ix_runs_job_id");
-
                     b.HasIndex("ScenarioId")
                         .HasDatabaseName("ix_runs_scenario_id");
+
+                    b.HasIndex("JobId", "JobRunIndex")
+                        .IsUnique()
+                        .HasDatabaseName("ix_runs_job_id_job_run_index")
+                        .HasFilter("job_id IS NOT NULL AND job_run_index IS NOT NULL");
 
                     b.HasIndex("VenueId", "Origin", "CreatedAt")
                         .HasDatabaseName("ix_runs_venue_id_origin_created_at");

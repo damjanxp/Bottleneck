@@ -25,7 +25,8 @@ public static class RunEndpoints
         runs.MapGet("/", List)
             .RequireAuthorization(VenuePolicies.Read)
             .Produces<List<RunSummary>>()
-            .WithSummary("List a venue's runs (newest first, without the records)");
+            .WithSummary("List a venue's runs (newest first, without the records)")
+            .WithDescription("Optional filters: ?scenarioId=, ?jobId= (the runs a job computed), ?limit= (1-500, default 100).");
 
         runs.MapPost("/", Create)
             .RequireAuthorization(VenuePolicies.Edit)
@@ -49,11 +50,14 @@ public static class RunEndpoints
             .WithSummary("Delete a run");
     }
 
-    private static async Task<IResult> List(string venueId, AppDbContext db, CancellationToken ct, [FromQuery] int? limit = null)
+    private static async Task<IResult> List(string venueId, AppDbContext db, CancellationToken ct, [FromQuery] int? limit = null,
+        [FromQuery] string? scenarioId = null, [FromQuery] string? jobId = null)
     {
         var take = Math.Clamp(limit ?? 100, 1, 500);
-        var list = await db.Runs.AsNoTracking()
-            .Where(r => r.VenueId == venueId)
+        var query = db.Runs.AsNoTracking().Where(r => r.VenueId == venueId);
+        if (scenarioId is not null) query = query.Where(r => r.ScenarioId == scenarioId);
+        if (jobId is not null) query = query.Where(r => r.JobId == jobId);
+        var list = await query
             .OrderByDescending(r => r.CreatedAt).ThenBy(r => r.Id)
             .Take(take)
             .Select(r => new RunSummary(r.Id, r.ScenarioId, r.JobId, r.Origin, r.EngineVersion, r.Seed, r.MetricsHash, r.SizeBytes, r.CreatedAt))

@@ -55,6 +55,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.MetricsHash).HasMaxLength(16);
             e.Property(x => x.Record).HasColumnType("jsonb");
             e.HasIndex(x => new { x.VenueId, x.Origin, x.CreatedAt });
+            e.HasIndex(x => new { x.JobId, x.JobRunIndex }).IsUnique().HasFilter("job_id IS NOT NULL AND job_run_index IS NOT NULL");
             e.HasOne<Scenario>().WithMany().HasForeignKey(x => x.ScenarioId).OnDelete(DeleteBehavior.SetNull);
             e.ToTable(t => t.HasCheckConstraint("ck_runs_origin", "origin IN ('job', 'clientReported')"));
         });
@@ -79,6 +80,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
             e.Property(x => x.Request).HasColumnType("jsonb");
             e.Property(x => x.Result).HasColumnType("jsonb");
+            e.Property(x => x.VenueSnapshot).HasColumnType("jsonb");
+            e.Property(x => x.ScenarioId).HasMaxLength(IdLength);
             e.Property(x => x.Error).HasMaxLength(2000);
             e.Property(x => x.EngineVersion).HasMaxLength(40);
             e.HasIndex(x => new { x.VenueId, x.RequestId }).IsUnique();
