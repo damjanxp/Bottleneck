@@ -14,3 +14,14 @@ export function loadScenarioValidator(): Promise<SchemaValidator> {
   });
   return pending;
 }
+
+let pendingVenue: Promise<SchemaValidator> | null = null;
+
+/** The venue validator, from the same lazy chunk. */
+export function loadVenueValidator(): Promise<SchemaValidator> {
+  pendingVenue ??= import("virtual:scenario-validator").then((m) => (data: unknown) => {
+    const ok = m.validateVenue(data);
+    return { ok, errors: ok ? [] : (m.validateVenue.errors ?? []) };
+  });
+  return pendingVenue;
+}

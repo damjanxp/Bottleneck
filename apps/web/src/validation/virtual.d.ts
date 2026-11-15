@@ -5,4 +5,5 @@ declare module "virtual:scenario-validator" {
     errors?: SchemaError[] | null;
   }
   export const validateScenario: StandaloneValidate;
+  export const validateVenue: StandaloneValidate;
 }

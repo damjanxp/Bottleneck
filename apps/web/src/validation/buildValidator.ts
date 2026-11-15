@@ -24,12 +24,15 @@ const UCS2_LENGTH = `function ucs2length(str) {
 
 /**
  * ES module source exporting `validateScenario(data): boolean` (with `.errors` after a failure),
- * from the given schemas (file name → parsed JSON; must include common and scenario).
+ * from the given schemas (file name → parsed JSON; must include common and scenario). If the venue
+ * schema is given too, it also exports `validateVenue` (the venue editor, Phase 5).
  */
 export function buildScenarioValidatorSource(schemas: Record<string, object>): string {
   const ajv = new Ajv({ code: { source: true, esm: true }, allErrors: true, strict: true, strictTuples: false });
   for (const [file, schema] of Object.entries(schemas)) ajv.addSchema(schema, file);
-  let code = standaloneCode(ajv, { validateScenario: "scenario.schema.json" });
+  const exports: Record<string, string> = { validateScenario: "scenario.schema.json" };
+  if ("venue.schema.json" in schemas) exports.validateVenue = "venue.schema.json";
+  let code = standaloneCode(ajv, exports);
   // The only runtime helper the scenario schema needs; inlined so the chunk has no dependencies.
   code = code.replace(/require\("ajv\/dist\/runtime\/ucs2length"\)\.default/g, "ucs2length");
   if (/require\(/.test(code)) throw new Error("The standalone scenario validator still needs an Ajv runtime helper; inline it in buildValidator.ts");
