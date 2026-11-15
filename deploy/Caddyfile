@@ -1,0 +1,57 @@
+# Caddy: automatic HTTPS, static frontend, same-origin reverse proxy to the API.
+# DOMAIN: a real host name in production (Let's Encrypt certificate is automatic; ports 80 and
+# 443 must be reachable), "http://localhost" for plain-http local use (deploy/dev.env).
+# Same origin is deliberate: the frontend's Content-Security-Policy says connect-src 'self'.
+{
+	admin off
+	# Real client IPs are seen only by Caddy; it sets X-Forwarded-For for the API (which trusts
+	# only the proxy network, see docker-compose.yml). Nothing in front of Caddy is trusted.
+}
+
+# Generated from /vercel.json at image build (deploy/gen-headers.mjs): CSP, Referrer-Policy, ...
+import /etc/caddy/security-headers.caddy
+
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	# Access logs must never contain secrets: read tokens travel in ?t=, edit keys in X-Edit-Key.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			request>uri query {
+				replace t REDACTED
+			}
+			request>headers>X-Edit-Key delete
+			request>headers>X-Read-Token delete
+		}
+	}
+
+	@api path /api/* /health /health/* /openapi/* /scalar /scalar/*
+	handle @api {
+		request_body {
+			max_size 6MB
+		}
+		reverse_proxy api:8080 {
+			# Backend answers within seconds; a hung upstream must not hold connections open.
+			transport http {
+				response_header_timeout 60s
+			}
+		}
+	}
+
+	handle {
+		import security_headers
+		root * /srv
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# Container-internal health endpoint (not published on the host).
+http://:8081 {
+	respond /healthz 200
+	bind 127.0.0.1
+}

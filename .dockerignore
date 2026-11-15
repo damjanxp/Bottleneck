@@ -1,0 +1,14 @@
+# Shared by apps/api/Dockerfile, apps/sidecar/Dockerfile and deploy/caddy.Dockerfile (build context = repo root).
+.git
+.claude
+**/node_modules
+**/dist
+**/bin
+**/obj
+**/storage
+**/coverage
+test-results
+playwright-report
+docs
+.env
+.env.*
