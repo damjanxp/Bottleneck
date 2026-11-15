@@ -23,9 +23,9 @@ _Last updated: 2026-11-15_
 
 | | |
 |---|---|
-| **Current phase** | Phase 5: venue editor, **core done and merged** (its checklist passes; drawing roads and car parks and storing map images are left). Phase 4's VPS deployment (4f) waits for the owner. Next: Phase 6, the showcase. |
-| **Done** | Phases 0–3, Phase 4 (4a–4e) and Phase 5 (5a–5c) are merged into `main` and pushed; Vercel deploys `main` (static, without the server). |
-| **Git state** | `main`: everything, pushed. `phase-4`, `phase-4-frontend-wip` and `phase-5` are merged and can be deleted. |
+| **Current phase** | Phase 5: venue editor, **core done on `phase-5`** (its checklist passes locally; not yet pushed or merged: see Git state; drawing roads and car parks and storing map images are left). Phase 4's VPS deployment (4f) waits for the owner. Next: Phase 6, the showcase. |
+| **Done** | Phases 0–3 and Phase 4 (4a–4e) are merged into `main` and pushed (CI green on all four jobs); Phase 5 (5a–5c) is committed on `phase-5`; Vercel deploys `main` (static, without the server). |
+| **Git state** | `main`: Phases 0–4, pushed. `phase-5`: Phase 5, **committed locally, not pushed**: on 2026-11-16 `git push` waited for a Git Credential Manager sign-in that nobody could answer. Next: push `phase-5`, let CI run, merge into `main`, push. `phase-4` and `phase-4-frontend-wip` are merged and can be deleted. |
 | **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys. The server part runs only with Docker Compose (`npm run stack:up`) until there is a VPS. |
 | **CI** | GitHub Actions: `check` (schema check, lint, typecheck, unit and validation tests, build), `secrets` (gitleaks over the whole history), `e2e` (Playwright, Chromium) and `api` (.NET tests with Testcontainers and the real sidecar) |
 | **How the work is done** | Work is orchestrated with subagents: the main agent plans and reviews, and subagents do focused pieces (code, tests, docs). Everything lands on a `phase-N` branch and passes `npm run check` before merging. |
@@ -50,7 +50,7 @@ _Last updated: 2026-11-15_
 - **Deployment:** Docker Compose with Caddy, encrypted backups (D-062); pinned SDK and strict builds (D-063); gitleaks in CI.
 - **Web:** "Share & server" tab when a server is present: publish, edit and share links, scenarios on the server, server jobs with a sweep chart, stored runs (D-064).
 
-**What exists after Phase 5** (merged to `main`):
+**What exists after Phase 5** (on `phase-5`, not yet merged):
 - **Venue editor** ("Edit venue" tab): draw walkable areas, obstacles, sources, gate lines and destinations on an SVG canvas over a calibrated map image; undo/redo; checks in plain sentences, including walking reachability computed by the engine (D-065, D-066); save in the browser as "my venue", or back to the server for a shared venue with the edit link (D-067).
 - **Fix:** Caddy no longer compresses API responses, which had broken every If-Match through the deployed stack (D-068).
 
@@ -61,9 +61,10 @@ _Last updated: 2026-11-15_
 1. **Live jam check** (Phase 1 [human]): open the Vercel URL, press Play on the concert example and see a queue form within 2 minutes; confirm that the "Engine self-check" line says **✓ Match: bit-identical to Node**. Send me the URL and I will put it in the README (it currently says "link added after deployment check").
 2. **`?perf=1` numbers** (Phase 1 [human]): on the machine you consider the reference machine, run with `?perf=1`, 8×, the concert example for about a minute, and send me frame p95, worker tick p95, CPU, browser and agent count.
 3. **Confirm the README and the GIF** (Phase 2 [human]): look at `README.md` on GitHub and at `docs/media/demo.gif`; tell me if anything is unclear or wrong.
-4. **For the VPS deployment (4f, the second CV milestone):** a VPS with Docker (2 vCPU, 4 GB RAM), SSH access for me, and a domain or subdomain pointed at it; for off-box backups, an rclone remote (for example an S3-compatible bucket) and a gpg public key whose private half only you keep.
-5. **Try the server locally if you like:** `npm run stack:up`, then open http://localhost:8080, pick "Share & server", publish, and run a lane sweep. `npm run stack:down` stops it. Docker Desktop needs about 4 GB free; the 7 `eventpark-*` containers of your other project were stopped (not removed) on 2026-11-15 to free memory, start them again when you need them.
-6. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026).
+4. **Sign in to GitHub on this machine** (Git Credential Manager asked for a sign-in on 2026-11-16 while nobody was there), then push Phase 5: `git push -u origin phase-5`; I merge it into `main` once CI is green.
+5. **For the VPS deployment (4f, the second CV milestone):** a VPS with Docker (2 vCPU, 4 GB RAM), SSH access for me, and a domain or subdomain pointed at it; for off-box backups, an rclone remote (for example an S3-compatible bucket) and a gpg public key whose private half only you keep.
+6. **Try the server locally if you like:** `npm run stack:up`, then open http://localhost:8080, pick "Share & server", publish, and run a lane sweep. `npm run stack:down` stops it. Docker Desktop needs about 4 GB free; the 7 `eventpark-*` containers of your other project were stopped (not removed) on 2026-11-15 to free memory, start them again when you need them.
+7. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026).
 
 ---
 
@@ -882,7 +883,7 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
 - **Later in Phase 5 or the redesign:** drawing roads, car parks and screening stages; image upload for shared venues; snapping and holes.
 - *Risks:* a second notion of "reachable" that disagrees with runs (avoided: the engine computes it, D-065); undo bugs from mutable edits (avoided: immutable documents, tests check identity).
 
-**Summary** (2026-11-15; merged into `main` and pushed)
+**Summary** (2026-11-16; committed on `phase-5`; not pushed, so CI has not run it yet)
 - **Built:** 5a to 5c.
 - **Checks:** `npm run check` passes (17 editor tests and 5 reachability tests among them). `npm run test:e2e`: 7 passed, 2 skipped (demo recorder, stack test). Full stack (`E2E_STACK_URL`): passes, now including the editor with a read-only link (every tool and the save button disabled) and saving a renamed venue with the edit link.
 - **Found and fixed:** Caddy's compression rewrote the API's ETags, so no shared document could be updated through the deployed stack (D-068); a blank venue crashed the editor through the engine (now plain errors).
