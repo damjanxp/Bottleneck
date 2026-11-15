@@ -19,13 +19,13 @@ The specification it builds on lives next to it: [spec/Bottleneck-specification-
 
 ## 1. Status
 
-_Last updated: 2026-11-13_
+_Last updated: 2026-11-15 (paused at the owner's request)_
 
 | | |
 |---|---|
-| **Current phase** | Phase 3: vehicles, parking and departures, **complete and merged into `main` locally** (engine, schema, examples and web view; see [section 6](#phase-3-vehicles-parking-and-departures)). Phases 0, 1 and 2 are merged into `main` and were pushed to GitHub on 2026-11-12. |
-| **Next phase** | Phase 4: .NET backend and jobs |
-| **Git state** | Phase 3 commits are **local only, not pushed** (`main` is ahead of `origin/main`): the owner pushes together with Claude. Until then GitHub CI and Vercel have not run on Phase 3; the same checks were run locally (`npm run check`: 263 tests; `npm run test:e2e`: 6 passed, 1 skipped). |
+| **Current phase** | Phase 4: .NET backend and jobs, **in progress, paused**. Backend done and green on CI; frontend for it unfinished (see [Phase 4 status](#phase-4-status-paused-2026-11-15)). |
+| **Done** | Phases 0–3 are merged into `main` and pushed; CI is green on `main` and Vercel deploys it. |
+| **Git state** | `main`: Phases 0–3, pushed. `phase-4`: backend, pushed, CI green (all three jobs). `phase-4-frontend-wip`: the unfinished frontend for Phase 4, pushed, **not verified**. |
 | **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys |
 | **CI** | GitHub Actions: schema check, lint, typecheck, unit and validation tests, build on every push; a second job runs the Playwright browser tests (Chromium) |
 | **How the work is done** | Work is orchestrated with subagents: the main agent plans and reviews, and subagents do focused pieces (code, tests, docs). Everything lands on a `phase-N` branch and passes `npm run check` before merging. |
@@ -43,14 +43,45 @@ _Last updated: 2026-11-13_
 - **Examples:** a stand-alone 320-stall car park (pay machines, or pay at the barrier, or pay at the barrier with 3 exit lanes) and car parks at Belgrade Fair (fair day with cars, a car park that closes, a concert with cars and departures, paying at the machines or at the barrier), with qualitative tests (D-052).
 - **Web view:** cars, roads, lots, stalls, barriers, crossings and the public-road edge on the map; parking headline card, lot and barrier tables with charts; "Jump to departures" and "Close lot now"; car fields, departure curve, barrier and lot overrides in the scenario editor; parking rows in the comparison; a Playwright test of the car park example (D-053).
 
-**Still open:** the owner's [human] checks (below), and pushing Phase 3 to GitHub together with the owner.
+**Still open:** the owner's [human] checks (below).
+
+### Phase 4 status (paused 2026-11-15)
+
+**Done on `phase-4`** (pushed; GitHub CI green on all three jobs: Node checks, Playwright, and .NET with Testcontainers and the real engine sidecar):
+- **API** (`apps/api`): ASP.NET Core on .NET 10, PostgreSQL via EF Core with jsonb documents; every write validated against `/schema` with a version-migration pipeline; generated C# classes with a CI staleness check; sharing without logins (read token, 256-bit edit key stored as SHA-256, constant-time compare, atomic rotation); ETag/If-Match concurrency; rate limits and quotas; image uploads re-encoded with SkiaSharp after a header size check; Serilog without secrets; OpenAPI + Scalar; health checks; retention cleanup.
+- **Engine sidecar** (`apps/sidecar`): stateless Node service running the engine in worker threads; same metrics hash as the browser.
+- **Job runner:** 20-seed batches (mean ± 95% CI), lane sweeps (smallest lane count meeting a target wait), gate-opening sweeps (latest opening for 95% inside by the start); the database is the queue; jobs survive restarts and can be cancelled; job runs hash identically to browser runs.
+- **Docker Compose stack:** db, sidecar, api and Caddy (same-origin `/api`, headers generated from `vercel.json`, non-root read-only containers, encrypted nightly backups; backup → wipe → restore tested locally). `npm run stack:up` runs it on http://localhost:8080.
+- **Strict builds:** .NET SDK 10.0.404 and analysis level pinned; the API image builds with warnings as errors.
+
+**Not done:**
+1. **Frontend for the backend** (on `phase-4-frontend-wip`, unfinished and unverified): API client, publish/share links (`/v/{id}#k=…` edit, `#t=…` read-only), server jobs panel and sweep chart. Next step: finish it, then lint, unit tests, `test:e2e`, and the full-stack Playwright spec against `npm run stack:up`.
+2. **Local Docker checks:** Docker Desktop crashed on 2026-11-15 ("unable to start"), so the API image build with the pinned SDK and the full-stack browser test have not been run locally since. CI covers the .NET tests.
+3. **Decision records and learning notes for Phase 4** (D-054 onwards). The design notes are collected below so nothing is lost.
+4. **Merge `phase-4` into `main`**, then **deploy to a VPS**, which needs the owner (server, SSH access, domain).
+
+**Phase 4 design notes (to become decision records):**
+- **Sidecar:** framework-free Node `http`; one `worker_threads` Worker per run, so timeouts and client disconnects really stop a run; `CONCURRENCY` (default 1) with an immediate 503 when busy; esbuild bundles engine + schemas into `dist/server.mjs`; Ajv validation; `seed` replaces `scenario.seed`, `overrides` merge per element and field (a lane sweep is one request); RFC 7807 errors (400, 404, 405, 413, 422, 503, 504); never logs bodies.
+- **Validation (.NET):** JsonSchema.Net (full draft-07, matches Ajv); NJsonSchema generates C# for typed reads only (it cannot express pure `oneOf` unions, so those are widened); documents stay JSON/jsonb. Caps: venue 1 MB, scenario 256 KB, client run 256 KB, depth 32, 200,000 values; validate → migrate → validate.
+- **Images:** SkiaSharp instead of ImageSharp (ImageSharp 3.2+ needs a licence key at build time; 3.1.12 has security advisories); own PNG/JPEG header parser checks 4096 px before decoding; 5 MB cap; at most 2 decodes at once.
+- **Concurrency:** an app-managed `Revision` as a strong ETag (not xmin, so activity tracking doesn't break editors' ETags); If-Match required (428 without, 412 on conflict).
+- **Credentials:** venue id 128 bits; read token 256 bits in `X-Read-Token` or `?t=` (query strings are never logged); edit key 256 bits only in `X-Edit-Key`; 404/401/403 semantics; rotation is one conditional UPDATE (one winner).
+- **Status codes:** 409 per-venue count limits, 507 storage quotas and the global venue cap, 413 size caps, 422 schema/version/image errors, 429 with Retry-After (fixed windows per IP; forwarded headers trusted only from the Caddy network).
+- **Retention:** unpinned venues with no activity for 90 days are deleted with their files.
+- **Job runner:** jobs table claimed with `FOR UPDATE SKIP LOCKED`; a Channel only wakes the runner (plus a 30 s poll); Running → Queued at startup and shutdown; finished runs reused on resume via `job_run_index`; a venue snapshot per job; cancel aborts the in-flight HTTP request; work budget (runs × simulated hours) and queue caps checked up front; results from different engine versions never mixed; server batches use the browser's seed derivation; sweeps use common random numbers; "meets the target" defaults to the mean and also reports the CI-based answer (with 2–5 seeds per point the CI rule mostly reflects the seed count).
+- **Cross-language determinism:** a Node-generated fixture of expected hashes (`api:hashes:check` fails if stale) and .NET tests that run the real sidecar and compare.
+- **Compose:** only Caddy publishes ports; `backend` network is internal; all containers non-root with read-only root filesystems and all capabilities dropped; secrets redacted from access logs; RPO 24 h, RTO 1 h target; gpg-encrypted backups with an rclone off-box copy (rclone and public-key gpg not yet tested).
+- **Builds:** `AnalysisLevel` floated with the SDK, so CI's newer SDK raised CA1873; it is now pinned (`10.0-recommended`) and CI and Docker use SDK 10.0.404.
+- **Tests:** default Vitest timeout raised to 30 s (many tests run whole simulations); the sidecar test client uses fresh connections (a pooled keep-alive socket was closed by the in-process server while a synchronous engine run blocked the event loop).
 
 ### What the owner needs to do now
 
 1. **Live jam check** (Phase 1 [human]): after the merge, open the Vercel URL, press Play on the concert example and see a queue form within 2 minutes; confirm that the "Engine self-check" line says **✓ Match: bit-identical to Node**. Send me the URL and I will put it in the README (it currently says "link added after deployment check").
 2. **`?perf=1` numbers** (Phase 1 [human]): on the machine you consider the reference machine, run with `?perf=1`, 8×, the concert example for about a minute, and send me frame p95, worker tick p95, CPU, browser and agent count.
 3. **Confirm the README and the GIF** (Phase 2 [human]): look at `README.md` on GitHub and at `docs/media/demo.gif`; tell me if anything is unclear or wrong.
-4. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026). Everything works on 20.19 for now, but some newer tools, such as Vitest 5, already require 22 or later.
+4. **Restart Docker Desktop** (it crashed on 2026-11-15): quit it from the tray and start it again; if it still fails, run `wsl --shutdown` and start it again.
+5. **For deployment (later):** a VPS with Docker (2 vCPU, 4 GB RAM), SSH access, and a domain or subdomain pointed at it.
+6. **Optional: upgrade Node.js** on your machine to 24 LTS (you have 20.19, which reached end of life in April 2026). Everything works on 20.19 for now, but some newer tools, such as Vitest 5, already require 22 or later.
 
 ---
 
