@@ -45,9 +45,18 @@ async function start(config: Partial<AppConfig> = {}): Promise<Started> {
   return { app, port, logs, close: () => new Promise<void>((resolve) => (app.server.closeAllConnections(), app.server.close(() => resolve()))) };
 }
 
+/**
+ * One connection per request (agent: false, connection: close). The server runs in this same process, so a
+ * synchronous in-process engine run (inProcessHash) blocks the event loop for seconds; the server's 5 s
+ * keep-alive timer then fires late and closes a pooled socket the client agent still thinks is reusable, and
+ * the next request on it fails with ECONNRESET. That is a test artefact of sharing one event loop (a real
+ * client on another process gets a clean close and retries), so the helper never reuses sockets.
+ */
 function call(port: number, method: string, url: string, body?: string | Buffer): Promise<Reply> {
   return new Promise((resolve, reject) => {
-    const req = request({ host: "127.0.0.1", port, method, path: url, headers: body === undefined ? {} : { "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, (res: IncomingMessage) => {
+    const headers: Record<string, string | number> = { connection: "close" };
+    if (body !== undefined) Object.assign(headers, { "content-type": "application/json", "content-length": Buffer.byteLength(body) });
+    const req = request({ host: "127.0.0.1", port, method, path: url, agent: false, headers }, (res: IncomingMessage) => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));
       res.on("end", () => resolve({ status: res.statusCode ?? 0, contentType: String(res.headers["content-type"]), body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown> }));
@@ -60,12 +69,12 @@ function call(port: number, method: string, url: string, body?: string | Buffer)
 const post = (port: number, payload: unknown) => call(port, "POST", "/run", JSON.stringify(payload));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe("sidecar", () => {
+describe("sidecar", { timeout: 60_000 }, () => {
   let s: Started;
   beforeAll(async () => {
     await buildSidecar(distDir);
     s = await start({ maxBodyBytes: 200_000 });
-  }, 60_000);
+  });
   afterAll(async () => {
     await s.close();
   });
@@ -101,12 +110,13 @@ describe("sidecar", () => {
   });
 
   it("overrides equal a scenario carrying them (laneCount sweep)", async () => {
-    const baseline = await post(s.port, { venue: fair.venue, scenario: fairScenario });
-    const swept = await post(s.port, { venue: fair.venue, scenario: fairScenario, overrides: { "gate-a": { laneCount: 1 } } });
+    const overrides = { "exit-barrier": { laneCount: 1 } };
+    const baseline = await post(s.port, { venue: carPark.venue, scenario: carScenario });
+    const swept = await post(s.port, { venue: carPark.venue, scenario: carScenario, overrides });
     expect(swept.status).toBe(200);
     expect(swept.body.metricsHash).not.toBe(baseline.body.metricsHash);
-    expect(swept.body.metricsHash).toBe(inProcessHash(fair.venue, { ...fairScenario, overrides: { "gate-a": { laneCount: 1 } } }));
-  }, 30_000);
+    expect(swept.body.metricsHash).toBe(inProcessHash(carPark.venue, { ...carScenario, overrides: { ...carScenario.overrides, ...overrides } }));
+  });
 
   it("400 for malformed JSON, missing documents and schema-invalid venue", async () => {
     const bad = await call(s.port, "POST", "/run", "{not json");
@@ -136,21 +146,27 @@ describe("sidecar", () => {
   });
 });
 
-describe("sidecar limits", () => {
+describe("sidecar limits", { timeout: 60_000 }, () => {
   it("503 when busy, then recovers", async () => {
     const t = await start({ concurrency: 1 });
     try {
-      const slow = post(t.port, { venue: fair.venue, scenario: fairScenario });
+      // The long run only has to occupy the slot; it is cancelled by closing its connection once the 503 is seen.
+      const body = JSON.stringify({ venue: fair.venue, scenario: fairScenario });
+      const slow = request({ host: "127.0.0.1", port: t.port, method: "POST", path: "/run", agent: false, headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), connection: "close" } });
+      slow.on("error", () => undefined);
+      slow.end(body);
       while (t.app.active() === 0) await sleep(10);
       const busy = await post(t.port, { venue: carPark.venue, scenario: carScenario });
       expect(busy.status).toBe(503);
       expect(busy.contentType).toContain("application/problem+json");
-      expect((await slow).status).toBe(200);
+      slow.destroy();
+      const t0 = Date.now();
+      while (t.app.active() > 0 && Date.now() - t0 < 5000) await sleep(10);
       expect((await post(t.port, { venue: carPark.venue, scenario: carScenario })).status).toBe(200);
     } finally {
       await t.close();
     }
-  }, 60_000);
+  });
 
   it("504 when the wall-clock budget is exceeded, and the slot is freed", async () => {
     const t = await start();
@@ -163,13 +179,13 @@ describe("sidecar limits", () => {
     } finally {
       await t.close();
     }
-  }, 60_000);
+  });
 
   it("a client abort stops the run and frees the slot", async () => {
     const t = await start({ concurrency: 1 });
     try {
       const body = JSON.stringify({ venue: fair.venue, scenario: fairScenario });
-      const req = request({ host: "127.0.0.1", port: t.port, method: "POST", path: "/run", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } });
+      const req = request({ host: "127.0.0.1", port: t.port, method: "POST", path: "/run", agent: false, headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), connection: "close" } });
       req.on("error", () => undefined);
       req.end(body);
       while (t.app.active() === 0) await sleep(10);
@@ -181,5 +197,5 @@ describe("sidecar limits", () => {
     } finally {
       await t.close();
     }
-  }, 60_000);
+  });
 });
