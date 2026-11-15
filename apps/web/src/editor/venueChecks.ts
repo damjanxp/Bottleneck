@@ -14,7 +14,7 @@
 import { checkWalkingReachability } from "@bottleneck/engine";
 import type { Point, Polygon, Venue } from "@bottleneck/schema";
 import { schemaMessages, type SchemaValidator } from "../library/validate.ts";
-import { isDegenerateOrSelfIntersecting } from "./geometry.ts";
+import { area, isDegenerateOrSelfIntersecting } from "./geometry.ts";
 
 export interface VenueProblem {
   severity: "error" | "warning";
@@ -59,6 +59,11 @@ export function structureProblems(v: Venue): VenueProblem[] {
   const out: VenueProblem[] = [];
   const err = (elementId: string, message: string) => out.push({ severity: "error", elementId, message });
   const warn = (elementId: string, message: string) => out.push({ severity: "warning", elementId, message });
+
+  // The basics a simulation needs.
+  if (!v.walkableAreas.some((w) => area(w.polygon.outer) > 0)) err("", "Draw at least one walkable area: people can only walk there.");
+  if (v.sources.length === 0 && (v.vehicleSources ?? []).length === 0) err("", "Add at least one source: where people arrive.");
+  if (v.destinations.length === 0) err("", "Add at least one destination: where people are going.");
 
   // Unique ids across the whole venue (scenario overrides and events refer to elements by id).
   const groups: [string, readonly Named[]][] = [
@@ -133,7 +138,14 @@ export function structureProblems(v: Venue): VenueProblem[] {
 /** Walking reachability from the engine. Assumes a schema-valid venue without structure errors. */
 export function reachabilityProblems(v: Venue): VenueProblem[] {
   const byId = new Map<string, Named>([...v.sources, ...v.screeningStages, ...v.gateGroups].map((e) => [e.id, e]));
-  return checkWalkingReachability(v).map((i): VenueProblem => {
+  let issues: ReturnType<typeof checkWalkingReachability>;
+  try {
+    issues = checkWalkingReachability(v);
+  } catch (e) {
+    // The engine refuses a venue it cannot model; say why instead of failing the page.
+    return [{ severity: "error", elementId: "", message: `The simulation cannot use this venue: ${e instanceof Error ? e.message : String(e)}.` }];
+  }
+  return issues.map((i): VenueProblem => {
     switch (i.kind) {
       case "sourceUnreachable":
         return { severity: "error", elementId: i.sourceId, message: `${label(byId.get(i.sourceId) ?? { id: i.sourceId }, "Source")} cannot reach any entry lane on foot: connect its walkable area to the gates.` };

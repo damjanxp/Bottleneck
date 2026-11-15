@@ -10,6 +10,9 @@ import { calibrate, distance, pixelToVenue, venueToPixel } from "./calibration.t
 import { area, isDegenerateOrSelfIntersecting, selfIntersections } from "./geometry.ts";
 import { HISTORY_LIMIT, canRedo, canUndo, commit, createHistory, redo, undo } from "./history.ts";
 import { checkVenue, hasErrors, structureProblems } from "./venueChecks.ts";
+import { addGate, addPolygon, addSource, blankVenue, deleteElement, handles, moveHandle } from "./edits.ts";
+import type { KeyValueStore } from "../library/storage.ts";
+import { USER_VENUES_KEY, loadUserVenues, removeUserVenue, saveUserVenues, upsertUserVenue } from "../library/userVenues.ts";
 
 // The build-time standalone validator (what the browser uses), evaluated in Node.
 const source = buildScenarioValidatorSource({ "common.schema.json": commonSchema as object, "scenario.schema.json": scenarioSchema as object, "venue.schema.json": venueSchema as object });
@@ -174,6 +177,16 @@ describe("[test] venue validation flags an unreachable source and a self-interse
     expect(checkVenue(drawn, validateVenue)).toEqual([]);
   });
 
+  it("a blank venue is refused with plain reasons, not an exception", () => {
+    const blank: Venue = { schemaVersion: 1, id: "blank", name: "Blank", walkableAreas: [], obstacles: [], sources: [], screeningStages: [], gateGroups: [], destinations: [] };
+    const problems = checkVenue(blank, validateVenue);
+    expect(problems.filter((p) => p.severity === "error").map((p) => p.message)).toEqual([
+      "Draw at least one walkable area: people can only walk there.",
+      "Add at least one source: where people arrive.",
+      "Add at least one destination: where people are going.",
+    ]);
+  });
+
   it("flags a source on an island that cannot reach the gates", () => {
     const v: Venue = {
       ...drawn,
@@ -221,5 +234,58 @@ describe("[test] venue validation flags an unreachable source and a self-interse
     expect(hasErrors(problems)).toBe(false);
     expect(problems.map((p) => p.severity)).toEqual(["warning", "warning"]);
     expect(concert.id).toBe("belgrade-fair-concert");
+  });
+});
+
+describe("editing operations keep the document immutable", () => {
+  it("adds elements with fresh ids, moves handles, deletes, and never mutates the input", () => {
+    const frozen = JSON.stringify(drawn);
+    const a = addSource(drawn, { x: 12.345, y: 20 });
+    expect(a.id).toBe("source-2");
+    expect(a.venue.sources.map((s) => s.share)).toEqual([0.5, 0.5]);
+    expect(a.venue.sources[1]?.position).toEqual({ x: 12.35, y: 20 }); // rounded to centimetres
+    expect(a.venue.walkableAreas).toBe(drawn.walkableAreas); // untouched parts are shared
+    const three = addSource(a.venue, { x: 1, y: 1 }).venue.sources.map((s) => s.share);
+    expect(three.reduce((x, y) => x + y, 0)).toBeCloseTo(1, 12);
+    const g = addGate(drawn, { x: 30, y: 30 }, { x: 30, y: 10 });
+    expect(g.id).toBe("gate-2");
+    expect(g.venue.gateGroups[1]?.laneCount).toBe(4);
+    const p = addPolygon(drawn, "obstacle", sq(20, 20, 22, 22));
+    expect(p.venue.obstacles[0]?.id).toBe("obstacle-1");
+    const h = handles(drawn).find((x) => x.handle.kind === "lineEnd" && x.handle.end === "a");
+    expect(h).toBeDefined();
+    const moved = moveHandle(drawn, h!.handle, { x: 41, y: 33 });
+    expect(moved.gateGroups[0]?.line.a).toEqual({ x: 41, y: 33 });
+    expect(deleteElement(drawn, "gate-1").gateGroups).toEqual([]);
+    expect(deleteElement(drawn, "nothing")).toBe(drawn);
+    expect(JSON.stringify(drawn)).toBe(frozen);
+    expect(blankVenue("v-1", "New").walkableAreas).toEqual([]);
+  });
+});
+
+describe("venues saved in this browser", () => {
+  const memory = (): KeyValueStore & { data: Map<string, string> } => {
+    const data = new Map<string, string>();
+    return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v), removeItem: (k) => void data.delete(k) };
+  };
+
+  it("round-trip exactly, sorted by id, with replace and remove", () => {
+    const store = memory();
+    let list = upsertUserVenue([], drawn, "2026-11-16T00:00:00.000Z");
+    list = upsertUserVenue(list, { ...drawn, id: "a-venue", name: "A" }, "t");
+    expect(list.map((v) => v.id)).toEqual(["a-venue", "drawn-venue"]);
+    expect(saveUserVenues(store, list)).toBe(true);
+    expect(loadUserVenues(store)).toEqual(list);
+    expect(removeUserVenue(list, "a-venue").map((v) => v.id)).toEqual(["drawn-venue"]);
+  });
+
+  it("skips entries that are not venues and ignores an unknown format", () => {
+    const store = memory();
+    store.setItem(USER_VENUES_KEY, JSON.stringify({ format: 1, venues: [{ venue: drawn, savedAt: "t" }, { venue: { id: 3 } }, null] }));
+    expect(loadUserVenues(store).map((v) => v.id)).toEqual(["drawn-venue"]);
+    store.setItem(USER_VENUES_KEY, JSON.stringify({ format: 2, venues: [] }));
+    expect(loadUserVenues(store)).toEqual([]);
+    store.setItem(USER_VENUES_KEY, "{not json");
+    expect(loadUserVenues(store)).toEqual([]);
   });
 });

@@ -7,6 +7,7 @@ import { buildRunRecord, fitRunRecord, venueHash } from "./api/runRecord.ts";
 import type { CompareEntry } from "./compare/plan.ts";
 import { allChoices, knownVenues, serverKey, userKey } from "./library/catalog.ts";
 import { useRemoteVenues } from "./library/remoteVenues.ts";
+import { useUserVenues } from "./library/userVenues.ts";
 import { copyName, newScenarioId } from "./library/scenarios.ts";
 import type { RunRecordParts } from "./sim/SimController.ts";
 import { strings } from "./strings.ts";
@@ -22,6 +23,7 @@ const LibraryView = lazy(() => import("./ui/LibraryView.tsx").then((m) => ({ def
 const CompareView = lazy(() => import("./ui/CompareView.tsx").then((m) => ({ default: m.CompareView })));
 const ScanLogView = lazy(() => import("./ui/ScanLogView.tsx").then((m) => ({ default: m.ScanLogView })));
 const ShareView = lazy(() => import("./ui/ShareView.tsx").then((m) => ({ default: m.ShareView })));
+const VenueEditor = lazy(() => import("./ui/VenueEditor.tsx").then((m) => ({ default: m.VenueEditor })));
 
 type SelfCheckResult = Extract<WorkerResponse, { type: "selfCheckResult" }>;
 type SelfCheckState = { status: "running" } | { status: "done"; result: SelfCheckResult } | { status: "error"; message: string };
@@ -77,8 +79,8 @@ function SelfCheckLine() {
   );
 }
 
-type Tab = "simulate" | "scenarios" | "compare" | "scanLogs" | "share";
-const TABS: Tab[] = ["simulate", "scenarios", "compare", "scanLogs"];
+type Tab = "simulate" | "scenarios" | "compare" | "scanLogs" | "editor" | "share";
+const TABS: Tab[] = ["simulate", "scenarios", "compare", "scanLogs", "editor"];
 
 const DEFAULT_VENUE = exampleVenues.find((v) => v.id === "belgrade-fair-concert")?.id ?? exampleVenues[0]?.id ?? "";
 
@@ -104,6 +106,7 @@ export function App() {
   // The optional backend: hidden entirely when the API is not reachable (static hosting).
   const server = useServer();
   const remote = useRemoteVenues();
+  const mine = useUserVenues();
   const sharedVenue = server.shared.status === "ready" ? server.shared.venue : null;
   const jobs = useJobs(server.client, sharedVenue?.id ?? null, server.access);
 
@@ -117,7 +120,7 @@ export function App() {
 
   // `remote` changes when a shared venue loads or changes: the catalogue reads it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const known = useMemo(() => knownVenues(), [remote]);
+  const known = useMemo(() => knownVenues(), [remote, mine]);
   const example = known.find((v) => v.id === venueId) ?? known.find((v) => v.id === DEFAULT_VENUE) ?? known[0];
   const venue = example?.venue;
   const isShared = example?.remote ?? false;
@@ -382,6 +385,11 @@ export function App() {
           {visited.has("scanLogs") && (
             <div hidden={tab !== "scanLogs"}>
               <ScanLogView venueId={example?.id ?? venueId} entries={library.entries} onApply={(s) => editDraft(s, true)} />
+            </div>
+          )}
+          {visited.has("editor") && (
+            <div hidden={tab !== "editor"}>
+              <VenueEditor key={example?.id ?? venueId} venueId={example?.id ?? venueId} server={server} onSaved={(id) => setVenueId(id)} />
             </div>
           )}
           {visited.has("share") && tabs.includes("share") && (

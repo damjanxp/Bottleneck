@@ -23,9 +23,9 @@ _Last updated: 2026-11-15_
 
 | | |
 |---|---|
-| **Current phase** | Phase 4: .NET backend and jobs. **Code done and merged**; only the VPS deployment (4f) is open, and it needs the owner. Next: Phase 5, the venue editor. |
-| **Done** | Phases 0–3 and Phase 4 (4a–4e) are merged into `main` and pushed; Vercel deploys `main` (static, without the server). |
-| **Git state** | `main`: everything, pushed. `phase-4` is merged; `phase-4-frontend-wip` is merged and can be deleted. |
+| **Current phase** | Phase 5: venue editor, **core done and merged** (its checklist passes; drawing roads and car parks and storing map images are left). Phase 4's VPS deployment (4f) waits for the owner. Next: Phase 6, the showcase. |
+| **Done** | Phases 0–3, Phase 4 (4a–4e) and Phase 5 (5a–5c) are merged into `main` and pushed; Vercel deploys `main` (static, without the server). |
+| **Git state** | `main`: everything, pushed. `phase-4`, `phase-4-frontend-wip` and `phase-5` are merged and can be deleted. |
 | **Live demo** | Vercel (the owner imported the repository on 2026-11-11); every push to `main` deploys. The server part runs only with Docker Compose (`npm run stack:up`) until there is a VPS. |
 | **CI** | GitHub Actions: `check` (schema check, lint, typecheck, unit and validation tests, build), `secrets` (gitleaks over the whole history), `e2e` (Playwright, Chromium) and `api` (.NET tests with Testcontainers and the real sidecar) |
 | **How the work is done** | Work is orchestrated with subagents: the main agent plans and reviews, and subagents do focused pieces (code, tests, docs). Everything lands on a `phase-N` branch and passes `npm run check` before merging. |
@@ -50,7 +50,11 @@ _Last updated: 2026-11-15_
 - **Deployment:** Docker Compose with Caddy, encrypted backups (D-062); pinned SDK and strict builds (D-063); gitleaks in CI.
 - **Web:** "Share & server" tab when a server is present: publish, edit and share links, scenarios on the server, server jobs with a sweep chart, stored runs (D-064).
 
-**Still open:** the VPS deployment (4f) and the owner's [human] checks (below).
+**What exists after Phase 5** (merged to `main`):
+- **Venue editor** ("Edit venue" tab): draw walkable areas, obstacles, sources, gate lines and destinations on an SVG canvas over a calibrated map image; undo/redo; checks in plain sentences, including walking reachability computed by the engine (D-065, D-066); save in the browser as "my venue", or back to the server for a shared venue with the edit link (D-067).
+- **Fix:** Caddy no longer compresses API responses, which had broken every If-Match through the deployed stack (D-068).
+
+**Still open:** the VPS deployment (4f), the Phase 5 extras (roads and car parks in the editor, stored map images), and the owner's [human] checks (below).
 
 ### What the owner needs to do now
 
@@ -276,7 +280,8 @@ Each record has four short parts: context, decision, alternatives, consequences.
 
 ### D-033 JSON Schema validation in the browser: Ajv standalone code generated at build time
 - **Context:** Scenarios must be validated against the JSON Schema before saving or importing. Ajv compiles a schema with `new Function`, which the strict CSP (no `unsafe-eval`, D-009) forbids.
-- **Decision:** Ajv's **standalone** mode runs the compilation at build time: a small Vite plugin (`apps/web/vite.config.ts`) serves the virtual module `virtual:scenario-validator`, built by `apps/web/src/api/          API client, link and credential handling, job requests and results, polling, run records (pure, tested)
+- **Decision:** Ajv's **standalone** mode runs the compilation at build time: a small Vite plugin (`apps/web/vite.config.ts`) serves the virtual module `virtual:scenario-validator`, built by `apps/web/src/editor/       venue editor logic: edits, undo/redo history, calibration, polygon checks, venue checks (pure, tested)
+apps/web/src/api/          API client, link and credential handling, job requests and results, polling, run records (pure, tested)
 apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/scenario`. The one runtime helper it needs (`ucs2length`) is inlined, and the build fails if the code still needs `require` or code generation. The app loads it lazily (a 65 kB chunk, 7 kB gzipped) when saving, importing or checking stored entries. On top of the schema, `library/validate.ts` checks what the schema cannot see (element ids, lane numbers against the lane count, sources, timeline order) and turns everything into plain sentences. The editor's own fields are parsed by `library/form.ts` with messages per field.
 - **Tests:** Vitest checks that the generated validator accepts and rejects the same documents as Ajv itself, that every built-in scenario round-trips through the editor form unchanged, and that every kind of editor output is schema-valid (`library.test.ts`).
 - **Alternatives:** Hand-written validation only (drifts from the schema); Ajv at run time with `unsafe-eval` (weakens the CSP); a committed generated file (needs a freshness check; the build-time plugin cannot go stale).
@@ -534,6 +539,35 @@ apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/sc
 - **Alternatives:** A separate admin page (more routes for the redesign to undo); WebSockets for job progress (spec 6.4 says polling; one more thing for Caddy and the rate limiter).
 - **Consequences:** On Vercel a `/v/{id}` link returns Vercel's 404, since there is no server there; links are only made by a deployment with the API. Known gaps for the redesign: image uploads have no UI yet (the API supports them; the venue editor of Phase 5 will use them); the shared venue's own document cannot be edited in the browser until the Phase 5 editor.
 
+### D-065 Walking reachability is computed by the engine (Phase 5)
+- **Context:** The checklist asks the editor to flag an unreachable source. "Reachable" must mean the same thing as in a run, where such people are counted as `TurnedAway` (D-022).
+- **Decision:** `checkWalkingReachability(venue)` in `packages/engine/src/venueCheck.ts` builds the run's own walk grid and flow fields (`buildVenueModel`) and reports: a source whose spawn cell cannot reach the entry lanes (or, without gates, a destination); a screening stage or gate group none of whose lane exits can reach the next stage or a destination. It draws no random numbers. A test runs the same venue and checks the run counts unreachable people too.
+- **Alternatives:** A separate flood fill in the web app on the drawn polygons (a second model that could disagree with the engine at narrow gaps or the 0.5 m grid).
+- **Consequences:** A destination drawn just outside every walkable area is **not** an error: the engine walks people to its nearest walkable cell, and the check says the same. The engine throws for a venue with no walkable area; the editor reports that as a plain error first.
+
+### D-066 The venue editor: immutable documents, undo by reference, an SVG canvas
+- **Context:** Spec Phase 5: draw a venue over a map with two-click calibration, undo/redo, validation; review C4 (undo stores document references) and C6 (keyboard access to editor tools).
+- **Decision:**
+  - **Edits** (`editor/edits.ts`) return a new venue that shares unchanged parts; coordinates are rounded to centimetres. **History** (`editor/history.ts`) keeps up to 200 previous documents by reference; edits with the same key in a row (a drag, typing a name) are one step; an edit that changes nothing adds no step. Undo therefore returns exactly the earlier object.
+  - **Calibration** (`editor/calibration.ts`): two clicks on the map image and the real distance give metres per pixel; venue point = `background.origin` + pixel × metres per pixel (both y-down). Points under 10 px apart are refused. Re-calibrating scales the shapes already drawn about the image origin so they stay on the same spot of the map.
+  - **Checks** (`editor/venueChecks.ts`), in plain sentences, in three stages: the JSON Schema (the build-time validator now also exports `validateVenue`, D-033); what the schema cannot say (at least one walkable area, a source or vehicle source, a destination; unique ids; references between gates and screening, barriers and roads, car parks and barriers, vehicle sources and car parks; polygons that cross themselves or have no area; sources and lane lines off the walkable areas; shares that do not add up to 1); then reachability (D-065). **Errors block saving; warnings do not.**
+  - **Canvas:** SVG, not PixiJS: a venue has tens of shapes, SVG gives hit-testing, crisp lines at any zoom and accessible markup for free, and needs nothing new under the CSP. Tools are buttons with `aria-pressed` in a toolbar; Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z), Enter (finish a shape), Escape (cancel) and Delete work from the keyboard; the element list lets every element be renamed, its lanes set and deleted without the mouse.
+  - **What it draws:** walkable areas, obstacles, destinations, sources and gate lines (4 lanes, the card/QR turnstile mix, D-024). An existing venue's screening stages, roads, barriers and car parks are kept, and their points that are lines can be dragged, but they cannot yet be created in the editor.
+- **Alternatives:** Inverse commands for undo (the review advised against them); PixiJS for the editor (no benefit at this size, and no DOM to click in tests).
+- **Consequences:** The map image is display-only and session-only (see D-067). Gaps for the redesign: drawing roads, car parks and screening stages; holes in polygons; snapping; editing a shape's points after it is closed other than by dragging.
+
+### D-067 Where an edited venue is saved
+- **Context:** Phase 2 keeps scenarios in localStorage (D-032); Phase 4 can store venues on the server.
+- **Decision:** A venue drawn or copied in the editor is saved in this browser under its own versioned key `bottleneck.venues.v1` (`library/userVenues.ts`; entries that are not venue-shaped are skipped on load), and appears in the venue list as "… (my venue)", so the simulation, scenarios and comparison work on it like on an example. A copy of an example gets a new id (`venue-…`) and " (copy)" in its name; examples stay read-only. A **shared venue** opened with the edit link is saved back to the server (PUT with If-Match, D-057); with the read-only link every tool and the save button are disabled, and the server refuses writes anyway (D-056). Publishing a "my venue" uses the Share section (D-064).
+- **Alternatives:** Storing venues in the scenario library key (would change its format and its backup, D-032).
+- **Consequences:** A background image is not stored in the browser (localStorage is too small for images, and the schema stores a file name, not the data); the venue keeps its calibration and the user picks the image again to see it. Uploading it to the server for a shared venue is a later step (the API supports uploads, D-059).
+
+### D-068 Caddy must not compress API responses
+- **Context:** The full-stack test of the editor found that saving a shared venue through Caddy always failed with 412. Caddy's `encode` rewrites a strong ETag when it compresses a response (`"1"` becomes `"1-gzip"`), so the If-Match the browser sends back never matches. The .NET tests talk to the API directly and could not see it.
+- **Decision:** `encode zstd gzip` applies only to the static site; API responses pass through unchanged (they are JSON of at most about 1 MB). The full-stack Playwright test now saves a venue change through Caddy.
+- **Alternatives:** Making the API accept `-gzip` suffixes in If-Match (works around one proxy's behaviour in application code); weak ETags (would weaken the concurrency check).
+- **Consequences:** API responses are larger on the wire; if that ever matters, the API can compress them itself (ASP.NET Core response compression keeps the ETag).
+
 ---
 
 ## 3. Review notes triage
@@ -562,9 +596,9 @@ What happened to each point in [keep-in-mind.md](spec/keep-in-mind.md). "Adopt" 
 | C1 | Replay memory blows 200 MB | **Adopt**: adaptive keyframe interval plus engine checkpoints every few simulated minutes; backward seeks restore the nearest checkpoint and re-run, cancellably | done in Phase 1: checkpoint interval adapts to a 64 MB budget, cancellable seeks (D-026) |
 | C2 | Budget the worker tick separately | **Adopt**: worker tick p95 under 12 ms at the reference load, shown in `?perf=1` | done in Phase 1 (worker tick timing in the `?perf=1` overlay; numbers in section 6) |
 | C3 | 20 Hz snapshots too coarse at 8× | **Adopt**: snapshots carry velocity; the renderer extrapolates | done in Phase 1 (D-029) |
-| C4 | Undo: inverse commands vs immutable documents | **Adopt**: undo stores previous document references (cheap with structural sharing), not inverse commands | Phase 5 |
+| C4 | Undo: inverse commands vs immutable documents | **Adopt**: undo stores previous document references (cheap with structural sharing), not inverse commands | **done in Phase 5** (D-066) |
 | C5 | Next.js adds little | **Adopt**: D-002 | done |
-| C6 | Accessibility and mobile | **Adopt**: table alternatives for charts, keyboard-accessible editor tools, `aria-live` headline number, canvas hidden by default below about 768 px | Phase 1 partly done (`aria-live` headline number); table alternatives for charts and the mobile canvas rule still open |
+| C6 | Accessibility and mobile | **Adopt**: table alternatives for charts, keyboard-accessible editor tools, `aria-live` headline number, canvas hidden by default below about 768 px | Phase 1 `aria-live` headline number; Phase 4 sweep chart has a table; Phase 5 keyboard-accessible editor tools (D-066); the mobile canvas rule is left for the redesign |
 | D1 | Limit the job runner | **Adopt**: one job at a time, per-venue and global queue caps, work budget (seeds × points × simulated hours), per-run timeout, jobs need the edit key | **done in Phase 4** (D-060) |
 | D2 | .NET to Node contract | **Adopt**: a stateless internal HTTP sidecar; the database is the real queue (`Channel<T>` only wakes the runner); unique (venueId, requestId); Running→Queued on startup; `engineVersion` stored per result | **done in Phase 4** (D-054, D-060) |
 | D3 | CSP, constant-time compare, atomic key rotation, no cookies | **Adopt**: CSP already in place (D-009); the rest in Phase 4 | **done** (D-009, D-056) |
@@ -636,11 +670,11 @@ Every check from spec section 9, sorted into the phase where the work actually h
 - [ ] [human] The app is live on the VPS over HTTPS; one backup restore has been tested. **Second CV milestone.**
 
 ### Phase 5: Venue editor
-- [ ] [test] After two-click calibration, a 100 m distance measures 100 m ± 1%
-- [ ] [test] Draw a venue (walkable area, source, gate group with 4 lanes, destination), save, reload: unchanged (Playwright)
-- [ ] [test] Undo/redo returns the document to exactly the previous state
-- [ ] [test] Validation flags an unreachable source and a self-intersecting polygon
-- [ ] [test] A read-only link shows the venue but rejects edits
+- [x] [test] After two-click calibration, a 100 m distance measures 100 m ± 1% (`apps/web/src/editor/editor.test.ts`: calibrated on a diagonal 100 m clicked to whole pixels, a different horizontal 100 m measures within 1 m)
+- [x] [test] Draw a venue (walkable area, source, gate group with 4 lanes, destination), save, reload: unchanged (Playwright, `apps/web/e2e/editor.spec.ts`: also undo/redo in the UI; the stored document is byte-for-byte the same after the reload)
+- [x] [test] Undo/redo returns the document to exactly the previous state (`editor.test.ts`: the very same object, untouched by later edits; a drag is one step; D-066)
+- [x] [test] Validation flags an unreachable source and a self-intersecting polygon (`editor.test.ts`; reachability from the engine, `packages/engine/test/venueCheck.test.ts`, D-065)
+- [x] [test] A read-only link shows the venue but rejects edits (full-stack Playwright `stack.spec.ts`: editor tools and save disabled; the API refuses writes without the edit key, `SharingTests.cs`)
 
 ### Phase 6: Showcase
 - [ ] [human] A first-time visitor loads an example, runs it and compares two scenarios without instructions
@@ -837,6 +871,24 @@ All Fixed rules from spec sections 4.1, 4.5, 5, 7, 8 and 11 in one place (review
 - **Fixed while finishing:** the job form's controls were named with their own value ("Seeds 20") because they sit inside their `<label>`; they now have an `aria-label`. Playwright no longer builds and serves the static app when `E2E_STACK_URL` is set.
 - **Deferred:** **4f** (VPS, HTTPS, a restore on the server: the second CV milestone); the rclone off-box copy and public-key gpg (need the VPS); a UI for image uploads (comes with the Phase 5 editor); putting the gate-opening answer first in the comparison view (review E6, Phase 6).
 - **Known limitations:** one run at a time on the server (D-060); `/v/{id}` links only work on a deployment with the API (D-064); the sweep chart's legend shows "--" until hovered; "Stored runs" needs "Refresh" after a job finishes.
+
+
+### Phase 5: Venue editor
+
+**Plan** (2026-11-15)
+- **5a. Editor core** (pure, tested): undo/redo by reference (C4), two-click calibration, polygon checks, venue checks with reachability from the engine (D-065, D-066).
+- **5b. Editor UI:** an "Edit venue" section with an SVG canvas, drawing tools, keyboard shortcuts and an element list; saving in the browser or, for a shared venue, on the server (D-066, D-067).
+- **5c. Tests:** the five checklist items, a Playwright test that draws, saves and reloads, and the read-only and save-to-server paths in the full-stack test.
+- **Later in Phase 5 or the redesign:** drawing roads, car parks and screening stages; image upload for shared venues; snapping and holes.
+- *Risks:* a second notion of "reachable" that disagrees with runs (avoided: the engine computes it, D-065); undo bugs from mutable edits (avoided: immutable documents, tests check identity).
+
+**Summary** (2026-11-15; merged into `main` and pushed)
+- **Built:** 5a to 5c.
+- **Checks:** `npm run check` passes (17 editor tests and 5 reachability tests among them). `npm run test:e2e`: 7 passed, 2 skipped (demo recorder, stack test). Full stack (`E2E_STACK_URL`): passes, now including the editor with a read-only link (every tool and the save button disabled) and saving a renamed venue with the edit link.
+- **Found and fixed:** Caddy's compression rewrote the API's ETags, so no shared document could be updated through the deployed stack (D-068); a blank venue crashed the editor through the engine (now plain errors).
+- **Looked at in the browser:** a venue drawn from scratch (walkable area, source, gate with 4 lanes, destination: "No problems found"), and a copy of the concert venue in the editor.
+- **Deferred:** drawing roads, car parks and screening stages; storing background images (session-only for now) and uploading them for shared venues; the mobile canvas rule (C6). A Playwright test of calibration on a real image (the calibration maths is tested in Vitest: a 100 m distance measures 100 m ± 1%).
+- **Known limitations:** the editor's view fits all coordinates, so a venue with a long public road shows its buildings small until zoomed; the editor does not check that a car park's roads connect (a run turns such cars away and counts them, D-041).
 
 ---
 
@@ -1133,6 +1185,44 @@ Every input is limited before it is trusted: body size and JSON depth before par
    Report both. The CI rule is the cautious one, but with so few seeds its width mostly reflects the seed count, so the headline uses the mean and the CI answer tells you whether more seeds are worth it.
 
 
+
+### Phase 5: the venue editor, in plain language
+
+#### Undo by keeping old documents
+There are two classic ways to build undo. **Commands:** remember each change and how to reverse it ("moved point 3 by +2 m"; undo moves it by −2 m). **Snapshots:** remember the whole document before each change. Snapshots sound expensive, but with **immutable** documents they are cheap: an edit builds a new venue object that reuses every part it did not touch (moving one source copies the list of sources and that one source, and shares the walkable areas, the gates and everything else with the old venue). The history is just a list of references to old venues. Undo hands back exactly the earlier object, so it cannot drift out of step the way a missed inverse command can. A drag makes dozens of tiny edits, so edits with the same key in a row (the same point being dragged) replace the newest entry instead of adding one: one drag, one undo step.
+
+#### Calibrating a map with two clicks
+A map image has pixels; the simulation needs metres. Click two points whose real distance you know (the length of a hall) and type it: metres per pixel = real distance ÷ distance in pixels. Every pixel then has a position: origin + pixel × metres per pixel. The error comes from where you click: one pixel off over 437 pixels is 0.2%, which is why points closer than 10 pixels are refused (one pixel would be over 10%). The test calibrates on one 100 m stretch, clicked to whole pixels, and measures a different 100 m stretch: within 1 m.
+
+#### A polygon that crosses itself
+A walkable area is a polygon. If two of its edges cross (a "bow tie"), "inside" is ambiguous: the engine's point-in-polygon test (count how many edges a ray crosses) gives a shape nobody meant. The editor checks every pair of edges with the **orientation test**: segments AB and CD cross if C and D lie on different sides of AB and A and B on different sides of CD (plus special cases when points lie exactly on a line). Neighbouring edges share a corner and are only a problem if they fold back over each other. This is O(n²), which is fine for hand-drawn shapes of tens of corners.
+
+#### One meaning of "reachable"
+People who appear somewhere they cannot walk away from are counted as unreachable in a run. The editor could flood-fill the drawn polygons to predict that, but its answer could differ from the engine's at a narrow gap, because the engine walks on a 0.5 m grid. So the editor asks the engine: it builds exactly the grid and distance maps a run would build and reads them. A test runs the same venue and checks that the run counts unreachable people too. One model, one answer.
+
+#### Errors and warnings
+Some problems make a venue meaningless (no walkable area, a polygon that crosses itself, a source that cannot reach any gate): those are **errors** and block saving. Others are probably mistakes but the simulation copes (a source drawn just off the walkable area starts at the nearest walkable spot; shares that add up to 0.8 are scaled to 1): those are **warnings**. Each one is a sentence that says what to do.
+
+#### A bug only the whole stack could show
+Saving a shared venue worked against the API in tests, and failed every time through Caddy with 412 "changed by someone else". The reason: when Caddy compresses a response it changes the strong ETag (`"1"` becomes `"1-gzip"`), because the compressed bytes are a different representation. The browser then sends `"1-gzip"` back in If-Match and the API, which knows only `"1"`, refuses. The fix is to compress only the static site. The lesson: proxies are part of the system; an end-to-end test through the real proxy found what unit and integration tests could not.
+
+#### Interview questions (Phase 5)
+
+1. **How would you implement undo/redo in an editor, and why snapshots here?**
+   With immutable documents and structural sharing, a snapshot is just a reference, so undo stores previous documents instead of inverse commands. Undo returns exactly the earlier state; there is no inverse to get wrong. Repeated edits of one thing (a drag) coalesce into one step, and the history is capped.
+
+2. **How do you detect a self-intersecting polygon?**
+   Test every pair of non-neighbouring edges with orientation tests (cross products); handle collinear cases with a bounding-box check; for neighbouring edges, only flag a fold-back. O(n²) is fine for hand-drawn shapes; a sweep line would be O(n log n) for large ones.
+
+3. **Why does the editor ask the simulation engine whether a source is reachable?**
+   So that "reachable" has one definition. A separate check in the UI could disagree with the engine's 0.5 m grid at narrow gaps. The engine builds the same grid and flow fields a run uses, and a test shows the run agrees.
+
+4. **What does two-click calibration compute, and what limits its accuracy?**
+   Metres per pixel = known distance ÷ pixel distance between the clicks. The click error of about one pixel divided by the pixel distance is the relative error, so points must be far apart; the test shows a 100 m measurement within 1%.
+
+5. **A PUT with If-Match works in integration tests but fails through the reverse proxy. What do you check?**
+   Whether something between client and server changes the ETag or the header: compression is a classic one (Caddy and nginx rewrite or weaken ETags of compressed responses). Fix it at the proxy (do not compress the API) or let the API compress itself, and test through the real proxy.
+
 ---
 
 ## 8. Reference
@@ -1147,7 +1237,7 @@ apps/web/src/library/      scenario library logic: storage, editor form, validat
 apps/web/src/compare/      comparison and batch logic: seeds and jobs, measures and differences, table rows, chart data, worker pool
 apps/web/src/scanlog/      applying a fitted scan log to a new scenario
 apps/web/src/validation/   build-time (Ajv standalone) scenario validator, served as virtual:scenario-validator (D-033)
-apps/web/e2e/              Playwright tests (determinism, smoke, replay, compare, library, parking; stack: only with E2E_STACK_URL) and record-demo (media recording, skipped unless RECORD_DEMO=1)
+apps/web/e2e/              Playwright tests (determinism, smoke, replay, compare, library, parking, editor; stack: only with E2E_STACK_URL) and record-demo (media recording, skipped unless RECORD_DEMO=1)
 apps/api/                  ASP.NET Core API (src/Bottleneck.Api), schema validation and generated C# (src/Bottleneck.Schema), tests (tests/, Testcontainers), expected-hash fixture (test/)
 apps/sidecar/              stateless Node service that runs the engine for the API (bundled to dist/server.mjs)
 deploy/                    Caddyfile, Caddy image, header generator and check, backup and restore scripts, dev.env

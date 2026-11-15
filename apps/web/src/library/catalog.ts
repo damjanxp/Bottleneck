@@ -3,6 +3,7 @@
 import { exampleVenues } from "@bottleneck/examples";
 import type { Scenario, Venue } from "@bottleneck/schema";
 import { remoteVenues } from "./remoteVenues.ts";
+import { userVenues } from "./userVenues.ts";
 import type { LibraryEntry } from "./storage.ts";
 
 export interface ScenarioChoice {
@@ -20,16 +21,25 @@ export const builtInKey = (id: string) => `builtin:${id}`;
 export const userKey = (id: string) => `user:${id}`;
 export const serverKey = (id: string) => `server:${id}`;
 
-/** A venue the page can show: a built-in example or one loaded from the server. */
+/** A venue the page can show: a built-in example, one drawn in this browser, or one loaded from the server. */
 export interface KnownVenue {
   id: string;
   title: string;
   venue: Venue;
   remote: boolean;
+  /** Drawn in the venue editor and saved in this browser. */
+  user?: boolean;
 }
 
+/** Suffix that marks a venue drawn in this browser in venue lists. */
+export const USER_VENUE_SUFFIX = " (my venue)";
+
 export function knownVenues(): KnownVenue[] {
-  return [...exampleVenues.map((v) => ({ id: v.id, title: v.title, venue: v.venue, remote: false })), ...remoteVenues().map((v) => ({ id: v.id, title: v.title, venue: v.venue, remote: true }))];
+  return [
+    ...exampleVenues.map((v) => ({ id: v.id, title: v.title, venue: v.venue, remote: false })),
+    ...userVenues().map((v) => ({ id: v.id, title: `${v.venue.name}${USER_VENUE_SUFFIX}`, venue: v.venue, remote: false, user: true })),
+    ...remoteVenues().map((v) => ({ id: v.id, title: v.title, venue: v.venue, remote: true })),
+  ];
 }
 
 export function isRemoteVenue(id: string): boolean {

@@ -62,6 +62,12 @@ test("publish a venue, open the share and edit links, run a server batch", async
   await expect(reader.getByRole("button", { name: "Submit to the server" })).toBeDisabled();
   await expect(reader.getByRole("button", { name: "Delete venue" })).toBeDisabled();
   await expect(reader.getByRole("button", { name: "Rotate edit key" })).toBeDisabled();
+  // The venue editor shows the venue but refuses edits.
+  await reader.getByRole("tab", { name: "Edit venue" }).click();
+  await expect(reader.getByText(/Read-only link: you can look at this venue/)).toBeVisible();
+  await expect(reader.getByRole("button", { name: "Save to the server" })).toBeDisabled();
+  await expect(reader.getByRole("button", { name: "Walkable area", exact: true })).toBeDisabled();
+  await expect(reader.getByLabel("Venue name")).toBeDisabled();
   await reader.close();
   expect(readerProblems).toEqual([]);
 
@@ -73,6 +79,13 @@ test("publish a venue, open the share and edit links, run a server batch", async
   await page.getByRole("button", { name: "Hide the map" }).click();
   await page.getByRole("tab", { name: "Share & server" }).click();
   await expect(page.getByTestId("access-level")).toContainText("Edit link");
+
+  // With the edit link, the venue editor saves a change to the server (PUT with If-Match).
+  await page.getByRole("tab", { name: "Edit venue" }).click();
+  await page.getByLabel("Venue name").fill("Concert hall, renamed");
+  await page.getByRole("button", { name: "Save to the server" }).click();
+  await expect(page.getByText("Saved on the server.")).toBeVisible();
+  await page.getByRole("tab", { name: "Share & server" }).click();
 
   // A small server batch (3 seeds), followed by polling until it finishes.
   await page.getByLabel("Job", { exact: true }).selectOption("batch");
