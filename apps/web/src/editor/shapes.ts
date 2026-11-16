@@ -88,6 +88,7 @@ export function moveElement(v: Venue, id: string, dx: number, dy: number): Venue
   if (v.sources.some((e) => e.id === id)) return { ...v, sources: v.sources.map((e) => (e.id === id ? { ...e, position: shift(e.position, dx, dy) } : e)) };
   if (v.gateGroups.some((e) => e.id === id)) return { ...v, gateGroups: v.gateGroups.map((e) => (e.id === id ? { ...e, line: { a: shift(e.line.a, dx, dy), b: shift(e.line.b, dx, dy) } } : e)) };
   if (v.screeningStages.some((e) => e.id === id)) return { ...v, screeningStages: v.screeningStages.map((e) => (e.id === id ? { ...e, line: { a: shift(e.line.a, dx, dy), b: shift(e.line.b, dx, dy) } } : e)) };
+  if ((v.roads ?? []).some((e) => e.id === id)) return { ...v, roads: (v.roads ?? []).map((e) => (e.id === id ? { ...e, points: ring(e.points) } : e)) };
   return v;
 }
 

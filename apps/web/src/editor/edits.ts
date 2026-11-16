@@ -13,6 +13,14 @@ import type { GateGroup, Point, Venue } from "@bottleneck/schema";
 
 export type DrawTool = "walkable" | "obstacle" | "destination" | "source" | "gate";
 
+/** A road along `points` (two-way, `lanes` per direction, not public unless marked). Points are rounded to centimetres. */
+export function addRoad(v: Venue, points: readonly Point[], lanes = 1): { venue: Venue; id: string } | null {
+  if (points.length < 2) return null;
+  const id = nextId(v, "road");
+  const road = { id, name: `Road ${id.split("-")[1]}`, points: points.slice(0, 500).map(roundPoint), direction: "twoWay" as const, laneCount: Math.max(1, Math.min(4, lanes)) };
+  return { venue: { ...v, roads: [...(v.roads ?? []), road] }, id };
+}
+
 export function blankVenue(id: string, name: string): Venue {
   return { schemaVersion: 1, id, name, walkableAreas: [], obstacles: [], sources: [], screeningStages: [], gateGroups: [], destinations: [] };
 }
@@ -90,6 +98,7 @@ export function deleteElement(v: Venue, id: string): Venue {
   if (has(v.gateGroups)) return { ...v, gateGroups: drop(v.gateGroups) };
   if (has(v.screeningStages)) return { ...v, screeningStages: drop(v.screeningStages), gateGroups: v.gateGroups.map((g) => (g.screeningStageId === id ? (({ screeningStageId: _drop, ...rest }) => rest)(g) : g)) };
   if (has(v.destinations)) return { ...v, destinations: drop(v.destinations) };
+  if (has(v.roads ?? [])) return { ...v, roads: drop(v.roads ?? []) };
   return v;
 }
 
@@ -98,7 +107,8 @@ export function deleteElement(v: Venue, id: string): Venue {
 export type Handle =
   | { kind: "vertex"; list: "walkableAreas" | "obstacles" | "destinations"; id: string; index: number }
   | { kind: "source"; id: string }
-  | { kind: "lineEnd"; list: "gateGroups" | "screeningStages"; id: string; end: "a" | "b" };
+  | { kind: "lineEnd"; list: "gateGroups" | "screeningStages"; id: string; end: "a" | "b" }
+  | { kind: "roadPoint"; id: string; index: number };
 
 export interface HandlePoint {
   handle: Handle;
@@ -113,6 +123,7 @@ export function handles(v: Venue): HandlePoint[] {
   for (const s of v.sources) out.push({ handle: { kind: "source", id: s.id }, point: s.position });
   for (const g of v.gateGroups) for (const end of ["a", "b"] as const) out.push({ handle: { kind: "lineEnd", list: "gateGroups", id: g.id, end }, point: g.line[end] });
   for (const g of v.screeningStages) for (const end of ["a", "b"] as const) out.push({ handle: { kind: "lineEnd", list: "screeningStages", id: g.id, end }, point: g.line[end] });
+  for (const r of v.roads ?? []) r.points.forEach((point, index) => out.push({ handle: { kind: "roadPoint", id: r.id, index }, point }));
   return out;
 }
 
@@ -124,6 +135,13 @@ export function moveHandle(v: Venue, h: Handle, to: Point): Venue {
   if (h.kind === "source") {
     const i = v.sources.findIndex((s) => s.id === h.id);
     return i < 0 ? v : { ...v, sources: replaceAt(v.sources, i, { ...(v.sources[i] as Venue["sources"][number]), position: p }) };
+  }
+  if (h.kind === "roadPoint") {
+    const roads = v.roads ?? [];
+    const i = roads.findIndex((r) => r.id === h.id);
+    const r = roads[i];
+    if (!r || h.index >= r.points.length) return v;
+    return { ...v, roads: replaceAt(roads, i, { ...r, points: replaceAt(r.points, h.index, p) }) };
   }
   if (h.kind === "lineEnd") {
     if (h.list === "gateGroups") {

@@ -67,7 +67,7 @@ test("[test] import a map image, calibrate it and trace areas on it", async ({ p
   await page.getByLabel("Distance (m)").fill("120");
   await page.getByRole("button", { name: "Apply scale" }).click();
   await expect(page.getByText("Scale: 0.500 m per pixel.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Trace area", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Trace area", exact: true }).click();
 
   // Trace the plaza as walkable floor: the park and the label inside it are closed over (4 corners).
   await clickAt(canvas, 250 * 0.5, 120 * 0.5);
@@ -83,6 +83,12 @@ test("[test] import a map image, calibrate it and trace areas on it", async ({ p
   await page.getByRole("group", { name: "Draw as" }).getByRole("button", { name: "Obstacle" }).click();
   await clickAt(canvas, 210 * 0.5, 181 * 0.5);
   await expect(page.getByRole("alert")).toContainText("too small");
+
+  // Detect areas by colour: the map's colours are listed with a guess each, and applying adds elements.
+  await page.getByRole("button", { name: "Detect areas" }).click();
+  await expect(page.getByTestId("detected-colours").getByRole("listitem")).not.toHaveCount(0);
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByText(/^Added \d+ walkable areas?, \d+ obstacles? and \d+ roads?\.$/)).toBeVisible();
 
   expect(problems).toEqual([]);
 });

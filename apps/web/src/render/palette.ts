@@ -114,7 +114,7 @@ export interface CarStyle {
 export const CAR_STYLES: readonly CarStyle[] = [
   { key: "CarDriving", color: 0x0072b2, css: "#0072B2", shape: "arrow", alpha: 1 },
   { key: "CarStopped", color: 0xe69f00, css: "#E69F00", shape: "stopped", alpha: 1 },
-  { key: "CarParked", color: 0x64748b, css: "#64748B", shape: "parked", alpha: 0.85 },
+  { key: "CarParked", color: 0xf0e442, css: "#F0E442", shape: "parked", alpha: 1 },
   { key: "CarDiverted", color: 0xcc79a7, css: "#CC79A7", shape: "striped", alpha: 1 },
 ];
 

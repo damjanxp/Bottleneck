@@ -18,7 +18,7 @@
  */
 
 import "pixi.js/unsafe-eval";
-import { Application, Container, Graphics, Particle, ParticleContainer, Rectangle, Sprite, Text, Texture } from "pixi.js";
+import { Application, CanvasSource, Container, Graphics, Particle, ParticleContainer, Rectangle, Sprite, Text, Texture } from "pixi.js";
 import type { BarrierLaneLive, LaneLayout, LaneLive, VehicleLayout } from "@bottleneck/engine";
 import type { Point, Polygon, Venue } from "@bottleneck/schema";
 import { AgentState } from "@bottleneck/engine";
@@ -26,7 +26,8 @@ import { clampLabel, distanceToSegment, fitCamera, pan, screenToWorld, worldToSc
 import { EXTRAPOLATE_BELOW_SPEED, extrapolationSeconds } from "../sim/extrapolate.ts";
 import { RollingSamples } from "../sim/rolling.ts";
 import type { Snapshot } from "../sim/SimController.ts";
-import { CAR_STYLES, GRID_METRES, HEATMAP_MAX, LANE_COLORS, MAP_DARK, MAP_LIGHT, ROAD_COLORS, STATE_STYLES, carStyleIndex, heatColor, insideFade, styleIndex, type CarShape, type MapTheme, type Shape } from "./palette.ts";
+import { CAR_STYLES, GRID_METRES, HEATMAP_MAX, LANE_COLORS, MAP_DARK, MAP_LIGHT, ROAD_COLORS, STATE_STYLES, carStyleIndex, heatColor, insideFade, styleIndex, type MapTheme } from "./palette.ts";
+import { carAtlas, personAtlas } from "./sprites.ts";
 import { barrierArm, chevron, dashSegments, pointsAlong, publicRoadBoundaries, roadWidth, stallCorners, zebraStripes } from "./vehicleGeometry.ts";
 
 const ATLAS_CELL = 32;
@@ -62,61 +63,6 @@ export interface FrameStats {
   frameIntervalP95: number;
   renderP50: number;
   renderP95: number;
-}
-
-function drawShape(g: Graphics, shape: Shape, cx: number, cy: number, r: number, color: number, outlineColor = 0xffffff): void {
-  const outline = { width: 2.5, color: outlineColor, alpha: 0.85 };
-  switch (shape) {
-    case "circle":
-      g.circle(cx, cy, r).fill(color).stroke(outline);
-      break;
-    case "square":
-      g.rect(cx - r * 0.85, cy - r * 0.85, r * 1.7, r * 1.7).fill(color).stroke(outline);
-      break;
-    case "diamond":
-      g.poly([cx, cy - r, cx + r, cy, cx, cy + r, cx - r, cy]).fill(color).stroke(outline);
-      break;
-    case "triangle":
-      g.poly([cx, cy - r, cx + r * 0.95, cy + r * 0.75, cx - r * 0.95, cy + r * 0.75]).fill(color).stroke(outline);
-      break;
-    case "cross": {
-      const w = r * 0.45;
-      g.poly([cx - r, cy - r + w, cx - r + w, cy - r, cx, cy - w, cx + r - w, cy - r, cx + r, cy - r + w, cx + w, cy, cx + r, cy + r - w, cx + r - w, cy + r, cx, cy + w, cx - r + w, cy + r, cx - r, cy + r - w, cx - w, cy])
-        .fill(color)
-        .stroke(outline);
-      break;
-    }
-  }
-}
-
-/** A car body in an atlas cell, nose towards +x: colour and shape both carry the state. */
-function drawCar(g: Graphics, shape: CarShape, ox: number, color: number): void {
-  const x0 = ox + (CAR_CELL_W - CAR_BODY_PX) / 2;
-  const x1 = x0 + CAR_BODY_PX;
-  const y0 = 6;
-  const y1 = CAR_CELL_H - 6;
-  const ym = CAR_CELL_H / 2;
-  const outline = { width: 2, color: 0xffffff, alpha: 0.95 };
-  const nose = x1 - 12;
-  switch (shape) {
-    case "arrow":
-      g.poly([x0, y0, nose, y0, x1, ym, nose, y1, x0, y1]).fill(color).stroke(outline);
-      break;
-    case "stopped":
-      // Square front and a white "pause" mark: standing in a queue.
-      g.rect(x0, y0, CAR_BODY_PX, y1 - y0).fill(color).stroke(outline);
-      g.rect(x0 + 18, y0 + 4, 5, y1 - y0 - 8).fill(0xffffff);
-      g.rect(x0 + 30, y0 + 4, 5, y1 - y0 - 8).fill(0xffffff);
-      break;
-    case "parked":
-      g.roundRect(x0, y0, CAR_BODY_PX, y1 - y0, 4).fill(color);
-      break;
-    case "striped":
-      // Arrow body with a white stripe along it: diverted to another lot.
-      g.poly([x0, y0, nose, y0, x1, ym, nose, y1, x0, y1]).fill(color).stroke(outline);
-      g.rect(x0 + 4, ym - 2.5, nose - x0 - 6, 5).fill(0xffffff);
-      break;
-  }
 }
 
 function ringPoints(ring: Point[]): number[] {
@@ -234,24 +180,17 @@ export class VenueRenderer {
   }
 
   private setup(): void {
-    // Agent texture atlas: one cell per state style.
-    const g = new Graphics();
-    STATE_STYLES.forEach((s, i) => drawShape(g, s.shape, i * ATLAS_CELL + ATLAS_CELL / 2, ATLAS_CELL / 2, (ATLAS_CELL / 2 - 3) * Math.min(1, s.size), s.color, this.theme.agentOutline));
-    const atlas = this.app.renderer.generateTexture({ target: g, frame: new Rectangle(0, 0, ATLAS_CELL * STATE_STYLES.length, ATLAS_CELL), resolution: 2, antialias: true });
-    g.destroy();
+    // People and car atlases, drawn on canvases (sprites.ts) at 2× and used as one texture each.
+    const atlas = new Texture({ source: new CanvasSource({ resource: personAtlas(STATE_STYLES, ATLAS_CELL, this.theme.agentOutline), resolution: 2 }) });
     this.stateTextures = STATE_STYLES.map((_, i) => new Texture({ source: atlas.source, frame: new Rectangle(i * ATLAS_CELL, 0, ATLAS_CELL, ATLAS_CELL) }));
     this.particles = new ParticleContainer({
       texture: atlas,
       dynamicProperties: { position: true, vertex: true, uvs: true, color: true, rotation: false },
     });
-    // Car texture atlas: one cell per car style.
-    const gc = new Graphics();
-    CAR_STYLES.forEach((s, i) => drawCar(gc, s.shape, i * CAR_CELL_W, s.color));
-    const carAtlas = this.app.renderer.generateTexture({ target: gc, frame: new Rectangle(0, 0, CAR_CELL_W * CAR_STYLES.length, CAR_CELL_H), resolution: 2, antialias: true });
-    gc.destroy();
-    this.carTextures = CAR_STYLES.map((_, i) => new Texture({ source: carAtlas.source, frame: new Rectangle(i * CAR_CELL_W, 0, CAR_CELL_W, CAR_CELL_H) }));
+    const carAtlasTexture = new Texture({ source: new CanvasSource({ resource: carAtlas(CAR_STYLES, CAR_CELL_W, CAR_CELL_H), resolution: 2 }) });
+    this.carTextures = CAR_STYLES.map((_, i) => new Texture({ source: carAtlasTexture.source, frame: new Rectangle(i * CAR_CELL_W, 0, CAR_CELL_W, CAR_CELL_H) }));
     this.cars = new ParticleContainer({
-      texture: carAtlas,
+      texture: carAtlasTexture,
       dynamicProperties: { position: true, vertex: true, uvs: true, color: true, rotation: true },
     });
     this.world.addChild(this.venueLayer, this.vehicleLayer, this.laneLayer, this.barrierLayer, this.cars, this.particles);

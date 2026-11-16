@@ -181,6 +181,11 @@ function douglasPeucker(points: PixelPoint[], epsilon: number): PixelPoint[] {
   return [...left.slice(0, -1), ...right];
 }
 
+/** Simplifies an open path (Douglas–Peucker); the ends are kept. */
+export function simplifyPath(path: PixelPoint[], epsilon: number): PixelPoint[] {
+  return douglasPeucker(path, epsilon);
+}
+
 /** Simplifies a closed ring (Douglas–Peucker, split at the point farthest from the first). */
 export function simplifyRing(ring: PixelPoint[], epsilon: number): PixelPoint[] {
   if (ring.length <= 4) return ring;

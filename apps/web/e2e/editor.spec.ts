@@ -70,9 +70,10 @@ test("[test] draw a venue, save, reload: unchanged", async ({ page }) => {
   await clickAt(canvas, 50, 45);
   await clickAt(canvas, 50, 15);
 
-  // A destination drawn freehand, finished with Enter.
+  // A destination drawn by clicking its corners, finished with Enter.
   await page.getByRole("group", { name: "Draw as" }).getByRole("button", { name: "Destination" }).click();
-  await page.getByRole("button", { name: "Freeform", exact: true }).click();
+  await page.getByRole("group", { name: "Drawing style" }).getByRole("button", { name: "Click points" }).click();
+  await page.getByRole("button", { name: "Area", exact: true }).click();
   for (const [x, y] of [
     [80, 20],
     [92, 20],
