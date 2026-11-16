@@ -79,3 +79,23 @@ export function isDegenerateOrSelfIntersecting(poly: Polygon): boolean {
   const rings = [poly.outer, ...(poly.holes ?? [])];
   return rings.some((r) => r.length < 3 || area(r) === 0 || selfIntersections(r).length > 0);
 }
+
+/** The area-weighted centre of a ring (the average of its points if it has no area). */
+export function centroidOf(ring: readonly Point[]): Point {
+  let a = 0;
+  let cx = 0;
+  let cy = 0;
+  for (let i = 0; i < ring.length; i++) {
+    const p = ring[i] as Point;
+    const q = ring[(i + 1) % ring.length] as Point;
+    const f = p.x * q.y - q.x * p.y;
+    a += f;
+    cx += (p.x + q.x) * f;
+    cy += (p.y + q.y) * f;
+  }
+  if (Math.abs(a) < 1e-9) {
+    const n = Math.max(1, ring.length);
+    return { x: ring.reduce((s, p) => s + p.x, 0) / n, y: ring.reduce((s, p) => s + p.y, 0) / n };
+  }
+  return { x: cx / (3 * a), y: cy / (3 * a) };
+}

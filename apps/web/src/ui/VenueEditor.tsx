@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type WheelEvent as ReactWheelEvent } from "react";
 import type { Point, Polygon, Venue } from "@bottleneck/schema";
-import { applyDetection, clusterColours, type Cluster, type MapClass } from "../editor/autodetect.ts";
+import { CLASS_CODE, NO_OVERRIDE, applyDetection, classMap, cleanOptions, clusterColours, type Cluster, type MapClass } from "../editor/autodetect.ts";
 import { calibrate, pixelToVenue, venueToPixel } from "../editor/calibration.ts";
 import { addGate, addRoad, addSource, blankVenue, deleteElement, handles, moveHandle, newVenueId, scaleVenue, type Handle } from "../editor/edits.ts";
 import { canRedo, canUndo, commit, createHistory, redo, undo, type History } from "../editor/history.ts";
 import { mergePolygon, paintPath } from "../editor/paint.ts";
 import { AREA_KINDS, changeKind, duplicateElement, elementAt, moveElement, polygonOf, shapePoints, type AreaKind, type ShapeKind } from "../editor/shapes.ts";
 import { DEFAULT_TRACE, simplifyPath, traceRegion } from "../editor/trace.ts";
-import { checkVenue, hasErrors, type VenueProblem } from "../editor/venueChecks.ts";
+import { applyFix, checkVenue, hasErrors, type VenueProblem } from "../editor/venueChecks.ts";
 import { knownVenues } from "../library/catalog.ts";
 import { deleteUserVenue, storeUserVenue } from "../library/userVenues.ts";
 import type { SchemaValidator } from "../library/validate.ts";
@@ -15,18 +15,23 @@ import { browserStore, downscaledSize, loadVenueImage, removeVenueImage, saveVen
 import { strings } from "../strings.ts";
 import { loadVenueValidator } from "../validation/loadValidator.ts";
 import { InfoTip } from "./icons.tsx";
+import { centroidOf } from "../editor/geometry.ts";
 import { btn, btnGhost, btnPrimary, btnSmall, card, cardTitle, input, labelText, overlay, select } from "./styles.ts";
 import type { Server } from "./useServer.ts";
 
 const E = strings.venueEditor;
-type Tool = "select" | ShapeKind | "area" | "eraser" | "source" | "gate" | "road" | "calibrate" | "trace";
+type Tool = "select" | ShapeKind | "area" | "eraser" | "source" | "gate" | "road" | "calibrate" | "trace" | "fix";
 type Style = "points" | "paint";
 const SHAPE_TOOLS: ShapeKind[] = ["rectangle", "circle", "lshape", "ushape"];
 const KEY_TO_TOOL: Record<string, Tool> = { v: "select", r: "rectangle", c: "circle", l: "lshape", u: "ushape", a: "area", e: "eraser", s: "source", g: "gate", d: "road", k: "calibrate", t: "trace" };
 const isShape = (t: Tool): t is ShapeKind => (SHAPE_TOOLS as string[]).includes(t);
 const LANE_WIDTH = 3.5;
 const CLASSES: MapClass[] = ["road", "walkable", "obstacle", "ignore"];
-const CLASS_RGBA: Record<MapClass, [number, number, number, number]> = { road: [55, 65, 81, 190], walkable: [52, 211, 153, 110], obstacle: [234, 88, 12, 140], ignore: [0, 0, 0, 0] };
+/** Detection preview colours: the same meaning as in the editor's key. Cleaned-up pixels (text, widgets, icons) show in magenta. */
+const CLASS_RGBA: Record<MapClass, [number, number, number, number]> = { road: [31, 41, 55, 200], walkable: [20, 184, 166, 105], obstacle: [220, 38, 38, 140], ignore: [0, 0, 0, 0] };
+const CLEANED_RGBA: [number, number, number, number] = [217, 70, 239, 200];
+type Layer = "image" | "detection" | "walkable" | "obstacles" | "destinations" | "roads" | "names" | "problems";
+const LAYERS: Layer[] = ["image", "detection", "walkable", "obstacles", "destinations", "roads", "names", "problems"];
 
 /** The map image in this page view: its data URL and pixels (for tracing and detection). */
 interface MapImage {
@@ -47,6 +52,8 @@ interface Detection {
   clusters: Cluster[];
   assignment: Uint8Array;
   classes: MapClass[];
+  /** Painted corrections per pixel (a class code or NO_OVERRIDE). */
+  overrides: Uint8Array;
   preview: string | null;
 }
 
@@ -98,15 +105,17 @@ async function decodeImage(src: string, keepUrl: boolean): Promise<MapImage> {
   return { url: keepUrl ? src : canvas.toDataURL("image/jpeg", 0.85), w, h, pixels };
 }
 
-/** The detection as a coloured overlay image (data URL). */
-function detectionPreview(d: { assignment: Uint8Array; classes: MapClass[] }, w: number, h: number): string | null {
+/** The cleaned detection (exactly what Apply will use) as a coloured overlay image (data URL). */
+function detectionPreview(d: { assignment: Uint8Array; classes: MapClass[]; overrides: Uint8Array }, w: number, h: number, metresPerPixel: number): string | null {
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d");
   if (!ctx) return null;
+  const { cls, cleaned } = classMap(d.assignment, w, h, d.classes, cleanOptions(metresPerPixel, d.overrides));
   const img = ctx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) img.data.set(CLASS_RGBA[d.classes[d.assignment[i] as number] ?? "ignore"], i * 4);
+  const byCode: MapClass[] = ["ignore", "road", "walkable", "obstacle"];
+  for (let i = 0; i < w * h; i++) img.data.set(cleaned[i] ? CLEANED_RGBA : CLASS_RGBA[byCode[cls[i] as number] ?? "ignore"], i * 4);
   ctx.putImageData(img, 0, 0);
   return c.toDataURL("image/png");
 }
@@ -158,6 +167,9 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
   const [tolerance, setTolerance] = useState(DEFAULT_TRACE.tolerance);
   const [detection, setDetection] = useState<Detection | null>(null);
   const [showDetection, setShowDetection] = useState(true);
+  const [fixClass, setFixClass] = useState<MapClass>("ignore");
+  const [layers, setLayers] = useState<Record<Layer, boolean>>({ image: true, detection: true, walkable: true, obstacles: true, destinations: true, roads: true, names: false, problems: true });
+  const show = (l: Layer) => layers[l];
   const [calPoints, setCalPoints] = useState<Point[]>([]);
   const [calDistance, setCalDistance] = useState("100");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(() => {
@@ -195,7 +207,6 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
   }, [target.venue.id]);
 
   const problems: VenueProblem[] | null = useMemo(() => (validator ? checkVenue(venue, validator) : null), [venue, validator]);
-  const flagged = new Set((problems ?? []).filter((p) => p.severity === "error").map((p) => p.elementId));
 
   const open = (t: Target) => {
     setTarget(t);
@@ -325,20 +336,41 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
     }
     const { clusters, assignment } = clusterColours(image.pixels, image.w, image.h);
     const classes = clusters.map((c) => c.guess);
-    setDetection({ clusters, assignment, classes, preview: detectionPreview({ assignment, classes }, image.w, image.h) });
+    const overrides = new Uint8Array(image.w * image.h).fill(NO_OVERRIDE);
+    setDetection({ clusters, assignment, classes, overrides, preview: detectionPreview({ assignment, classes, overrides }, image.w, image.h, cal.metresPerPixel) });
     setShowDetection(true);
   };
   const setClass = (index: number, c: MapClass) => {
     if (!detection || !image) return;
     const classes = detection.classes.map((x, k) => (k === index ? c : x));
-    setDetection({ ...detection, classes, preview: detectionPreview({ assignment: detection.assignment, classes }, image.w, image.h) });
+    setDetection({ ...detection, classes, preview: detectionPreview({ assignment: detection.assignment, classes, overrides: detection.overrides }, image.w, image.h, cal.metresPerPixel) });
   };
   const applyDetected = () => {
     if (!detection || !image) return;
-    const r = applyDetection(venue, detection.assignment, image.w, image.h, detection.classes, cal.origin, cal.metresPerPixel);
+    const r = applyDetection(venue, detection.assignment, image.w, image.h, detection.classes, cal.origin, cal.metresPerPixel, detection.overrides);
     edit(r.venue);
     setDetection(null);
+    if (tool === "fix") chooseTool("select");
     setMessage({ ok: true, text: E.applied(r.walkable, r.obstacles, r.roads) });
+  };
+
+  /** Paints a correction stroke (venue path, brush metres) into the detection's overrides, in image pixels. */
+  const paintCorrection = (path: readonly Point[]) => {
+    if (!detection || !image) return;
+    const overrides = detection.overrides.slice();
+    const r = brush / 2 / cal.metresPerPixel;
+    const code = CLASS_CODE[fixClass];
+    const disc = (cx: number, cy: number) => {
+      for (let y = Math.max(0, Math.floor(cy - r)); y <= Math.min(image.h - 1, Math.ceil(cy + r)); y++)
+        for (let x = Math.max(0, Math.floor(cx - r)); x <= Math.min(image.w - 1, Math.ceil(cx + r)); x++) if ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r) overrides[y * image.w + x] = code;
+    };
+    const px = path.map((q) => venueToPixel(cal, q));
+    px.forEach((q, k) => {
+      const prev = px[k - 1] ?? q;
+      const n = Math.max(1, Math.ceil(Math.hypot(q.px - prev.px, q.py - prev.py) / Math.max(1, r / 2)));
+      for (let t = 1; t <= n; t++) disc(prev.px + ((q.px - prev.px) * t) / n, prev.py + ((q.py - prev.py) * t) / n);
+    });
+    setDetection({ ...detection, overrides, preview: detectionPreview({ assignment: detection.assignment, classes: detection.classes, overrides }, image.w, image.h, cal.metresPerPixel) });
   };
 
   const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -374,7 +406,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
       return;
     }
     if (isShape(tool)) setDrag({ kind: "shape", a: p, b: p });
-    else if (tool === "eraser" || (tool === "area" && style === "paint") || (tool === "road" && style === "paint")) setDrag({ kind: "stroke", path: [p] });
+    else if (tool === "fix" || tool === "eraser" || (tool === "area" && style === "paint") || (tool === "road" && style === "paint")) setDrag({ kind: "stroke", path: [p] });
     else if (tool === "area" || tool === "road") setDraft((d) => [...d, p]);
     else if (tool === "source") {
       const r = addSource(venue, p);
@@ -426,7 +458,8 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
         setSelected(r.id);
       } else setDraft([drag.a]);
     } else if (drag?.kind === "stroke") {
-      if (tool === "road") {
+      if (tool === "fix") paintCorrection(drag.path);
+      else if (tool === "road") {
         // A freehand road: the stroke simplified to a centreline.
         const line = simplifyPath(
           drag.path.map((q) => ({ px: q.x, py: q.y })),
@@ -496,9 +529,29 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
     }
   };
 
+  const problemList = problems ?? [];
+  const anchors = new Map<string, Point>();
+  for (const p of problemList) if (p.elementId && !anchors.has(p.elementId)) {
+    const a = anchorOf(venue, p.elementId);
+    if (a) anchors.set(p.elementId, a);
+  }
+  const focus = (id: string) => {
+    if (!id) return;
+    setSelected(id);
+    const a = anchors.get(id) ?? anchorOf(venue, id);
+    const poly = polygonOf(venue, id);
+    if (!a) return;
+    const xs = poly ? poly.ring.map((q) => q.x) : [a.x];
+    const ys = poly ? poly.ring.map((q) => q.y) : [a.y];
+    const w = Math.max(30, (Math.max(...xs) - Math.min(...xs)) * 2.2);
+    const h = Math.max(20, (Math.max(...ys) - Math.min(...ys)) * 2.2);
+    setView({ x: a.x - w / 2, y: a.y - h / 2, w, h });
+  };
+  const fixCount = (f: NonNullable<VenueProblem["fix"]>) => problemList.filter((p) => p.fix === f).length;
+
   const zoom = (f: number) => setView((v) => ({ x: v.x + (v.w * (1 - f)) / 2, y: v.y + (v.h * (1 - f)) / 2, w: v.w * f, h: v.h * f }));
   const stroke = view.w / 500;
-  const paintsArea = tool === "eraser" || (tool === "area" && style === "paint");
+  const paintsArea = tool === "fix" || tool === "eraser" || (tool === "area" && style === "paint");
   const hint =
     tool === "select"
       ? E.hint.select
@@ -512,7 +565,9 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
             ? style === "paint"
               ? E.hint.roadPaint
               : E.hint.roadPoints
-            : (E.hint[tool] ?? "");
+            : tool === "fix"
+              ? E.fixHint
+              : (E.hint[tool] ?? "");
   const others = known.filter((v) => !v.remote && v.id !== target.venue.id);
   const polySel = selected ? polygonOf(venue, selected) : null;
   const gateSel = selected ? venue.gateGroups.find((g) => g.id === selected) : undefined;
@@ -682,28 +737,45 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
           onWheel={onWheel}
           onDoubleClick={finishPoints}
         >
-          {image && venue.background && <image href={image.url} x={venue.background.origin.x} y={venue.background.origin.y} width={image.w * venue.background.metresPerPixel} height={image.h * venue.background.metresPerPixel} opacity={imageAlpha} preserveAspectRatio="none" />}
-          {detection?.preview && showDetection && venue.background && image && <image href={detection.preview} x={venue.background.origin.x} y={venue.background.origin.y} width={image.w * venue.background.metresPerPixel} height={image.h * venue.background.metresPerPixel} preserveAspectRatio="none" style={{ imageRendering: "pixelated" }} />}
+          <defs>
+            <pattern id="obstacle-hatch" patternUnits="userSpaceOnUse" width={stroke * 8} height={stroke * 8} patternTransform="rotate(45)">
+              <rect width={stroke * 8} height={stroke * 8} className="fill-[#e2e8f0] dark:fill-[#334155]" />
+              <line x1="0" y1="0" x2="0" y2={stroke * 8} className="stroke-[#64748b] dark:stroke-[#94a3b8]" strokeWidth={stroke * 2.2} />
+            </pattern>
+          </defs>
+          {show("image") && image && venue.background && <image href={image.url} x={venue.background.origin.x} y={venue.background.origin.y} width={image.w * venue.background.metresPerPixel} height={image.h * venue.background.metresPerPixel} opacity={imageAlpha} preserveAspectRatio="none" />}
+          {detection?.preview && showDetection && show("detection") && venue.background && image && <image href={detection.preview} x={venue.background.origin.x} y={venue.background.origin.y} width={image.w * venue.background.metresPerPixel} height={image.h * venue.background.metresPerPixel} preserveAspectRatio="none" style={{ imageRendering: "pixelated" }} />}
           {/* Roads under everything people use. */}
-          {(venue.roads ?? []).map((r) => (
+          {show("roads") && (venue.roads ?? []).map((r) => (
             <g key={r.id}>
-              <path d={linePath(r.points)} fill="none" stroke="#4b5563" strokeWidth={r.laneCount * LANE_WIDTH * (r.direction === "twoWay" ? 2 : 1)} strokeLinecap="round" strokeLinejoin="round" opacity={0.92} />
+              <path d={linePath(r.points)} fill="none" stroke="#111827" strokeWidth={r.laneCount * LANE_WIDTH * (r.direction === "twoWay" ? 2 : 1) + stroke * 3} strokeLinecap="round" strokeLinejoin="round" opacity={0.9} />
+              <path d={linePath(r.points)} fill="none" stroke="#4b5563" strokeWidth={r.laneCount * LANE_WIDTH * (r.direction === "twoWay" ? 2 : 1)} strokeLinecap="round" strokeLinejoin="round" />
               {r.direction === "twoWay" && <path d={linePath(r.points)} fill="none" stroke="#f8fafc" strokeWidth={stroke * 1.2} strokeDasharray={`${stroke * 8} ${stroke * 6}`} opacity={0.9} />}
               {selected === r.id && <path d={linePath(r.points)} fill="none" stroke="#f59e0b" strokeWidth={stroke * 2.5} />}
             </g>
           ))}
-          {venue.walkableAreas.map((w) => (
-            <path key={`wall-${w.id}`} d={polyPath(w.polygon)} fill="none" className="stroke-[#3a3f47] dark:stroke-[#4a5261]" strokeWidth={stroke * 4} strokeLinejoin="round" opacity={image ? 0.7 : 1} />
-          ))}
-          {venue.walkableAreas.map((w) => (
-            <path key={w.id} d={polyPath(w.polygon)} fillRule="evenodd" className={KIND_FILL.walkable} opacity={image ? 0.55 : 1} />
-          ))}
-          {venue.destinations.map((d) => (
-            <path key={d.id} d={polyPath(d.area)} fillRule="evenodd" className={KIND_FILL.destination} stroke="#2f9e6e" strokeWidth={stroke * 1.5} opacity={image ? 0.75 : 1} />
-          ))}
-          {venue.obstacles.map((o) => (
-            <path key={o.id} d={polyPath(o.polygon)} fillRule="evenodd" className={KIND_FILL.obstacle} stroke="#8b929c" strokeWidth={stroke} opacity={image ? 0.8 : 1} />
-          ))}
+          {/* Walkable: teal; destinations: green; obstacles: grey hatching. Strong outlines, so each shape stands out over a map image. */}
+          {show("walkable") &&
+            venue.walkableAreas.map((w) => (
+              <path key={w.id} d={polyPath(w.polygon)} fillRule="evenodd" className="fill-[#99f6e4] stroke-[#0d9488] dark:fill-[#115e59]" fillOpacity={image && show("image") ? 0.45 : 0.85} strokeWidth={stroke * 2} strokeLinejoin="round" />
+            ))}
+          {show("destinations") &&
+            venue.destinations.map((d) => (
+              <path key={d.id} d={polyPath(d.area)} fillRule="evenodd" className="fill-[#86efac] stroke-[#15803d] dark:fill-[#14532d]" fillOpacity={image && show("image") ? 0.6 : 0.9} strokeWidth={stroke * 2} />
+            ))}
+          {show("obstacles") &&
+            venue.obstacles.map((o) => (
+              <path key={o.id} d={polyPath(o.polygon)} fillRule="evenodd" fill="url(#obstacle-hatch)" className="stroke-[#334155] dark:stroke-[#cbd5e1]" fillOpacity={image && show("image") ? 0.8 : 1} strokeWidth={stroke * 1.6} />
+            ))}
+          {show("names") &&
+            [...venue.walkableAreas.map((e) => ({ id: e.id, name: e.name ?? e.id, ring: e.polygon.outer })), ...venue.obstacles.map((e) => ({ id: e.id, name: e.name ?? e.id, ring: e.polygon.outer })), ...venue.destinations.map((e) => ({ id: e.id, name: e.name, ring: e.area.outer }))].map((e) => {
+              const c = centroidOf(e.ring);
+              return (
+                <text key={`name-${e.id}`} x={c.x} y={c.y} fontSize={stroke * 11} textAnchor="middle" dominantBaseline="middle" className="fill-[#0f172a] stroke-white dark:fill-white dark:stroke-black" strokeWidth={stroke * 2.5} paintOrder="stroke" pointerEvents="none">
+                  {e.name}
+                </text>
+              );
+            })}
           {[...venue.screeningStages, ...venue.gateGroups].map((g) => (
             <g key={g.id}>
               <line x1={g.line.a.x} y1={g.line.a.y} x2={g.line.b.x} y2={g.line.b.y} className="stroke-[#2b2f36] dark:stroke-[#cbd5e1]" strokeWidth={stroke * 2.5} strokeLinecap="round" />
@@ -719,11 +791,30 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
               <circle cx={s.position.x} cy={s.position.y} r={stroke * 3.5} fill="#2563eb" />
             </g>
           ))}
-          {/* Problems and selection on top. */}
-          {[...flagged].map((id) => {
-            const p = polygonOf(venue, id);
-            return p ? <polygon key={`bad-${id}`} points={pts(p.ring)} fill="none" stroke="#ea580c" strokeWidth={stroke * 2} strokeDasharray={`${stroke * 6} ${stroke * 4}`} /> : null;
-          })}
+          {/* Problems: the shape outlined (red for errors, amber for warnings) and a numbered marker, like the list. */}
+          {show("problems") &&
+            problemList.map((p, k) => {
+              if (!p.elementId) return null;
+              const a = anchors.get(p.elementId);
+              const poly = polygonOf(venue, p.elementId);
+              const color = p.severity === "error" ? "#dc2626" : "#d97706";
+              return (
+                <g key={`problem-${k}`} className="cursor-pointer" onPointerDown={(ev) => {
+                  ev.stopPropagation();
+                  focus(p.elementId);
+                }}>
+                  {poly && <polygon points={pts(poly.ring)} fill={color} fillOpacity={0.12} stroke={color} strokeWidth={stroke * 2.5} strokeDasharray={`${stroke * 6} ${stroke * 3}`} />}
+                  {a && (
+                    <>
+                      <circle cx={a.x} cy={a.y} r={stroke * 7} fill={color} stroke="#fff" strokeWidth={stroke * 1.5} />
+                      <text x={a.x} y={a.y} fontSize={stroke * 8} fontWeight={700} textAnchor="middle" dominantBaseline="central" fill="#fff" pointerEvents="none">
+                        {k + 1}
+                      </text>
+                    </>
+                  )}
+                </g>
+              );
+            })}
           {polySel && <polygon points={pts(polySel.ring)} fill="none" stroke="#f59e0b" strokeWidth={stroke * 2.5} />}
           {gateSel && <line x1={gateSel.line.a.x} y1={gateSel.line.a.y} x2={gateSel.line.b.x} y2={gateSel.line.b.y} stroke="#f59e0b" strokeWidth={stroke * 5} strokeLinecap="round" opacity={0.6} />}
           {preview && <polygon points={pts(preview)} className={KIND_FILL[kind]} stroke="#f59e0b" strokeWidth={stroke * 2} strokeDasharray={`${stroke * 5} ${stroke * 3}`} opacity={0.85} />}
@@ -773,6 +864,19 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
           <button type="button" className={btnGhost} onClick={() => setView(bounds(venue))}>
             {E.fit}
           </button>
+          <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+          <details className="relative">
+            <summary className={`${btnGhost} cursor-pointer list-none`}>{E.layers}</summary>
+            <div className={`${overlay} absolute top-10 left-0 z-10 flex w-56 flex-col gap-1 p-3 text-xs`}>
+              {LAYERS.map((l) => (
+                <label key={l} className="flex items-center gap-2">
+                  <input type="checkbox" checked={layers[l]} onChange={(e) => setLayers((cur) => ({ ...cur, [l]: e.target.checked }))} />
+                  <span className={`inline-block size-3 shrink-0 rounded-sm border ${LAYER_SWATCH[l]}`} aria-hidden="true" />
+                  {E.layerNames[l]}
+                </label>
+              ))}
+            </div>
+          </details>
         </div>
         <p className={`${overlay} pointer-events-none absolute top-3 right-3 max-w-[22rem] px-3 py-1.5 text-xs text-muted`} aria-live="polite">
           {hint}
@@ -837,6 +941,32 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
               <input type="checkbox" checked={showDetection} onChange={(e) => setShowDetection(e.target.checked)} />
               {E.showDetection}
             </label>
+            <div className="mt-3 flex flex-col gap-1.5 border-t border-line pt-3">
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs font-medium text-fg">{E.fixHeading}</p>
+                <InfoTip text={E.fixIntro} />
+              </div>
+              <div role="group" aria-label={E.fixHeading} className="grid grid-cols-4 gap-0.5 rounded-md bg-sunken p-0.5">
+                {CLASSES.map((c) => (
+                  <button key={c} type="button" aria-pressed={fixClass === c} onClick={() => setFixClass(c)} className={`h-7 rounded text-[11px] font-medium ${fixClass === c ? "bg-surface text-fg shadow-sm" : "text-muted hover:text-fg"}`}>
+                    {E.classes[c]}
+                  </button>
+                ))}
+              </div>
+              <button type="button" className={tool === "fix" ? btnPrimary : btn} aria-pressed={tool === "fix"} onClick={() => chooseTool(tool === "fix" ? "select" : "fix")}>
+                {E.fixPaint}
+              </button>
+              {tool === "fix" && (
+                <label className={labelText}>
+                  {E.brush}: {brush} m
+                  <input type="range" min={1} max={30} step={0.5} value={brush} onChange={(e) => setBrush(Number(e.target.value))} />
+                </label>
+              )}
+              <p className="flex items-center gap-1.5 text-[11px] text-muted">
+                <span className="inline-block size-3 rounded-sm" style={{ background: "rgb(217 70 239)" }} aria-hidden="true" />
+                {E.cleanedKey}
+              </p>
+            </div>
             <div className="mt-3 flex gap-2">
               <button type="button" className={btnPrimary} onClick={applyDetected}>
                 {E.applyDetection}
@@ -943,14 +1073,28 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
           ) : (
             <ul className="mt-1.5 flex flex-col gap-1 text-xs" data-testid="venue-problems">
               {problems.map((p, k) => (
-                <li key={k} className={p.severity === "error" ? "text-bad" : "text-muted"}>
-                  <button type="button" className="text-left" onClick={() => p.elementId && setSelected(p.elementId)}>
-                    {p.severity === "error" ? "✗ " : "! "}
-                    {p.message}
+                <li key={k} className={p.severity === "error" ? "text-bad" : "text-warn"}>
+                  <button type="button" className="flex gap-1.5 text-left hover:underline disabled:no-underline" disabled={!p.elementId} onClick={() => focus(p.elementId)}>
+                    <span className={`grid size-4 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white ${p.severity === "error" ? "bg-[#dc2626]" : "bg-[#d97706]"}`}>{k + 1}</span>
+                    <span>{p.message}</span>
                   </button>
                 </li>
               ))}
             </ul>
+          )}
+          {(fixCount("removeTiny") > 0 || fixCount("removeIsolated") > 0) && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {fixCount("removeTiny") > 0 && (
+                <button type="button" className={btnSmall} disabled={readOnly} onClick={() => edit(applyFix(venue, problemList, "removeTiny"))}>
+                  {E.fixTiny(fixCount("removeTiny"))}
+                </button>
+              )}
+              {fixCount("removeIsolated") > 0 && (
+                <button type="button" className={btnSmall} disabled={readOnly} onClick={() => edit(applyFix(venue, problemList, "removeIsolated"))}>
+                  {E.fixIsolated(fixCount("removeIsolated"))}
+                </button>
+              )}
+            </div>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             <button type="button" className={btnPrimary} disabled={readOnly || problems === null} onClick={() => void save()}>
@@ -1024,5 +1168,30 @@ function nearLineElement(v: Venue, p: Point, radius: number): string | null {
     const half = (r.laneCount * LANE_WIDTH * (r.direction === "twoWay" ? 2 : 1)) / 2;
     for (let k = 1; k < r.points.length; k++) if (nearSegment(r.points[k - 1] as Point, r.points[k] as Point, Math.max(radius, half))) return r.id;
   }
+  return null;
+}
+
+/** Swatches for the layers menu: the same colours as on the canvas. */
+const LAYER_SWATCH: Record<Layer, string> = {
+  image: "border-line bg-[linear-gradient(135deg,#cbd5e1,#94a3b8)]",
+  detection: "border-line bg-[linear-gradient(90deg,#14b8a6_33%,#dc2626_33%_66%,#d946ef_66%)]",
+  walkable: "border-[#0d9488] bg-[#99f6e4]",
+  obstacles: "border-[#334155] bg-[repeating-linear-gradient(45deg,#e2e8f0_0_2px,#64748b_2px_3px)]",
+  destinations: "border-[#15803d] bg-[#86efac]",
+  roads: "border-[#111827] bg-[#4b5563]",
+  names: "border-line bg-surface",
+  problems: "border-[#dc2626] bg-[#fecaca]",
+};
+
+/** Where to put an element's problem marker: a polygon's centre, a source, a gate's middle, a road's middle point. */
+function anchorOf(v: Venue, id: string): Point | null {
+  const p = polygonOf(v, id);
+  if (p) return centroidOf(p.ring);
+  const s = v.sources.find((e) => e.id === id);
+  if (s) return s.position;
+  const g = [...v.gateGroups, ...v.screeningStages].find((e) => e.id === id);
+  if (g) return { x: (g.line.a.x + g.line.b.x) / 2, y: (g.line.a.y + g.line.b.y) / 2 };
+  const r = (v.roads ?? []).find((e) => e.id === id);
+  if (r) return r.points[Math.floor(r.points.length / 2)] ?? null;
   return null;
 }

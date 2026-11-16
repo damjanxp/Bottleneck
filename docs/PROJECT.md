@@ -604,6 +604,19 @@ apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/sc
 - **Alternatives:** A machine-learning segmentation model (heavy, and still needs checking); fixed colour lists for one map provider (breaks with styles and screenshots of other maps); vector tiles from a map service (needs an API key and a network connection, against F13 and the CSP).
 - **Consequences:** Detected walkable blocks are separated by roads (people cannot cross a street until a crossing or a painted connection is added); car parks, barriers and crossings are not detected; detection quality depends on the map style (checked on synthetic maps in tests and in the browser: open ground, buildings, parks, roads, water and main roads each found). Tests: `editor/paint.test.ts`, `editor/autodetect.test.ts`, the detection step in `e2e/editor-image.spec.ts`.
 
+
+### D-072 Redesign 4 (trial): a clear editing view, problems on the map, cleaner map detection
+- **Context:** Owner feedback on round 3: imported maps give usable but messy results; it is hard to see what is walkable, an obstacle or ignored, and which shapes break the rules, so they cannot be fixed; map text and widgets still end up in the venue.
+- **Decision:**
+  - **Editing colours** (editor only; the simulation keeps the floor-plan look): walkable teal with a teal outline, destinations green, obstacles grey **hatched**, roads asphalt with a dark edge and a dashed centre line; outlines stay strong over a map image. A **Layers** menu (map image, detection, walkable, obstacles, destinations, roads, names, problems) shows a colour swatch for each, so it doubles as the key; "Names" writes each area's name on it.
+  - **Problems on the map:** every check that names an element outlines it (red for errors, amber for warnings) and puts a **numbered marker** on it, matching the numbered Checks list; clicking a marker or a list entry selects the element and zooms to it.
+  - **Clean-up checks** (`cleanupProblems`): shapes under 4 m² (map noise) and walkable areas no source can reach on foot (islands, found by a flood fill over walkable minus obstacles on a grid) are warnings, with one-click repairs: "Remove n tiny shapes", "Remove n islands".
+  - **Cleaner detection** (`classMap`): the preview now shows exactly what Apply will use. After clustering: the user's painted corrections win; patches under 6 m² (pins, icons) are dropped; road patches that are not long and thin, or that touch no image edge and fill their bounding box (search boxes, buttons), are dropped; obstacle patches thinner than 1.5 m on average, or hollow and thin (the shadow ring around a widget), are dropped; then every dropped or ignored pixel (text, lines) takes the class of the nearest classified pixel. Cleaned pixels show in magenta in the preview.
+  - **Correct the detection:** in the detection panel, choose Road, Walkable, Obstacle or Ignore and paint over the map (brush 1–30 m); corrections always win and the preview updates after each stroke.
+  - **Tests:** the browser tests' port is configurable (`E2E_PORT`), so they can run while a preview is open on 4173.
+- **Alternatives:** hiding problem shapes instead of marking them (the user could not fix what they cannot see); stricter automatic rules only (every map style has exceptions; a correction brush handles them).
+- **Consequences:** Detected street blocks are still islands until crossings or connections are added (now shown on the map with a one-click removal, which is not always what is wanted). A widget right next to an area becomes part of that area unless corrected. Tests: `autodetect.test.ts` (widgets, pins, labels, corrections, widget shadows), `editor.test.ts` (tiny shapes and islands with their repairs).
+
 ---
 
 ## 3. Review notes triage

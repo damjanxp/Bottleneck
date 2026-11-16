@@ -9,7 +9,7 @@ import { buildScenarioValidatorSource } from "../validation/buildValidator.ts";
 import { calibrate, distance, pixelToVenue, venueToPixel } from "./calibration.ts";
 import { area, isDegenerateOrSelfIntersecting, selfIntersections } from "./geometry.ts";
 import { HISTORY_LIMIT, canRedo, canUndo, commit, createHistory, redo, undo } from "./history.ts";
-import { checkVenue, hasErrors, structureProblems } from "./venueChecks.ts";
+import { applyFix, checkVenue, cleanupProblems, hasErrors, structureProblems } from "./venueChecks.ts";
 import { addGate, addPolygon, addSource, blankVenue, deleteElement, handles, moveHandle } from "./edits.ts";
 import type { KeyValueStore } from "../library/storage.ts";
 import { USER_VENUES_KEY, loadUserVenues, removeUserVenue, saveUserVenues, upsertUserVenue } from "../library/userVenues.ts";
@@ -287,5 +287,22 @@ describe("venues saved in this browser", () => {
     expect(loadUserVenues(store)).toEqual([]);
     store.setItem(USER_VENUES_KEY, "{not json");
     expect(loadUserVenues(store)).toEqual([]);
+  });
+});
+
+describe("clean-up checks for imported venues", () => {
+  it("flags tiny shapes and walkable islands, and the one-click fixes remove them", () => {
+    const v: Venue = {
+      ...drawn,
+      walkableAreas: [...drawn.walkableAreas, { id: "island", polygon: { outer: sq(200, 0, 220, 20) } }, { id: "speck", polygon: { outer: sq(5, 5, 6, 6) } }],
+      obstacles: [{ id: "dot", polygon: { outer: sq(30, 30, 31, 31) } }],
+    };
+    const problems = cleanupProblems(v);
+    expect(problems.filter((p) => p.fix === "removeTiny").map((p) => p.elementId).sort()).toEqual(["dot", "speck"]);
+    expect(problems.filter((p) => p.fix === "removeIsolated").map((p) => p.elementId)).toEqual(["island"]);
+    const fixed = applyFix(applyFix(v, problems, "removeTiny"), problems, "removeIsolated");
+    expect(fixed.walkableAreas.map((w) => w.id)).toEqual(["area-1"]);
+    expect(fixed.obstacles).toEqual([]);
+    expect(cleanupProblems(fixed)).toEqual([]);
   });
 });

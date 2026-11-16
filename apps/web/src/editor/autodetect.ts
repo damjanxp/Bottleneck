@@ -16,6 +16,7 @@
 import type { Point, Road, Venue } from "@bottleneck/schema";
 import { nextId } from "./edits.ts";
 import { applyPaint } from "./paint.ts";
+import { components } from "./raster.ts";
 import { simplifyPath, type PixelPoint } from "./trace.ts";
 
 export type MapClass = "road" | "walkable" | "obstacle" | "ignore";
@@ -157,44 +158,125 @@ export function guessClass(rgb: readonly [number, number, number], edgeShare: nu
   return { guess: "walkable", label: "Open ground" };
 }
 
+/** Class codes in a class map. */
+export const CLASS_CODE: Record<MapClass, number> = { ignore: 0, road: 1, walkable: 2, obstacle: 3 };
+export const CODE_CLASS: MapClass[] = ["ignore", "road", "walkable", "obstacle"];
+/** "No correction" in an overrides array. */
+export const NO_OVERRIDE = 255;
+
+export interface CleanOptions {
+  /** Corrections painted by the user: a class code per pixel, or NO_OVERRIDE. They always win. */
+  overrides?: Uint8Array;
+  /** Patches of one class smaller than this many pixels are noise (icons, pins, specks). */
+  minPixels?: number;
+  /** A road patch must be at least this many times longer than it is wide (else it is a button or a box). */
+  roadElongation?: number;
+  /** Obstacle patches thinner than this on average (pixels) are lines or shadows, not buildings. */
+  minObstacleWidth?: number;
+}
+
 /**
- * The pixels of the chosen class, with pixels marked "ignore" (labels, icons, lines) given to the
- * class most of their neighbours have, so text inside a park does not cut holes in it.
+ * The cleaned class of every pixel (CLASS_CODE), and which pixels the cleaning changed:
+ * 1. the user's corrections are applied;
+ * 2. patches smaller than minPixels and road patches that are not long and thin (map widgets,
+ *    search boxes, labels on a white background) are set to "ignore";
+ * 3. every "ignore" pixel (text, lines, icons, the removed patches) takes the class of the nearest
+ *    classified pixel, so a label in a park becomes park and a widget over a street block becomes
+ *    that block.
  */
-export function classMask(assignment: Uint8Array, w: number, h: number, classes: readonly MapClass[], want: MapClass): Uint8Array {
-  const cls = new Uint8Array(w * h);
-  const code: Record<MapClass, number> = { road: 1, walkable: 2, obstacle: 3, ignore: 0 };
-  for (let i = 0; i < w * h; i++) cls[i] = code[classes[assignment[i] as number] ?? "ignore"];
-  // Fill unknown pixels from their neighbours, a few passes (labels are a few pixels thick).
-  for (let pass = 0; pass < 4; pass++) {
-    let changed = false;
-    const next = cls.slice();
-    for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        if (cls[i] !== 0) continue;
-        const votes = [0, 0, 0, 0];
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            const xx = x + dx;
-            const yy = y + dy;
-            if (xx >= 0 && yy >= 0 && xx < w && yy < h) {
-              const v = cls[yy * w + xx] as number;
-              votes[v] = (votes[v] as number) + 1;
-            }
-          }
-        let best = 0;
-        for (let c = 1; c < 4; c++) if ((votes[c] as number) > (votes[best === 0 ? 1 : best] as number) || (best === 0 && (votes[c] as number) > 0)) best = c;
-        if (best !== 0) {
-          next[i] = best;
-          changed = true;
+export function classMap(assignment: Uint8Array, w: number, h: number, classes: readonly MapClass[], options: CleanOptions = {}): { cls: Uint8Array; cleaned: Uint8Array } {
+  const n = w * h;
+  const minPixels = options.minPixels ?? 24;
+  const elongation = options.roadElongation ?? 3;
+  const minObstacleWidth = options.minObstacleWidth ?? 3;
+  const cls = new Uint8Array(n);
+  for (let i = 0; i < n; i++) cls[i] = CLASS_CODE[classes[assignment[i] as number] ?? "ignore"];
+  const locked = new Uint8Array(n);
+  if (options.overrides)
+    for (let i = 0; i < n; i++) {
+      const o = options.overrides[i] as number;
+      if (o !== NO_OVERRIDE) {
+        cls[i] = o;
+        if (o !== 0) locked[i] = 1;
+      }
+    }
+  const raw = cls.slice();
+  // Small patches of any class, and road patches that are not elongated.
+  for (const code of [1, 2, 3]) {
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) mask[i] = cls[i] === code && !locked[i] ? 1 : 0;
+    const { labels, count } = components(mask, w, h);
+    if (count === 0) continue;
+    const size = new Int32Array(count + 1);
+    for (let i = 0; i < n; i++) size[labels[i] as number] = (size[labels[i] as number] as number) + 1;
+    // Skeleton pixels per patch give its length; size / length is its mean width.
+    let spine: Int32Array | null = null;
+    if (code === 1 || code === 3) {
+      spine = new Int32Array(count + 1);
+      const skel = thin(mask, w, h);
+      for (let i = 0; i < n; i++) if (skel[i]) spine[labels[i] as number] = (spine[labels[i] as number] as number) + 1;
+    }
+    // Bounding boxes and border contact, for telling a widget (a solid box inside the image) from a street.
+    const minX = new Int32Array(count + 1).fill(w);
+    const minY = new Int32Array(count + 1).fill(h);
+    const maxX = new Int32Array(count + 1).fill(-1);
+    const maxY = new Int32Array(count + 1).fill(-1);
+    for (let i = 0; i < n; i++) {
+      const l = labels[i] as number;
+      if (!l) continue;
+      const x = i % w;
+      const y = (i - x) / w;
+      if (x < (minX[l] as number)) minX[l] = x;
+      if (y < (minY[l] as number)) minY[l] = y;
+      if (x > (maxX[l] as number)) maxX[l] = x;
+      if (y > (maxY[l] as number)) maxY[l] = y;
+    }
+    const dropPatch = new Uint8Array(count + 1);
+    for (let l = 1; l <= count; l++) {
+      const s = size[l] as number;
+      let drop = s < minPixels;
+      if (!drop && spine) {
+        const length = Math.max(1, spine[l] as number);
+        const width = s / length;
+        const boxArea = ((maxX[l] as number) - (minX[l] as number) + 1) * ((maxY[l] as number) - (minY[l] as number) + 1);
+        if (code === 1) {
+          const touchesEdge = (minX[l] as number) === 0 || (minY[l] as number) === 0 || (maxX[l] as number) === w - 1 || (maxY[l] as number) === h - 1;
+          drop = length < elongation * width || (!touchesEdge && s / boxArea > 0.85);
+        } else {
+          // A building is solid; a thin line, or a thin ring (the shadow around a map widget), is not.
+          drop = width < minObstacleWidth || (s / boxArea < 0.45 && width < 3 * minObstacleWidth);
         }
       }
-    cls.set(next);
-    if (!changed) break;
+      dropPatch[l] = drop ? 1 : 0;
+    }
+    for (let i = 0; i < n; i++) if (dropPatch[labels[i] as number]) cls[i] = 0;
   }
+  // Nearest-class fill of every "ignore" pixel (breadth-first from all classified pixels).
+  const queue = new Int32Array(n);
+  let tail = 0;
+  for (let i = 0; i < n; i++) if (cls[i] !== 0) queue[tail++] = i;
+  let head = 0;
+  while (head < tail) {
+    const i = queue[head++] as number;
+    const x = i % w;
+    const c = cls[i] as number;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < n - w ? i + w : -1]) {
+      if (j >= 0 && cls[j] === 0) {
+        cls[j] = c;
+        queue[tail++] = j;
+      }
+    }
+  }
+  const cleaned = new Uint8Array(n);
+  for (let i = 0; i < n; i++) cleaned[i] = raw[i] !== cls[i] ? 1 : 0;
+  return { cls, cleaned };
+}
+
+/** The pixels of one class after cleaning (classMap). */
+export function classMask(assignment: Uint8Array, w: number, h: number, classes: readonly MapClass[], want: MapClass, options: CleanOptions = {}): Uint8Array {
+  const { cls } = classMap(assignment, w, h, classes, options);
   const out = new Uint8Array(w * h);
-  const target = code[want];
+  const target = CLASS_CODE[want];
   for (let i = 0; i < w * h; i++) out[i] = cls[i] === target ? 1 : 0;
   return out;
 }
@@ -301,6 +383,16 @@ export function toVenuePath(path: readonly PixelPoint[], origin: Point, metresPe
   return path.map((p) => ({ x: Math.round((origin.x + p.px * metresPerPixel) * 100) / 100, y: Math.round((origin.y + p.py * metresPerPixel) * 100) / 100 }));
 }
 
+/** The cleaning settings for an image of this scale: specks under 6 m², obstacle lines under 1.5 m wide. */
+export function cleanOptions(metresPerPixel: number, overrides?: Uint8Array): CleanOptions {
+  return { overrides, minPixels: speckPixels(metresPerPixel), minObstacleWidth: Math.max(2, 1.5 / metresPerPixel) };
+}
+
+/** Noise threshold in pixels: patches under about 6 m² (icons, pins, specks). */
+export function speckPixels(metresPerPixel: number): number {
+  return Math.max(12, Math.round(6 / (metresPerPixel * metresPerPixel)));
+}
+
 export interface DetectionResult {
   venue: Venue;
   walkable: number;
@@ -313,13 +405,19 @@ export interface DetectionResult {
  * ones already there, as when painting) and roads (two-way, one lane each way, public). Areas under
  * 25 m² and roads under 15 m are dropped as noise.
  */
-export function applyDetection(v: Venue, assignment: Uint8Array, w: number, h: number, classes: readonly MapClass[], origin: Point, metresPerPixel: number): DetectionResult {
+export function applyDetection(v: Venue, assignment: Uint8Array, w: number, h: number, classes: readonly MapClass[], origin: Point, metresPerPixel: number, overrides?: Uint8Array): DetectionResult {
+  const { cls } = classMap(assignment, w, h, classes, cleanOptions(metresPerPixel, overrides));
+  const maskOf = (code: number) => {
+    const m = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) m[i] = cls[i] === code ? 1 : 0;
+    return m;
+  };
   const box = { minX: origin.x, minY: origin.y, maxX: origin.x + w * metresPerPixel, maxY: origin.y + h * metresPerPixel };
   let venue = v;
   const counts = { walkable: 0, obstacles: 0, roads: 0 };
   for (const kind of ["walkable", "obstacle"] as const) {
-    if (!classes.includes(kind)) continue;
-    const mask = classMask(assignment, w, h, classes, kind);
+    if (!cls.includes(CLASS_CODE[kind])) continue;
+    const mask = maskOf(CLASS_CODE[kind]);
     const before = kind === "walkable" ? venue.walkableAreas.length : venue.obstacles.length;
     venue = applyPaint(
       venue,
@@ -342,8 +440,8 @@ export function applyDetection(v: Venue, assignment: Uint8Array, w: number, h: n
     if (kind === "walkable") counts.walkable = after - before;
     else counts.obstacles = after - before;
   }
-  if (classes.includes("road")) {
-    const lines = roadLines(classMask(assignment, w, h, classes, "road"), w, h, 15 / metresPerPixel, Math.max(1, 1 / metresPerPixel));
+  if (cls.includes(CLASS_CODE.road)) {
+    const lines = roadLines(maskOf(CLASS_CODE.road), w, h, 15 / metresPerPixel, Math.max(1, 1 / metresPerPixel));
     const roads: Road[] = [...(venue.roads ?? [])];
     for (const line of lines) {
       const points = toVenuePath(line, origin, metresPerPixel).slice(0, 500);

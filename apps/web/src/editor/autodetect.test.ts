@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDetection, classMask, clusterColours, roadLines, thin } from "./autodetect.ts";
+import { CLASS_CODE, NO_OVERRIDE, applyDetection, classMap, classMask, cleanOptions, clusterColours, roadLines, thin } from "./autodetect.ts";
 import { blankVenue } from "./edits.ts";
 
 type RGB = [number, number, number];
@@ -70,5 +70,67 @@ describe("reading a map screenshot", () => {
     expect(r.obstacles).toBe(3); // two buildings and the pond
     expect(r.roads).toBeGreaterThanOrEqual(3);
     expect(r.venue.roads?.every((road) => road.direction === "twoWay" && road.publicRoad && road.points.length >= 2)).toBe(true);
+  });
+});
+
+describe("cleaning up map widgets, icons and text", () => {
+  /** Open ground with a long white road, a white "widget" box (like a zoom button) and a red pin. */
+  function messyMap() {
+    const w = 200;
+    const h = 120;
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    const paint = (x0: number, y0: number, x1: number, y1: number, c: RGB) => {
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) rgba.set([...c, 255], (y * w + x) * 4);
+    };
+    paint(0, 0, w, h, OPEN);
+    paint(0, 50, w, 58, ROAD); // a street: long and thin
+    paint(150, 80, 190, 112, ROAD); // a widget: white but compact
+    paint(30, 85, 36, 91, [234, 67, 53]); // a red map pin
+    paint(60, 20, 120, 23, TEXT); // a label
+    return { rgba, w, h };
+  }
+
+  it("keeps the street, drops the widget, the pin and the label into the open ground around them", () => {
+    const { rgba, w, h } = messyMap();
+    const { clusters, assignment } = clusterColours(rgba, w, h);
+    const classes = clusters.map((c) => c.guess);
+    const { cls, cleaned } = classMap(assignment, w, h, classes, { minPixels: 60 });
+    expect(cls[54 * w + 100]).toBe(CLASS_CODE.road); // the street
+    expect(cls[95 * w + 170]).toBe(CLASS_CODE.walkable); // the widget became open ground
+    expect(cls[88 * w + 33]).toBe(CLASS_CODE.walkable); // the pin too
+    expect(cls[21 * w + 90]).toBe(CLASS_CODE.walkable); // and the label
+    expect(cleaned[95 * w + 170]).toBe(1);
+    expect(cleaned[54 * w + 100]).toBe(0);
+  });
+
+  it("a painted correction always wins", () => {
+    const { rgba, w, h } = messyMap();
+    const { clusters, assignment } = clusterColours(rgba, w, h);
+    const overrides = new Uint8Array(w * h).fill(NO_OVERRIDE);
+    for (let y = 0; y < 20; y++) for (let x = 0; x < 30; x++) overrides[y * w + x] = CLASS_CODE.obstacle;
+    const { cls } = classMap(assignment, w, h, clusters.map((c) => c.guess), { overrides });
+    expect(cls[10 * w + 10]).toBe(CLASS_CODE.obstacle);
+    expect(cls[10 * w + 60]).toBe(CLASS_CODE.walkable);
+  });
+});
+
+describe("map widget shadows", () => {
+  it("the grey ring a widget's shadow leaves is not a building", () => {
+    const w = 160;
+    const h = 120;
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    const paint = (x0: number, y0: number, x1: number, y1: number, c: RGB) => {
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) rgba.set([...c, 255], (y * w + x) * 4);
+    };
+    paint(0, 0, w, h, OPEN);
+    paint(0, 100, w, 108, ROAD); // a street along the bottom
+    paint(36, 36, 124, 64, BUILDING); // shadow ring (4 px wide)…
+    paint(40, 40, 120, 60, ROAD); // …around a white widget
+    paint(10, 10, 30, 30, BUILDING); // a real (solid) building
+    const { clusters, assignment } = clusterColours(rgba, w, h);
+    const { cls } = classMap(assignment, w, h, clusters.map((c) => c.guess), cleanOptions(0.5));
+    expect(cls[38 * w + 80]).toBe(CLASS_CODE.walkable); // the ring
+    expect(cls[50 * w + 80]).toBe(CLASS_CODE.walkable); // the widget
+    expect(cls[20 * w + 20]).toBe(CLASS_CODE.obstacle); // the building stays
   });
 });

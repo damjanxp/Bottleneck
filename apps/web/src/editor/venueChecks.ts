@@ -15,13 +15,19 @@ import { checkWalkingReachability } from "@bottleneck/engine";
 import type { Point, Polygon, Venue } from "@bottleneck/schema";
 import { schemaMessages, type SchemaValidator } from "../library/validate.ts";
 import { area, isDegenerateOrSelfIntersecting } from "./geometry.ts";
+import { components, makeGrid, rasterizePolygon, ringBox } from "./raster.ts";
 
 export interface VenueProblem {
   severity: "error" | "warning";
   /** The element the problem is about (for highlighting), or "" for the whole venue. */
   elementId: string;
   message: string;
+  /** A one-click repair that applies to every problem of this kind. */
+  fix?: "removeTiny" | "removeIsolated";
 }
+
+/** Shapes smaller than this (m²) are almost always map noise. */
+export const TINY_AREA = 4;
 
 interface Named {
   id?: string;
@@ -157,14 +163,93 @@ export function reachabilityProblems(v: Venue): VenueProblem[] {
   });
 }
 
+/**
+ * Clean-up warnings for imported or painted venues: tiny shapes (noise) and walkable areas no
+ * source can reach on foot (islands). Each comes with a one-click repair.
+ */
+export function cleanupProblems(v: Venue): VenueProblem[] {
+  const out: VenueProblem[] = [];
+  const shapes: { what: string; e: Named & { id: string }; poly: Polygon }[] = [
+    ...v.walkableAreas.map((e) => ({ what: "Walkable area", e, poly: e.polygon })),
+    ...v.obstacles.map((e) => ({ what: "Obstacle", e, poly: e.polygon })),
+    ...v.destinations.map((e) => ({ what: "Destination", e, poly: e.area })),
+  ];
+  const tiny = new Set<string>();
+  for (const { what, e, poly } of shapes) {
+    const a = area(poly.outer);
+    if (a < TINY_AREA) {
+      tiny.add(e.id);
+      out.push({ severity: "warning", elementId: e.id, message: `${label(e, what)} is tiny (${a.toFixed(1)} m²): probably map noise.`, fix: "removeTiny" });
+    }
+  }
+  for (const id of isolatedWalkable(v)) {
+    if (tiny.has(id)) continue;
+    const e = v.walkableAreas.find((w) => w.id === id);
+    if (e) out.push({ severity: "warning", elementId: id, message: `${label(e, "Walkable area")} cannot be reached from any source: an island nobody walks to.`, fix: "removeIsolated" });
+  }
+  return out;
+}
+
+/** Ids of walkable areas that no source can reach on foot (through walkable areas, around obstacles). */
+export function isolatedWalkable(v: Venue): string[] {
+  if (v.sources.length === 0 || v.walkableAreas.length < 2) return [];
+  const box = ringBox(v.walkableAreas.map((w) => w.polygon.outer));
+  const extent = Math.max(box.maxX - box.minX, box.maxY - box.minY);
+  const g = makeGrid(box, Math.min(2, Math.max(0.5, extent / 500)));
+  for (const w of v.walkableAreas) rasterizePolygon(g, w.polygon, 1);
+  for (const o of v.obstacles) rasterizePolygon(g, o.polygon, 0);
+  const { labels } = components(g.data, g.w, g.h);
+  const reached = new Set<number>();
+  for (const s of v.sources) {
+    const i = Math.floor((s.position.x - g.x0) / g.cell);
+    const j = Math.floor((s.position.y - g.y0) / g.cell);
+    // The source's own cell, or the nearest walkable cell within a few metres.
+    let found = 0;
+    for (let r = 0; r <= 6 && !found; r++)
+      for (let dj = -r; dj <= r && !found; dj++)
+        for (let di = -r; di <= r && !found; di++) {
+          const ii = i + di;
+          const jj = j + dj;
+          if (ii >= 0 && jj >= 0 && ii < g.w && jj < g.h) found = labels[jj * g.w + ii] as number;
+        }
+    if (found) reached.add(found);
+  }
+  const out: string[] = [];
+  for (const w of v.walkableAreas) {
+    const one = { ...g, data: new Uint8Array(g.w * g.h) };
+    rasterizePolygon(one, w.polygon, 1);
+    let ok = false;
+    let any = false;
+    for (let k = 0; k < one.data.length && !ok; k++)
+      if (one.data[k]) {
+        any = true;
+        if (reached.has(labels[k] as number)) ok = true;
+      }
+    if (any && !ok) out.push(w.id);
+  }
+  return out;
+}
+
 /** All checks in order; later stages run only if the earlier ones found no errors. */
 export function checkVenue(data: unknown, validate: SchemaValidator): VenueProblem[] {
   const schema = schemaProblems(data, validate);
   if (schema.length > 0) return schema;
   const v = data as Venue;
   const structure = structureProblems(v);
-  if (structure.some((p) => p.severity === "error")) return structure;
-  return [...structure, ...reachabilityProblems(v)];
+  const cleanup = cleanupProblems(v);
+  if (structure.some((p) => p.severity === "error")) return [...structure, ...cleanup];
+  return [...structure, ...cleanup, ...reachabilityProblems(v)];
+}
+
+/** Applies a one-click repair: removes the tiny shapes, or the walkable islands. */
+export function applyFix(v: Venue, problems: readonly VenueProblem[], fix: NonNullable<VenueProblem["fix"]>): Venue {
+  const ids = new Set(problems.filter((p) => p.fix === fix).map((p) => p.elementId));
+  return {
+    ...v,
+    walkableAreas: v.walkableAreas.filter((e) => !ids.has(e.id)),
+    obstacles: v.obstacles.filter((e) => !ids.has(e.id)),
+    destinations: v.destinations.filter((e) => !ids.has(e.id)),
+  };
 }
 
 export function hasErrors(problems: readonly VenueProblem[]): boolean {
