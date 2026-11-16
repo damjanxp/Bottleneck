@@ -29,6 +29,23 @@ async function clickAt(canvas: Locator, x: number, y: number): Promise<void> {
   await canvas.click({ position: { x: ox + (x - vx) * s, y: oy + (y - vy) * s } });
 }
 
+/** Drags on the canvas from venue point a to b. */
+async function dragOn(page: Page, canvas: Locator, a: [number, number], b: [number, number]): Promise<void> {
+  const { box, vb } = await canvas.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { box: { x: r.x, y: r.y, w: r.width, h: r.height }, vb: (el.getAttribute("viewBox") ?? "0 0 100 60").split(" ").map(Number) };
+  });
+  const [vx, vy, vw, vh] = vb as [number, number, number, number];
+  const s = Math.min(box.w / vw, box.h / vh);
+  const ox = box.x + (box.w - vw * s) / 2;
+  const oy = box.y + (box.h - vh * s) / 2;
+  await page.mouse.move(ox + (a[0] - vx) * s, oy + (a[1] - vy) * s);
+  await page.mouse.down();
+  await page.mouse.move(ox + ((a[0] + b[0]) / 2 - vx) * s, oy + ((a[1] + b[1]) / 2 - vy) * s, { steps: 4 });
+  await page.mouse.move(ox + (b[0] - vx) * s, oy + (b[1] - vy) * s, { steps: 4 });
+  await page.mouse.up();
+}
+
 const storedVenues = (page: Page) => page.evaluate(() => window.localStorage.getItem("bottleneck.venues.v1"));
 
 test("[test] draw a venue, save, reload: unchanged", async ({ page }) => {
@@ -41,15 +58,10 @@ test("[test] draw a venue, save, reload: unchanged", async ({ page }) => {
 
   await page.getByLabel("Venue name").fill("Test hall");
 
-  await page.getByRole("button", { name: "Walkable area", exact: true }).click();
-  for (const [x, y] of [
-    [5, 5],
-    [95, 5],
-    [95, 55],
-    [5, 55],
-  ] as const)
-    await clickAt(canvas, x, y);
-  await page.getByRole("button", { name: "Finish shape" }).click();
+  // A walkable floor dragged out as a rectangle.
+  await page.getByRole("group", { name: "Draw as" }).getByRole("button", { name: "Walkable" }).click();
+  await page.getByRole("button", { name: "Rectangle", exact: true }).click();
+  await dragOn(page, canvas, [5, 5], [95, 55]);
 
   await page.getByRole("button", { name: "Source", exact: true }).click();
   await clickAt(canvas, 10, 30);
@@ -58,7 +70,9 @@ test("[test] draw a venue, save, reload: unchanged", async ({ page }) => {
   await clickAt(canvas, 50, 45);
   await clickAt(canvas, 50, 15);
 
-  await page.getByRole("button", { name: "Destination", exact: true }).click();
+  // A destination drawn freehand, finished with Enter.
+  await page.getByRole("group", { name: "Draw as" }).getByRole("button", { name: "Destination" }).click();
+  await page.getByRole("button", { name: "Freeform", exact: true }).click();
   for (const [x, y] of [
     [80, 20],
     [92, 20],

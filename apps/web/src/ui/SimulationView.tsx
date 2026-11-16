@@ -13,9 +13,10 @@ import { barrierRows, eventPhase, lotRows, parkingHeadlines, withLotClosed } fro
 import { SimController, type RunRecordParts, type SeekState } from "../sim/SimController.ts";
 import { strings } from "../strings.ts";
 import type { LoadedInfo, MetricsSummary, StatsMessage } from "../workerProtocol.ts";
+import { browserStore, loadVenueImage } from "../library/venueImages.ts";
 import { downloadText } from "./browserFiles.ts";
 import { Legend } from "./Legend.tsx";
-import { CapacityTable, ClockDisplay, Headlines, LaneTable, ParametersList, StateCounts, WorstLane, type ClockInfo } from "./Panels.tsx";
+import { CapacityTable, ClockDisplay, Headlines, LaneTable, ParametersList, Section, StateCounts, WorstLane, type ClockInfo } from "./Panels.tsx";
 import { BarrierTable, CarCounts, LotTable, ParkingHeadlineCard } from "./ParkingPanels.tsx";
 import { IconEyeOff, IconExit, IconFit, IconLayers, IconPause, IconPeak, IconPlay, IconRestart, IconStep } from "./icons.tsx";
 import { btn, btnGhost, btnIcon, btnPrimary, btnSmall, card, cardHint, cardTitle, overlay, select } from "./styles.ts";
@@ -177,7 +178,10 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
         r.onLaneClick = (id) => setSelectedLane(id);
         const info = loadedRef.current;
         const c = controllerRef.current;
-        if (info) r.setVenue(venue, info.lanes, info.vehicleLayout);
+        if (info) {
+          r.setVenue(venue, info.lanes, info.vehicleLayout);
+          void r.setBackgroundImage(venue.id ? loadVenueImage(browserStore(), venue.id) : null, venue.background ?? null);
+        }
         if (c?.latest) r.setSnapshot(c.latest);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
@@ -193,7 +197,10 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
   // New venue geometry for the renderer.
   useEffect(() => {
     const r = rendererRef.current;
-    if (r && loaded) r.setVenue(venue, loaded.lanes, loaded.vehicleLayout);
+    if (r && loaded) {
+      r.setVenue(venue, loaded.lanes, loaded.vehicleLayout);
+      void r.setBackgroundImage(venue.id ? loadVenueImage(browserStore(), venue.id) : null, venue.background ?? null);
+    }
   }, [loaded, venue]);
 
   useEffect(() => {
@@ -430,9 +437,6 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
 
         {/* Bottom: the legend, then the playback bar. */}
         <div className="absolute right-3 bottom-3 left-3 flex flex-col gap-2">
-          <div className={`${overlay} self-start px-3 py-1.5`}>
-            <Legend heatmap={heatmap} cars={layout !== null} />
-          </div>
           <div className={`${overlay} flex flex-col gap-2 px-3 py-2.5`}>
             <div className="flex flex-wrap items-center gap-1.5">
               <button type="button" className={`${btnPrimary} w-[5.5rem]`} onClick={onPlayPause} disabled={playDisabled}>
@@ -567,6 +571,10 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
           </Suspense>
         )}
         {stats && <StateCounts counts={stats.countsByState} time={stats.time} cars={layout !== null} leaving={!!loaded?.parameters.departureCurve} />}
+
+        <Section id="legend-heading" title={strings.legend.heading} collapsible defaultOpen={false}>
+          <Legend heatmap={heatmap} cars={layout !== null} />
+        </Section>
 
         {/* This run: batch over seeds, scan-log export, saving to the server. */}
         <section className={`${card} p-3`} aria-labelledby="run-actions-heading">

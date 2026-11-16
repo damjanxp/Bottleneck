@@ -17,7 +17,7 @@ import { useJobs } from "./ui/useJobs.ts";
 import { useLibrary } from "./ui/useLibrary.ts";
 import { useServer } from "./ui/useServer.ts";
 import type { WorkerRequest, WorkerResponse } from "./workerProtocol.ts";
-import { IconCompare, IconList, IconLog, IconLogo, IconMap, IconPencil, IconShare } from "./ui/icons.tsx";
+import { IconCompare, IconList, IconLog, IconLogo, IconMap, IconPencil, IconShare, InfoTip } from "./ui/icons.tsx";
 import { noticeInfo, noticeWarn, page, select } from "./ui/styles.ts";
 
 // Sections other than the simulation load on first use (their own chunks).
@@ -345,7 +345,6 @@ export function App() {
         <div className="mt-auto hidden flex-col gap-2 border-t border-line px-4 py-3 lg:flex">
           <SelfCheckLine />
           {server.status === "available" && <p className="text-[11px] text-subtle">{strings.share.footerServer}</p>}
-          <p className="text-[11px] text-subtle">{strings.footer.note}</p>
           <a className="text-[11px] text-subtle underline underline-offset-2 hover:text-fg" href={strings.footer.sourceUrl}>
             {strings.footer.source}
           </a>
@@ -368,11 +367,7 @@ export function App() {
                 /
               </span>
               {scenarioPicker}
-              {choice?.description && (
-                <p className="hidden min-w-0 flex-1 truncate text-xs text-muted xl:block" title={choice.description}>
-                  {choice.description}
-                </p>
-              )}
+              {choice?.description && <InfoTip text={choice.description} />}
             </>
           )}
           {savedNote && tab === "simulate" && <span className="rounded-full bg-ok-soft px-2.5 py-0.5 text-xs font-medium text-ok">{savedNote}</span>}
@@ -414,7 +409,11 @@ export function App() {
                 />,
               )}
             {visited.has("scanLogs") && pageWrap("scanLogs", <ScanLogView venueId={example?.id ?? venueId} entries={library.entries} onApply={(s) => editDraft(s, true)} />)}
-            {visited.has("editor") && pageWrap("editor", <VenueEditor key={example?.id ?? venueId} venueId={example?.id ?? venueId} server={server} onSaved={(id) => setVenueId(id)} />)}
+            {visited.has("editor") && (
+              <div hidden={tab !== "editor"} className="h-full">
+                <VenueEditor key={example?.id ?? venueId} venueId={example?.id ?? venueId} server={server} onSaved={(id) => setVenueId(id)} />
+              </div>
+            )}
             {visited.has("share") && tabs.includes("share") && pageWrap("share", <ShareView server={server} jobs={jobs} venueId={example?.id ?? venueId} library={library} onOpenScenario={openScenario} />)}
           </Suspense>
         </main>

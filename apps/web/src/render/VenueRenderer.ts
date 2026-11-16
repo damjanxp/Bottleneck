@@ -26,7 +26,7 @@ import { clampLabel, distanceToSegment, fitCamera, pan, screenToWorld, worldToSc
 import { EXTRAPOLATE_BELOW_SPEED, extrapolationSeconds } from "../sim/extrapolate.ts";
 import { RollingSamples } from "../sim/rolling.ts";
 import type { Snapshot } from "../sim/SimController.ts";
-import { CAR_STYLES, HEATMAP_MAX, LANE_COLORS, ROAD_COLORS, STATE_STYLES, carStyleIndex, heatColor, insideFade, styleIndex, type CarShape, type Shape } from "./palette.ts";
+import { CAR_STYLES, GRID_METRES, HEATMAP_MAX, LANE_COLORS, MAP_DARK, MAP_LIGHT, ROAD_COLORS, STATE_STYLES, carStyleIndex, heatColor, insideFade, styleIndex, type CarShape, type MapTheme, type Shape } from "./palette.ts";
 import { barrierArm, chevron, dashSegments, pointsAlong, publicRoadBoundaries, roadWidth, stallCorners, zebraStripes } from "./vehicleGeometry.ts";
 
 const ATLAS_CELL = 32;
@@ -39,7 +39,7 @@ const CAR_MIN_PX = 9;
 /** Label at the public-road boundary (the renderer's only text of its own). */
 const PUBLIC_ROAD_LABEL = "Public road | site";
 /** Agent marker size: at least this many metres, and at least MIN_PX screen pixels. */
-const AGENT_METRES = 0.6;
+const AGENT_METRES = 0.75;
 const MIN_PX = 5;
 const CLICK_SLOP_PX = 5;
 const LANE_HIT_PX = 14;
@@ -64,8 +64,8 @@ export interface FrameStats {
   renderP95: number;
 }
 
-function drawShape(g: Graphics, shape: Shape, cx: number, cy: number, r: number, color: number): void {
-  const outline = { width: 2, color: 0xffffff, alpha: 0.9 };
+function drawShape(g: Graphics, shape: Shape, cx: number, cy: number, r: number, color: number, outlineColor = 0xffffff): void {
+  const outline = { width: 2.5, color: outlineColor, alpha: 0.85 };
   switch (shape) {
     case "circle":
       g.circle(cx, cy, r).fill(color).stroke(outline);
@@ -152,6 +152,7 @@ export class VenueRenderer {
   private readonly host: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly dark: boolean;
+  private readonly theme: MapTheme;
   private readonly world = new Container();
   private readonly venueLayer = new Graphics();
   private readonly laneLayer = new Graphics();
@@ -171,6 +172,7 @@ export class VenueRenderer {
   private heatCanvas: HTMLCanvasElement | null = null;
   private heatTexture: Texture | null = null;
   private labels: Label[] = [];
+  private mapSprite: Sprite | null = null;
 
   private camera: Camera = { scale: 1, x: 0, y: 0 };
   private bounds: Bounds | null = null;
@@ -202,6 +204,7 @@ export class VenueRenderer {
     this.host = host;
     this.canvas = canvas;
     this.dark = dark;
+    this.theme = dark ? MAP_DARK : MAP_LIGHT;
     this.resizeObserver = new ResizeObserver(() => this.handleResize());
   }
 
@@ -233,7 +236,7 @@ export class VenueRenderer {
   private setup(): void {
     // Agent texture atlas: one cell per state style.
     const g = new Graphics();
-    STATE_STYLES.forEach((s, i) => drawShape(g, s.shape, i * ATLAS_CELL + ATLAS_CELL / 2, ATLAS_CELL / 2, (ATLAS_CELL / 2 - 3) * Math.min(1, s.size), s.color));
+    STATE_STYLES.forEach((s, i) => drawShape(g, s.shape, i * ATLAS_CELL + ATLAS_CELL / 2, ATLAS_CELL / 2, (ATLAS_CELL / 2 - 3) * Math.min(1, s.size), s.color, this.theme.agentOutline));
     const atlas = this.app.renderer.generateTexture({ target: g, frame: new Rectangle(0, 0, ATLAS_CELL * STATE_STYLES.length, ATLAS_CELL), resolution: 2, antialias: true });
     g.destroy();
     this.stateTextures = STATE_STYLES.map((_, i) => new Texture({ source: atlas.source, frame: new Rectangle(i * ATLAS_CELL, 0, ATLAS_CELL, ATLAS_CELL) }));
@@ -279,15 +282,12 @@ export class VenueRenderer {
     this.insideTime = Number.NaN;
     const g = this.venueLayer;
     g.clear();
-    const walk = this.dark ? 0x1e293b : 0xffffff;
-    const obstacle = this.dark ? 0x475569 : 0x94a3b8;
-    const dest = this.dark ? 0x065f46 : 0xd1fae5;
+    const t = this.theme;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
     for (const a of venue.walkableAreas) {
-      drawPolygon(g, a.polygon, walk);
       for (const p of a.polygon.outer) {
         minX = Math.min(minX, p.x);
         minY = Math.min(minY, p.y);
@@ -295,17 +295,42 @@ export class VenueRenderer {
         maxY = Math.max(maxY, p.y);
       }
     }
-    for (const d of venue.destinations) drawPolygon(g, d.area, dest, 0.9);
-    for (const o of venue.obstacles) drawPolygon(g, o.polygon, obstacle);
-    const lineColor = this.dark ? 0xcbd5e1 : 0x334155;
-    for (const el of [...venue.screeningStages, ...venue.gateGroups]) {
-      g.moveTo(el.line.a.x, el.line.a.y).lineTo(el.line.b.x, el.line.b.y).stroke({ width: 0.35, color: lineColor, alpha: 0.6 });
+    // Walls: every walkable outline stroked thick first, floors filled on top. Where two areas
+    // overlap or touch, the neighbour's floor covers the stroke, so walls show only on the outside.
+    const wall = 0.9;
+    for (const a of venue.walkableAreas) g.poly(ringPoints(a.polygon.outer)).stroke({ width: wall * 2, color: t.wall, join: "miter" });
+    for (const a of venue.walkableAreas) drawPolygon(g, a.polygon, t.floor);
+    // A faint floor grid, for a sense of scale.
+    if (Number.isFinite(minX)) {
+      const x0 = Math.floor(minX / GRID_METRES) * GRID_METRES;
+      const y0 = Math.floor(minY / GRID_METRES) * GRID_METRES;
+      for (let x = x0; x <= maxX; x += GRID_METRES) g.moveTo(x, minY).lineTo(x, maxY);
+      for (let y = y0; y <= maxY; y += GRID_METRES) g.moveTo(minX, y).lineTo(maxX, y);
+      g.stroke({ width: 0.06, color: t.grid, alpha: t.gridAlpha });
     }
+    // Destinations: rooms with a coloured edge; obstacles: raised blocks with a soft shadow.
+    for (const d of venue.destinations) {
+      drawPolygon(g, d.area, t.destination);
+      g.poly(ringPoints(d.area.outer)).stroke({ width: 0.3, color: t.destinationEdge, alpha: 0.9 });
+    }
+    for (const o of venue.obstacles) {
+      g.poly(ringPoints(o.polygon.outer).map((v, k) => v + (k % 2 === 0 ? 0.5 : 0.7))).fill({ color: t.shadow, alpha: t.shadowAlpha });
+    }
+    for (const o of venue.obstacles) {
+      drawPolygon(g, o.polygon, t.obstacle);
+      g.poly(ringPoints(o.polygon.outer)).stroke({ width: 0.15, color: t.obstacleEdge });
+    }
+    // Gate and screening lines: a low fence between the lanes (the lanes draw their own turnstiles).
+    for (const el of [...venue.screeningStages, ...venue.gateGroups]) {
+      g.moveTo(el.line.a.x, el.line.a.y).lineTo(el.line.b.x, el.line.b.y).stroke({ width: 0.18, color: t.wall, alpha: 0.85 });
+    }
+    // Sources: an entrance marker (a ring with a dot), where people appear.
     for (const s of venue.sources) {
-      g.circle(s.position.x, s.position.y, 1.6).fill({ color: 0x0072b2, alpha: 0.25 }).stroke({ width: 0.3, color: 0x0072b2 });
+      g.circle(s.position.x, s.position.y, 1.8).fill({ color: t.source, alpha: 0.12 }).stroke({ width: 0.2, color: t.source, alpha: 0.7 });
+      g.circle(s.position.x, s.position.y, 0.55).fill({ color: t.source });
     }
     const payStations = (venue.parkingLots ?? []).flatMap((l) => (l.payStation ? [l.payStation] : []));
-    for (const ps of payStations) g.moveTo(ps.line.a.x, ps.line.a.y).lineTo(ps.line.b.x, ps.line.b.y).stroke({ width: 0.35, color: lineColor, alpha: 0.6 });
+    for (const ps of payStations) g.moveTo(ps.line.a.x, ps.line.a.y).lineTo(ps.line.b.x, ps.line.b.y).stroke({ width: 0.18, color: t.wall, alpha: 0.85 });
     // Site roads and lots count towards the fitted view; public roads may run off it.
     if (vehicleLayout) {
       const grow = (p: Point) => {
@@ -327,22 +352,21 @@ export class VenueRenderer {
     for (const l of this.labels) l.text.destroy();
     this.labels = [];
     this.labelLayer.removeChildren();
-    const fill = this.dark ? 0xf1f5f9 : 0x0f172a;
-    const stroke = this.dark ? 0x0f172a : 0xffffff;
-    const add = (text: string, x: number, y: number, dy = 0, size = 12) => {
-      const t = new Text({ text, style: { fontFamily: "system-ui, sans-serif", fontSize: size, fill, stroke: { color: stroke, width: 3 }, align: "center" }, resolution: 2 });
-      t.anchor.set(0.5);
-      this.labelLayer.addChild(t);
-      this.labels.push({ text: t, x, y, dy });
+    const add = (text: string, x: number, y: number, dy = 0, size = 12, weight: "500" | "600" = "500", alpha = 1) => {
+      const label = new Text({ text, style: { fontFamily: "Inter Variable, system-ui, sans-serif", fontSize: size, fontWeight: weight, fill: t.label, stroke: { color: t.labelHalo, width: 3, join: "round" }, align: "center" }, resolution: 2 });
+      label.anchor.set(0.5);
+      label.alpha = alpha;
+      this.labelLayer.addChild(label);
+      this.labels.push({ text: label, x, y, dy });
     };
     for (const d of venue.destinations) {
       const c = centroid(d.area.outer);
-      add(d.name, c.x, c.y, 0, 13);
+      add(d.name, c.x, c.y, 0, 13, "600");
     }
-    for (const s of venue.sources) add(s.name, s.position.x, s.position.y, -14, 11);
+    for (const s of venue.sources) add(s.name, s.position.x, s.position.y, -16, 10, "500", 0.75);
     for (const el of [...venue.screeningStages, ...venue.gateGroups, ...payStations]) {
       const top = el.line.a.y < el.line.b.y ? el.line.a : el.line.b;
-      add(el.name, top.x, top.y, -14, 11);
+      add(el.name, top.x, top.y, -14, 11, "600");
     }
     if (vehicleLayout) {
       for (const l of vehicleLayout.lots) {
@@ -534,33 +558,59 @@ export class VenueRenderer {
     }
   }
 
+  /**
+   * Each lane as it looks on site: a queue corridor between two rope lines, and at its head a
+   * turnstile (two posts and an arm). The arm shows the state: open (green), not open yet (grey,
+   * outlined) or failed (orange with a cross: never colour alone).
+   */
   private drawLanes(): void {
     const g = this.laneLayer;
     g.clear();
+    const t = this.theme;
     const px = 1 / this.camera.scale;
+    const half = 0.45; // half the lane width, metres
     for (const lane of this.lanes) {
       const live = this.laneStates[lane.laneId];
       const failed = live?.failed ?? false;
       const open = live?.open ?? false;
-      const color = failed ? LANE_COLORS.failed : open ? (this.dark ? LANE_COLORS.openDark : LANE_COLORS.open) : LANE_COLORS.closed;
+      const dx = lane.service.x - lane.queueTail.x;
+      const dy = lane.service.y - lane.queueTail.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      const nx = -uy * half;
+      const ny = ux * half;
+      const tail = lane.queueTail;
+      const head = lane.service;
       if (lane.laneId === this.selectedLane) {
-        g.moveTo(lane.queueTail.x, lane.queueTail.y).lineTo(lane.service.x, lane.service.y).stroke({ width: 8 * px, color: LANE_COLORS.selected, alpha: 0.6, cap: "round" });
+        g.poly([tail.x + nx * 1.6, tail.y + ny * 1.6, head.x + nx * 1.6, head.y + ny * 1.6, head.x - nx * 1.6, head.y - ny * 1.6, tail.x - nx * 1.6, tail.y - ny * 1.6]).fill({ color: LANE_COLORS.selected, alpha: 0.28 });
       }
-      g.moveTo(lane.queueTail.x, lane.queueTail.y)
-        .lineTo(lane.queueHead.x, lane.queueHead.y)
-        .stroke({ width: Math.max(0.12, 2 * px), color, alpha: open || failed ? 0.8 : 0.5 });
-      const r = Math.max(0.35, 4 * px);
+      // Corridor floor and the two rope lines.
+      g.poly([tail.x + nx, tail.y + ny, head.x + nx, head.y + ny, head.x - nx, head.y - ny, tail.x - nx, tail.y - ny]).fill({ color: t.laneFloor, alpha: 0.9 });
+      g.moveTo(tail.x + nx, tail.y + ny)
+        .lineTo(head.x + nx, head.y + ny)
+        .moveTo(tail.x - nx, tail.y - ny)
+        .lineTo(head.x - nx, head.y - ny)
+        .stroke({ width: Math.max(0.05, 1 * px), color: t.rope, alpha: 0.9 });
+      // Turnstile: two posts across the lane head, and the arm between them.
+      const postL = 0.55;
+      const postW = 0.16;
+      for (const side of [1, -1]) {
+        const cx = head.x + nx * side * 1.15;
+        const cy = head.y + ny * side * 1.15;
+        g.poly([cx - ux * postL - uy * postW, cy - uy * postL + ux * postW, cx + ux * postL - uy * postW, cy + uy * postL + ux * postW, cx + ux * postL + uy * postW, cy + uy * postL - ux * postW, cx - ux * postL + uy * postW, cy - uy * postL - ux * postW]).fill({ color: t.post });
+      }
+      const armColor = failed ? t.armFailed : open ? t.armOpen : t.armClosed;
+      g.moveTo(head.x + nx, head.y + ny)
+        .lineTo(head.x - nx, head.y - ny)
+        .stroke({ width: Math.max(0.12, 2.5 * px), color: armColor, alpha: open || failed ? 1 : 0.8, cap: "round" });
       if (failed) {
-        // Failed: a cross, not only a colour.
-        g.moveTo(lane.service.x - r, lane.service.y - r)
-          .lineTo(lane.service.x + r, lane.service.y + r)
-          .moveTo(lane.service.x + r, lane.service.y - r)
-          .lineTo(lane.service.x - r, lane.service.y + r)
-          .stroke({ width: Math.max(0.15, 2.5 * px), color });
-      } else if (open) {
-        g.rect(lane.service.x - r, lane.service.y - r, 2 * r, 2 * r).fill(color);
-      } else {
-        g.rect(lane.service.x - r, lane.service.y - r, 2 * r, 2 * r).stroke({ width: Math.max(0.1, 1.5 * px), color });
+        const r = Math.max(0.35, 4 * px);
+        g.moveTo(head.x - r, head.y - r)
+          .lineTo(head.x + r, head.y + r)
+          .moveTo(head.x + r, head.y - r)
+          .lineTo(head.x - r, head.y + r)
+          .stroke({ width: Math.max(0.12, 2.5 * px), color: t.armFailed });
       }
     }
   }
@@ -807,6 +857,36 @@ export class VenueRenderer {
     this.app.renderer.resize(r.width, r.height);
     if (!this.userMovedCamera) this.fit();
     else this.markDirty();
+  }
+
+  /**
+   * A map image under the floor plan (a calibrated screenshot from the venue editor), or none.
+   * With an image the plan is drawn slightly see-through, so streets and buildings show through.
+   */
+  async setBackgroundImage(url: string | null, bg: { widthPx: number; heightPx: number; metresPerPixel: number; origin: Point } | null): Promise<void> {
+    this.mapSprite?.destroy({ texture: true, textureSource: true });
+    this.mapSprite = null;
+    this.venueLayer.alpha = 1;
+    if (url && bg) {
+      const img = new Image();
+      img.src = url;
+      try {
+        await img.decode();
+      } catch {
+        this.markDirty();
+        return;
+      }
+      if (this.destroyed) return;
+      const sprite = new Sprite(Texture.from(img));
+      sprite.position.set(bg.origin.x, bg.origin.y);
+      sprite.width = bg.widthPx * bg.metresPerPixel;
+      sprite.height = bg.heightPx * bg.metresPerPixel;
+      sprite.alpha = this.dark ? 0.55 : 0.85;
+      this.world.addChildAt(sprite, 0);
+      this.mapSprite = sprite;
+      this.venueLayer.alpha = 0.82;
+    }
+    this.markDirty();
   }
 
   destroy(): void {

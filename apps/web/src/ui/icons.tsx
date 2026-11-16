@@ -137,3 +137,18 @@ export const IconLogo = (p: P) => (
     <path d="M5 6.5h4.5L12 11l2.5-4.5H19M5 17.5h4.5L12 13l2.5 4.5H19" fill="none" stroke="var(--accent-fg)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+export const IconInfo = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5M12 8h.01" />
+  </Svg>
+);
+
+/** An ⓘ that shows `text` on hover or focus (title) and to screen readers. */
+export function InfoTip({ text, className = "" }: { text: string; className?: string }) {
+  return (
+    <span tabIndex={0} title={text} aria-label={text} role="img" className={`inline-flex cursor-help text-subtle hover:text-muted ${className}`}>
+      <IconInfo width={14} height={14} />
+    </span>
+  );
+}

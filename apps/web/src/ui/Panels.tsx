@@ -17,7 +17,7 @@ import type { Headline, HeadlineKind } from "../sim/headline.ts";
 import type { ParameterRow } from "../sim/parameters.ts";
 import type { EventPhase } from "../sim/parking.ts";
 import { strings } from "../strings.ts";
-import { IconChevron } from "./icons.tsx";
+import { IconChevron, InfoTip } from "./icons.tsx";
 import { ShapeIcon, stateShape } from "./Legend.tsx";
 import { btnSmall, cardHint, cardTitle } from "./styles.ts";
 
@@ -57,11 +57,12 @@ export function Section({
         aria-labelledby={id}
         {...rest}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {heading}
+          {typeof hint === "string" && <InfoTip text={hint} />}
           {right && <div className="ml-auto">{right}</div>}
         </div>
-        {hint && <p className={cardHint}>{hint}</p>}
+        {hint && typeof hint !== "string" && <p className={cardHint}>{hint}</p>}
         {children}
       </section>
     );
@@ -78,7 +79,7 @@ export function Section({
           {right && <div className="ml-auto">{right}</div>}
         </summary>
         <div className="px-3.5 pb-3.5">
-          {hint && <p className={`${cardHint} mt-0 mb-2`}>{hint}</p>}
+          {hint && typeof hint !== "string" && <p className={`${cardHint} mt-0 mb-2`}>{hint}</p>}
           {children}
         </div>
       </details>
@@ -436,8 +437,7 @@ export function ClockDisplay({
           {formatRelativeClock(time, clock.anchor, clock.fixedStart)}
         </span>
         <span className="text-sm text-subtle">
-          {formatWallClock(clock.referenceClock, time, true)} ·{" "}
-          {clock.fixedStart ? C.relativeToStart : C.relativeToOpening}
+          {formatWallClock(clock.referenceClock, time, true)}
         </span>
       </div>
       {phase && (

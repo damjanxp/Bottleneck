@@ -152,3 +152,79 @@ export const ROAD_COLORS = {
   barrierBusy: 0xcc79a7,
   crossing: 0xffffff,
 } as const;
+
+// ---------------------------------------------------------------------------------------------
+// The venue drawn as an architectural floor plan (redesign 2)
+// ---------------------------------------------------------------------------------------------
+
+export interface MapTheme {
+  floor: number;
+  wall: number;
+  grid: number;
+  gridAlpha: number;
+  obstacle: number;
+  obstacleEdge: number;
+  shadow: number;
+  shadowAlpha: number;
+  destination: number;
+  destinationEdge: number;
+  laneFloor: number;
+  rope: number;
+  post: number;
+  armOpen: number;
+  armClosed: number;
+  armFailed: number;
+  source: number;
+  label: number;
+  labelHalo: number;
+  agentOutline: number;
+}
+
+export const MAP_LIGHT: MapTheme = {
+  floor: 0xfaf9f6,
+  wall: 0x3a3f47,
+  grid: 0x1f2937,
+  gridAlpha: 0.05,
+  obstacle: 0xd3d7de,
+  obstacleEdge: 0x8b929c,
+  shadow: 0x0f172a,
+  shadowAlpha: 0.16,
+  destination: 0xdcf3e8,
+  destinationEdge: 0x2f9e6e,
+  laneFloor: 0xedf0f4,
+  rope: 0x9aa3ae,
+  post: 0x2b2f36,
+  armOpen: 0x15803d,
+  armClosed: 0xa3abb6,
+  armFailed: 0xd55e00,
+  source: 0x2563eb,
+  label: 0x1f2937,
+  labelHalo: 0xffffff,
+  agentOutline: 0x111827,
+};
+
+export const MAP_DARK: MapTheme = {
+  floor: 0x1b1f27,
+  wall: 0x4a5261,
+  grid: 0xffffff,
+  gridAlpha: 0.035,
+  obstacle: 0x2c323c,
+  obstacleEdge: 0x4b5563,
+  shadow: 0x000000,
+  shadowAlpha: 0.45,
+  destination: 0x123a2c,
+  destinationEdge: 0x34d399,
+  laneFloor: 0x232833,
+  rope: 0x596273,
+  post: 0xcbd5e1,
+  armOpen: 0x34d399,
+  armClosed: 0x5b6472,
+  armFailed: 0xfb923c,
+  source: 0x60a5fa,
+  label: 0xe5e7eb,
+  labelHalo: 0x0b0d11,
+  agentOutline: 0x0b0d11,
+};
+
+/** Spacing of the floor grid, metres (a sense of scale, like floor tiles on a plan). */
+export const GRID_METRES = 5;

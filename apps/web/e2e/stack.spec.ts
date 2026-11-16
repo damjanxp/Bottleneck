@@ -66,7 +66,7 @@ test("publish a venue, open the share and edit links, run a server batch", async
   await reader.getByRole("tab", { name: "Edit venue" }).click();
   await expect(reader.getByText(/Read-only link: you can look at this venue/)).toBeVisible();
   await expect(reader.getByRole("button", { name: "Save to the server" })).toBeDisabled();
-  await expect(reader.getByRole("button", { name: "Walkable area", exact: true })).toBeDisabled();
+  await expect(reader.getByRole("button", { name: "Rectangle", exact: true })).toBeDisabled();
   await expect(reader.getByLabel("Venue name")).toBeDisabled();
   await reader.close();
   expect(readerProblems).toEqual([]);

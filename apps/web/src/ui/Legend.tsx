@@ -1,4 +1,4 @@
-import { CAR_STYLES, LANE_COLORS, ROAD_COLORS, STATE_STYLES, type Shape } from "../render/palette.ts";
+import { CAR_STYLES, MAP_LIGHT, ROAD_COLORS, STATE_STYLES, type Shape } from "../render/palette.ts";
 import { CarIcon } from "./ParkingPanels.tsx";
 import { strings } from "../strings.ts";
 
@@ -42,7 +42,7 @@ export function stateShape(state: number): { shape: Shape; css: string } | null 
 export function Legend({ heatmap, cars = false }: { heatmap: boolean; cars?: boolean }) {
   const L = strings.legend;
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted" aria-label={L.heading}>
+    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-muted" aria-label={L.heading}>
       {STATE_STYLES.map((s) => (
         <span key={s.state} className="inline-flex items-center gap-1">
           <ShapeIcon shape={s.shape} color={s.css} />
@@ -52,19 +52,19 @@ export function Legend({ heatmap, cars = false }: { heatmap: boolean; cars?: boo
       ))}
       <span className="inline-flex items-center gap-1">
         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
-          <rect x="2" y="2" width="8" height="8" fill={hex(LANE_COLORS.open)} />
+          <path d="M1 6 L11 6" stroke={hex(MAP_LIGHT.armOpen)} strokeWidth="3" strokeLinecap="round" />
         </svg>
         {L.laneOpen}
       </span>
       <span className="inline-flex items-center gap-1">
         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
-          <rect x="2" y="2" width="8" height="8" fill="none" stroke={hex(LANE_COLORS.closed)} strokeWidth="1.5" />
+          <path d="M1 6 L11 6" stroke={hex(MAP_LIGHT.armClosed)} strokeWidth="3" strokeLinecap="round" />
         </svg>
         {L.laneClosed}
       </span>
       <span className="inline-flex items-center gap-1">
         <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
-          <path d="M2 2 L10 10 M10 2 L2 10" stroke={hex(LANE_COLORS.failed)} strokeWidth="2.5" />
+          <path d="M2 2 L10 10 M10 2 L2 10" stroke={hex(MAP_LIGHT.armFailed)} strokeWidth="2.5" />
         </svg>
         {L.laneFailed}
       </span>
