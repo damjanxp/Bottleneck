@@ -734,7 +734,7 @@ export const strings = {
     applied: (w: number, o: number, r: number) => `Added ${w} walkable area${w === 1 ? "" : "s"}, ${o} obstacle${o === 1 ? "" : "s"} and ${r} road${r === 1 ? "" : "s"}.`,
     calibrateFirst: "Calibrate the image first, so areas and roads get their real size.",
     layers: "Layers",
-    layerNames: { image: "Map image", detection: "Detection", walkable: "Walkable", obstacles: "Obstacles", destinations: "Destinations", roads: "Roads", names: "Names", problems: "Problems" } as Record<string, string>,
+    layerNames: { image: "Map image", detection: "Detection", walkable: "Walkable", obstacles: "Obstacles", destinations: "Destinations", roads: "Roads", parking: "Car parks", names: "Names", problems: "Problems" } as Record<string, string>,
     fixHeading: "Correct the detection",
     fixIntro: "Paint over the map to set what a spot is, for example Ignore over a map widget or a label. Corrections always win; the preview updates after each stroke.",
     fixPaint: "Paint corrections",
@@ -744,8 +744,8 @@ export const strings = {
     fixIsolated: (n: number) => `Remove ${n} island${n === 1 ? "" : "s"}`,
     osmImport: "Import OpenStreetMap",
     osmHint: "On openstreetmap.org: Export → select the area → Export, then choose the .osm file here. Roads, footways, buildings, car parks and fences come in as they are mapped.",
-    osmDone: (r: { roads: number; walkable: number; obstacles: number; gates: number; sources: number; width: number; height: number }) =>
-      `Imported ${r.width} × ${r.height} m: ${r.walkable} walkable area${r.walkable === 1 ? "" : "s"}, ${r.obstacles} building${r.obstacles === 1 ? "" : "s"} and obstacle${r.obstacles === 1 ? "" : "s"}, ${r.roads} road${r.roads === 1 ? "" : "s"}, ${r.gates} suggested gate${r.gates === 1 ? "" : "s"}${r.sources ? `, ${r.sources} source${r.sources === 1 ? "" : "s"} at stops` : " (no stops in the area: add sources where people arrive)"}. Add a destination, then check the gates.`,
+    osmDone: (r: { roads: number; walkable: number; obstacles: number; gates: number; sources: number; carParks: number; stalls: number; carSources: number; width: number; height: number }) =>
+      `Imported ${r.width} × ${r.height} m: ${r.walkable} walkable area${r.walkable === 1 ? "" : "s"}, ${r.obstacles} building${r.obstacles === 1 ? "" : "s"} and obstacle${r.obstacles === 1 ? "" : "s"}, ${r.roads} road${r.roads === 1 ? "" : "s"}, ${r.gates} suggested gate${r.gates === 1 ? "" : "s"}${r.carParks ? `, ${r.carParks} car park${r.carParks === 1 ? "" : "s"} with ${r.stalls} stalls (cars come in at ${r.carSources} map edge${r.carSources === 1 ? "" : "s"})` : ""}${r.sources ? `, ${r.sources} source${r.sources === 1 ? "" : "s"} at stops` : " (no stops in the area: add sources where people arrive)"}. Add a destination, then check the gates.`,
     osmFailed: "Could not read that file as an OpenStreetMap export.",
     importImage: "Import map image",
     importHint: "A screenshot of an online map or a site plan (PNG or JPEG).",
@@ -787,6 +787,6 @@ export const strings = {
     blocked: "Fix the errors before saving.",
     readOnly: "Read-only link: you can look at this venue, but changing it needs the private edit link.",
     deleteVenue: "Delete this venue",
-    kinds: { walkableAreas: "Walkable area", obstacles: "Obstacle", sources: "Source", gateGroups: "Gate group", screeningStages: "Screening", destinations: "Destination", roads: "Road" } as Record<string, string>,
+    kinds: { walkableAreas: "Walkable area", obstacles: "Obstacle", sources: "Source", gateGroups: "Gate group", screeningStages: "Screening", destinations: "Destination", roads: "Road", parkingLots: "Car park" } as Record<string, string>,
   },
 } as const;

@@ -7,6 +7,9 @@ import type { SchemaError, SchemaValidator } from "../library/validate.ts";
 import { buildScenarioValidatorSource } from "../validation/buildValidator.ts";
 import { OsmError, clipPolyline, clipRing, osmToVenue, parseOsm } from "./osm.ts";
 import { checkVenue } from "./venueChecks.ts";
+import { createRun, type Run } from "@bottleneck/engine";
+import type { Scenario } from "@bottleneck/schema";
+import { layoutCarPark } from "./osmParking.ts";
 
 const source = buildScenarioValidatorSource({ "common.schema.json": commonSchema as object, "scenario.schema.json": scenarioSchema as object, "venue.schema.json": venueSchema as object });
 const standalone = new Function(`${source.replace(/export const (validateScenario|validateVenue)/g, "const $1")}\nreturn validateVenue;`)() as ((d: unknown) => boolean) & { errors?: SchemaError[] | null };
@@ -68,7 +71,7 @@ describe("OpenStreetMap import", () => {
   });
 
   it("the boulevard becomes a public two-way road, clipped to the box, with lanes and speed from the tags", () => {
-    expect(venue.roads).toHaveLength(1);
+    expect(venue.roads?.filter((x) => x.publicRoad)).toHaveLength(1);
     const r = venue.roads?.[0];
     expect(r?.direction).toBe("twoWay");
     expect(r?.laneCount).toBe(2);
@@ -112,5 +115,57 @@ describe("clipping to the export box", () => {
     const ring = clipRing([{ x: 50, y: 20 }, { x: 150, y: 20 }, { x: 150, y: 40 }, { x: 50, y: 40 }], box);
     expect(Math.max(...ring.map((p) => p.x))).toBe(100);
     expect(clipRing([{ x: 200, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 10 }], box)).toEqual([]);
+  });
+});
+
+describe("car parks from OpenStreetMap", () => {
+  const { venue, report } = osmToVenue(parseOsm(OSM), { id: "osm-test" });
+  const lot = venue.parkingLots?.[0];
+
+  it("the 40 × 20 m car park becomes a lot with an aisle, stall rows both sides and entry/exit barriers", () => {
+    expect(report.carParks).toBe(1);
+    expect(lot?.aisles).toHaveLength(1);
+    expect(lot?.stallRows?.map((r) => r.count)).toEqual([13, 13]);
+    expect(report.stalls).toBe(26);
+    expect(venue.vehicleBarriers?.map((b) => b.kind)).toEqual(["entry", "exit"]);
+    // Entry and exit are one-way connector roads from the boulevard; cars come in where the boulevard leaves the map.
+    const connectors = venue.roads?.filter((r) => r.id.startsWith("car-park-1-")) ?? [];
+    expect(connectors.map((r) => r.direction)).toEqual(["oneWay", "oneWay"]);
+    expect(venue.vehicleSources?.map((s) => s.position.x).sort((a, b) => a - b)).toEqual([0, 200]);
+  });
+
+  it("is schema-valid, and in a run cars drive in through the barrier, park and leave", () => {
+    const withHall: Venue = { ...venue, destinations: [{ id: "hall", name: "Hall entrance", area: { outer: [ { x: 85, y: 18 }, { x: 125, y: 18 }, { x: 125, y: 48 }, { x: 85, y: 48 } ] } }] };
+    expect(validateVenue(withHall).errors).toEqual([]);
+    const scenario: Scenario = {
+      schemaVersion: 1,
+      venueId: "osm-test",
+      name: "Small fair with cars",
+      eventType: "concert",
+      timeline: { referenceClock: "20:00", gatesOpen: -3600, eventStart: 0, eventEnd: 3600, horizon: 10800 },
+      attendance: 60,
+      carShare: 1,
+      arrivals: { preset: "concert" },
+      departures: { preset: "concert" },
+      seed: 1,
+    };
+    const run: Run = createRun(withHall, scenario);
+    while (!run.done) run.step();
+    const m = run.metrics();
+    const lotReport = m.parking?.lots[0];
+    expect(m.deadlock).toBe(false);
+    // 29 cars for 26 stalls: the lot fills up, 3 are turned away, and after the event it empties.
+    expect(lotReport?.parked).toBe(26);
+    expect(lotReport?.maxOccupancy).toBe(26);
+    expect(m.parking?.turnedAwayCars).toBe(3);
+    expect(lotReport?.emptyAt).not.toBeNull();
+  });
+
+  it("a long, slanted car park gets several aisles joined by a spine", () => {
+    const outline = [ { x: 0, y: 0 }, { x: 80, y: 40 }, { x: 60, y: 80 }, { x: -20, y: 40 } ];
+    const l = layoutCarPark(outline);
+    expect(l).not.toBeNull();
+    expect(l?.aisles.length).toBeGreaterThanOrEqual(3); // at least two aisles and the spine
+    expect(l?.rows.length).toBeGreaterThanOrEqual(4);
   });
 });

@@ -22,6 +22,7 @@
 import type { Point, Polygon, Road, Venue } from "@bottleneck/schema";
 import { SERVICE_TIME_PRESETS } from "@bottleneck/engine";
 import { gridToPolygons, makeGrid, paintStroke, rasterizePolygon, type Grid } from "./raster.ts";
+import { buildCarParks, edgeSources } from "./osmParking.ts";
 import { simplifyPath } from "./trace.ts";
 
 export interface OsmData {
@@ -202,7 +203,7 @@ const name120 = (s: string) => s.slice(0, 120);
 
 export interface OsmImport {
   venue: Venue;
-  report: { roads: number; walkable: number; obstacles: number; gates: number; sources: number; footways: number; buildings: number; carParks: number; width: number; height: number };
+  report: { roads: number; walkable: number; obstacles: number; gates: number; sources: number; footways: number; buildings: number; carParks: number; stalls: number; carSources: number; width: number; height: number };
 }
 
 export interface OsmOptions {
@@ -264,8 +265,9 @@ export function osmToVenue(osm: OsmData, options: OsmOptions): OsmImport {
   }
   const of = (k: OsmKind) => features.filter((f) => f.kind === k);
 
-  // Roads.
-  const roads: Road[] = [];
+  // Roads (with their OSM service type, to recognise car-park aisles).
+  let roads: Road[] = [];
+  const serviceType = new Map<string, string>();
   for (const f of of("road")) {
     const t = f.tags;
     const lanesTag = Number.parseInt(t.lanes ?? "", 10);
@@ -276,6 +278,7 @@ export function osmToVenue(osm: OsmData, options: OsmOptions): OsmImport {
       const line = simplify(t.oneway === "-1" ? [...piece].reverse() : piece, 0.4).map(r2);
       if (line.length < 2 || pathLength(line) < 5) continue;
       const id = `road-${roads.length + 1}`;
+      if (t.service) serviceType.set(id, t.service);
       roads.push({
         id,
         name: name120(t.name ?? (t.service === "parking_aisle" ? "Car park aisle" : t.service === "driveway" ? "Driveway" : `Road ${roads.length + 1}`)),
@@ -287,6 +290,16 @@ export function osmToVenue(osm: OsmData, options: OsmOptions): OsmImport {
       });
     }
   }
+  // Car parks: lots with aisles, stalls and barriers on one-way connector roads (osmParking.ts).
+  const siteRing = of("site")[0]?.rings[0];
+  const focus = siteRing ? { x: siteRing.reduce((a, p) => a + p.x, 0) / siteRing.length, y: siteRing.reduce((a, p) => a + p.y, 0) / siteRing.length } : { x: box.w / 2, y: box.h / 2 };
+  const parks = of("parking").flatMap((f, k) =>
+    f.rings.map((ring) => ({ name: name120(f.tags.name ?? `Car park ${k + 1}`), outline: simplify(ring, 0.3).map(r2), capacity: Number.parseInt(f.tags.capacity ?? "", 10) || null })),
+  );
+  const carParks = buildCarParks(parks, roads, (id) => serviceType.get(id), focus, box);
+  roads = [...roads.filter((r) => !carParks.dropRoads.has(r.id)), ...carParks.connectors];
+  const carSources = carParks.lots.length > 0 ? edgeSources(roads, carParks.lots, carParks.barriers, box) : [];
+
   const roadWidth = (r: Road) => r.laneCount * laneWidth * (r.direction === "twoWay" ? 2 : 1);
 
   // Gates: where a footway, path or driveway crosses a fence, and at mapped gate or entrance nodes on a fence.
@@ -387,6 +400,7 @@ export function osmToVenue(osm: OsmData, options: OsmOptions): OsmImport {
     })),
     destinations: [],
     ...(roads.length ? { roads } : {}),
+    ...(carParks.lots.length ? { parkingLots: carParks.lots, vehicleBarriers: carParks.barriers, vehicleSources: carSources } : {}),
   };
   return {
     venue,
@@ -398,7 +412,9 @@ export function osmToVenue(osm: OsmData, options: OsmOptions): OsmImport {
       sources: venue.sources.length,
       footways: of("path").length + of("crossing").length,
       buildings: of("building").length,
-      carParks: of("parking").length,
+      carParks: carParks.lots.length,
+      stalls: carParks.stalls,
+      carSources: new Set(carSources.map((c) => `${c.position.x},${c.position.y}`)).size,
       width: Math.round(box.w),
       height: Math.round(box.h),
     },

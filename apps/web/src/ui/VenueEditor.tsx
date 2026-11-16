@@ -31,8 +31,8 @@ const CLASSES: MapClass[] = ["road", "walkable", "obstacle", "ignore"];
 /** Detection preview colours: the same meaning as in the editor's key. Cleaned-up pixels (text, widgets, icons) show in magenta. */
 const CLASS_RGBA: Record<MapClass, [number, number, number, number]> = { road: [31, 41, 55, 200], walkable: [20, 184, 166, 105], obstacle: [220, 38, 38, 140], ignore: [0, 0, 0, 0] };
 const CLEANED_RGBA: [number, number, number, number] = [217, 70, 239, 200];
-type Layer = "image" | "detection" | "walkable" | "obstacles" | "destinations" | "roads" | "names" | "problems";
-const LAYERS: Layer[] = ["image", "detection", "walkable", "obstacles", "destinations", "roads", "names", "problems"];
+type Layer = "image" | "detection" | "walkable" | "obstacles" | "destinations" | "roads" | "parking" | "names" | "problems";
+const LAYERS: Layer[] = ["image", "detection", "walkable", "obstacles", "destinations", "roads", "parking", "names", "problems"];
 
 /** The map image in this page view: its data URL and pixels (for tracing and detection). */
 interface MapImage {
@@ -169,7 +169,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
   const [detection, setDetection] = useState<Detection | null>(null);
   const [showDetection, setShowDetection] = useState(true);
   const [fixClass, setFixClass] = useState<MapClass>("ignore");
-  const [layers, setLayers] = useState<Record<Layer, boolean>>({ image: true, detection: true, walkable: true, obstacles: true, destinations: true, roads: true, names: false, problems: true });
+  const [layers, setLayers] = useState<Record<Layer, boolean>>({ image: true, detection: true, walkable: true, obstacles: true, destinations: true, roads: true, parking: true, names: false, problems: true });
   const show = (l: Layer) => layers[l];
   const [calPoints, setCalPoints] = useState<Point[]>([]);
   const [calDistance, setCalDistance] = useState("100");
@@ -598,6 +598,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
     ...venue.gateGroups.map((e) => ({ list: "gateGroups", id: e.id, name: e.name })),
     ...venue.destinations.map((e) => ({ list: "destinations", id: e.id, name: e.name })),
     ...(venue.roads ?? []).map((e) => ({ list: "roads", id: e.id, name: e.name ?? e.id })),
+    ...(venue.parkingLots ?? []).map((e) => ({ list: "parkingLots", id: e.id, name: e.name })),
   ];
   const selRow = elementRows.find((r) => r.id === selected);
   const rename = (list: string, id: string, name: string) => {
@@ -788,6 +789,33 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
           {show("obstacles") &&
             venue.obstacles.map((o) => (
               <path key={o.id} d={polyPath(o.polygon)} fillRule="evenodd" fill="url(#obstacle-hatch)" className="stroke-[#334155] dark:stroke-[#cbd5e1]" fillOpacity={image && show("image") ? 0.8 : 1} strokeWidth={stroke * 1.6} />
+            ))}
+          {/* Car parks: outline, aisles, stalls, barriers (green entry, red exit), car sources. */}
+          {show("parking") &&
+            (venue.parkingLots ?? []).map((l) => (
+              <g key={l.id}>
+                <path d={polyPath(l.outline)} fill="#fde68a" fillOpacity={0.55} stroke="#b45309" strokeWidth={stroke * 1.8} strokeDasharray={`${stroke * 6} ${stroke * 3}`} />
+                {l.aisles.map((a, k) => (
+                  <path key={k} d={linePath(a.points)} fill="none" stroke="#9ca3af" strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
+                ))}
+                {(l.stallRows ?? []).flatMap((r, k) => stallRects(r).map((q, j) => <polygon key={`${k}-${j}`} points={pts(q)} fill="#fffbeb" stroke="#92400e" strokeWidth={stroke * 0.6} />))}
+                <circle cx={l.walkingExit.x} cy={l.walkingExit.y} r={stroke * 5} fill="#0d9488" stroke="#fff" strokeWidth={stroke} />
+              </g>
+            ))}
+          {show("parking") &&
+            (venue.vehicleBarriers ?? []).map((b) => (
+              <rect key={b.id} x={b.position.x - 2} y={b.position.y - 2} width={4} height={4} rx={0.8} fill={b.kind === "entry" ? "#16a34a" : "#dc2626"} stroke="#fff" strokeWidth={stroke}>
+                <title>{b.name}</title>
+              </rect>
+            ))}
+          {show("parking") &&
+            (venue.vehicleSources ?? []).map((v) => (
+              <g key={v.id}>
+                <circle cx={v.position.x} cy={v.position.y} r={stroke * 9} fill="#f59e0b" opacity={0.25} />
+                <circle cx={v.position.x} cy={v.position.y} r={stroke * 4} fill="#d97706">
+                  <title>{v.name}</title>
+                </circle>
+              </g>
             ))}
           {show("names") &&
             [...venue.walkableAreas.map((e) => ({ id: e.id, name: e.name ?? e.id, ring: e.polygon.outer })), ...venue.obstacles.map((e) => ({ id: e.id, name: e.name ?? e.id, ring: e.polygon.outer })), ...venue.destinations.map((e) => ({ id: e.id, name: e.name, ring: e.area.outer }))].map((e) => {
@@ -1201,6 +1229,7 @@ const LAYER_SWATCH: Record<Layer, string> = {
   obstacles: "border-[#334155] bg-[repeating-linear-gradient(45deg,#e2e8f0_0_2px,#64748b_2px_3px)]",
   destinations: "border-[#15803d] bg-[#86efac]",
   roads: "border-[#111827] bg-[#4b5563]",
+  parking: "border-[#b45309] bg-[#fde68a]",
   names: "border-line bg-surface",
   problems: "border-[#dc2626] bg-[#fecaca]",
 };
@@ -1216,4 +1245,31 @@ function anchorOf(v: Venue, id: string): Point | null {
   const r = (v.roads ?? []).find((e) => e.id === id);
   if (r) return r.points[Math.floor(r.points.length / 2)] ?? null;
   return null;
+}
+
+/** The stalls of a row as quadrilaterals (the engine's geometry: centres along a→b, depth to the given side). */
+function stallRects(row: { a: Point; b: Point; count: number; side: "left" | "right" | "both"; depth?: number }): Point[][] {
+  const dx = row.b.x - row.a.x;
+  const dy = row.b.y - row.a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const depth = row.depth ?? 5;
+  const w = len / Math.max(1, row.count);
+  const sides = row.side === "both" ? [1, -1] : row.side === "right" ? [1] : [-1];
+  const out: Point[][] = [];
+  for (const s of sides)
+    for (let k = 0; k < row.count; k++) {
+      const x0 = row.a.x + ux * w * k;
+      const y0 = row.a.y + uy * w * k;
+      const nx = -uy * s * depth;
+      const ny = ux * s * depth;
+      out.push([
+        { x: x0, y: y0 },
+        { x: x0 + ux * w, y: y0 + uy * w },
+        { x: x0 + ux * w + nx, y: y0 + uy * w + ny },
+        { x: x0 + nx, y: y0 + ny },
+      ]);
+    }
+  return out;
 }

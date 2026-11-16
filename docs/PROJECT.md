@@ -630,6 +630,18 @@ apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/sc
 - **Alternatives:** live queries to the Overpass API (needs the network from the page; the CSP allows only 'self'); keeping colour detection as the main path (unreliable on real screenshots).
 - **Consequences:** On the owner's file: 397 × 269 m, 5 walkable areas, 21 buildings, 36 roads, 2 suggested gates, no sources (the only stop lies outside the box), schema-valid; only a source and a destination are left to add. Not imported yet: car parks as parking lots with stalls and barriers (they become walkable ground; their aisles roads), pedestrian areas mapped only as `area:highway` details, building entrances as destinations. Tests: `editor/osm.test.ts` (parsing, roads, gates, sources, one connected walkable area through the gate and over the crossing, clipping, refusals), `e2e/editor-osm.spec.ts`.
 
+
+### D-074 Car parks from OpenStreetMap
+- **Context:** D-073 imported OSM car parks only as walkable ground with their aisles as roads; the engine needs real parking lots (aisles, stalls, entry and exit barriers on roads, a walking exit) and car sources (D-041 to D-045).
+- **Decision** (`editor/osmParking.ts`), per `amenity=parking` outline:
+  - **Layout:** aisles along the outline's longest side, 16 m apart (5 m stall, 6 m aisle, 5 m stall), 3 m in from the outline, joined by a spine through their starts; stall rows 3 m either side of each aisle, 2.5 m per stall, scaled down to the `capacity` tag when mapped.
+  - **Access:** a one-way **way in** and **way out** (overlapping) from the nearest road that is connected to where cars enter the map (the engine's junction rule: an end within 1 m of another road) to the spine's start, with a ticket **entry barrier** and **exit barrier**. OSM's own aisles and service roads inside the car park are dropped, so the barriers cannot be bypassed.
+  - **Walking exit:** the point on the outline nearest the site's centre. Stall choice: nearest the walking exit.
+  - **Car sources** where public roads leave the map, split per reachable car park with shares in proportion to its stalls (a source without a lot sends every car to the single quickest car park). **Overflow:** a full car park diverts to the largest other one (once).
+  - The editor draws car parks (outline, aisles, every stall, the walking exit), barriers (green entry, red exit) and car sources on a new "Car parks" layer.
+- **Alternatives:** keeping OSM's aisles (they connect to the service roads around the car park, so cars would bypass the barriers); one source per map edge without lots (all cars went to one car park in the first try: 70 parked, 283 turned away).
+- **Consequences:** On the owner's Belgrade Fair export: 4 car parks with 70, 180, 162 and 12 stalls (424); a 2,000-person concert with 35% by car (353 cars) parks every car (42, 157, 142, 12; 3 diverted, none turned away), the car parks are empty 48 to 50 minutes after the event, no deadlock, everyone reaches the hall. The generated layout ignores how the real car park is striped; entry and exit share one access point; barrier kinds and payment are defaults (ticket, prepaid) to be edited. Tests: `editor/osm.test.ts` (a 40 × 20 m car park: 26 stalls, barriers, sources; a run where the lot fills, 3 cars are turned away and it empties after the event; a slanted car park with several aisles and a spine).
+
 ---
 
 ## 3. Review notes triage
