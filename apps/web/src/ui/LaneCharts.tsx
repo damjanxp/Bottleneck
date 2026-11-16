@@ -55,7 +55,7 @@ export function Chart({ title, series, anchor, fixedStart, color, bars, unit }: 
 
   return (
     <figure className="mt-3">
-      <figcaption className="text-xs font-medium text-slate-600 dark:text-slate-400">{title}</figcaption>
+      <figcaption className="text-xs font-medium text-muted">{title}</figcaption>
       <div ref={host} className="w-full" />
     </figure>
   );
@@ -73,13 +73,13 @@ export function LaneCharts({ name, report, startTime, queueInterval, binSeconds,
     rows.push({ t, q: queue.y[k] as number, th: bin >= 0 ? ((throughput.y[bin] as number | undefined) ?? 0) : 0 });
   }
   return (
-    <section aria-label={name} className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+    <section aria-label={name} className="rounded-lg border border-line p-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">
           {name}
           {report.laneType === "manual" && <ManualBadge />}
         </h3>
-        <button type="button" onClick={onClose} className="rounded px-2 py-0.5 text-xs text-slate-600 underline hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100">
+        <button type="button" onClick={onClose} className="rounded px-2 py-0.5 text-xs text-muted underline hover:text-fg">
           {C.close}
         </button>
       </div>
@@ -87,10 +87,10 @@ export function LaneCharts({ name, report, startTime, queueInterval, binSeconds,
       <Chart title={C.queueTitle} series={queue} anchor={anchor} fixedStart={fixedStart} color="#E69F00" unit={C.people} />
       <Chart title={C.throughputTitle} series={throughput} anchor={anchor} fixedStart={fixedStart} color="#0072B2" bars unit={C.perMinute} />
       <details className="mt-2 text-xs">
-        <summary className="cursor-pointer text-slate-600 dark:text-slate-400">{C.tableSummary}</summary>
+        <summary className="cursor-pointer text-muted">{C.tableSummary}</summary>
         <table className="mt-1 w-full text-left font-mono">
           <thead>
-            <tr className="text-slate-500">
+            <tr className="text-subtle">
               <th className="font-normal">{C.time}</th>
               <th className="font-normal">{C.queue}</th>
               <th className="font-normal">{C.throughput}</th>

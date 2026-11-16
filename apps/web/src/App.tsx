@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ENGINE_VERSION } from "@bottleneck/engine";
 import { exampleVenues } from "@bottleneck/examples";
 import type { Scenario } from "@bottleneck/schema";
@@ -17,6 +17,8 @@ import { useJobs } from "./ui/useJobs.ts";
 import { useLibrary } from "./ui/useLibrary.ts";
 import { useServer } from "./ui/useServer.ts";
 import type { WorkerRequest, WorkerResponse } from "./workerProtocol.ts";
+import { IconCompare, IconList, IconLog, IconLogo, IconMap, IconPencil, IconShare } from "./ui/icons.tsx";
+import { noticeInfo, noticeWarn, page, select } from "./ui/styles.ts";
 
 // Sections other than the simulation load on first use (their own chunks).
 const LibraryView = lazy(() => import("./ui/LibraryView.tsx").then((m) => ({ default: m.LibraryView })));
@@ -57,19 +59,17 @@ function SelfCheckLine() {
   const state = useEngineSelfCheck();
   const s = strings.selfCheck;
   return (
-    <p className="text-xs text-slate-500" aria-live="polite">
+    <p className="text-[11px] leading-snug text-subtle" aria-live="polite">
       {s.heading}:{" "}
       {state.status === "running" && s.running}
       {state.status === "error" && (
-        <span className="font-medium text-red-700 dark:text-red-400">
+        <span className="font-medium text-bad">
           ✕ {s.failed}: {state.message}
         </span>
       )}
       {state.status === "done" && (
         <>
-          <span className={state.result.matches ? "font-medium text-emerald-700 dark:text-emerald-400" : "font-medium text-red-700 dark:text-red-400"}>
-            {state.result.matches ? `✓ ${s.match}` : `✕ ${s.mismatch}`}
-          </span>{" "}
+          <span className={state.result.matches ? "font-medium text-ok" : "font-medium text-bad"}>{state.result.matches ? `✓ ${s.match}` : `✕ ${s.mismatch}`}</span>{" "}
           <span className="font-mono" title={`${state.result.numbers.toLocaleString("en-GB")} numbers, engine ${state.result.engineVersion}`}>
             {state.result.hash.slice(0, 16)}… · {state.result.durationMs.toFixed(0)} ms
           </span>
@@ -96,10 +96,7 @@ export interface EditorRequest {
   nonce: number;
 }
 
-const select = "mt-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100";
-const notice = "rounded-lg border p-3 text-sm";
-const noticeWarn = "border-orange-300 bg-orange-50 dark:border-orange-500/40 dark:bg-orange-500/10";
-const noticeInfo = "border-sky-300 bg-sky-50 dark:border-sky-500/40 dark:bg-sky-500/10";
+const TAB_ICON: Record<Tab, typeof IconMap> = { simulate: IconMap, scenarios: IconList, compare: IconCompare, scanLogs: IconLog, editor: IconPencil, share: IconShare };
 
 export function App() {
   const library = useLibrary();
@@ -218,55 +215,59 @@ export function App() {
     return fitted.trimmed ? strings.share.saveRun.savedTrimmed(Math.round(fitted.bytes / 1024)) : strings.share.saveRun.saved;
   };
 
-  return (
-    <div className="mx-auto flex min-h-screen max-w-[1500px] flex-col gap-4 px-4 py-4 sm:py-6">
-      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <h1 className="text-2xl font-bold tracking-tight">
-          <span className="text-amber-500">⟩⟨</span> {strings.appName}
-        </h1>
-        <p className="text-sm text-slate-600 dark:text-slate-400">{strings.tagline}</p>
-      </header>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col text-xs text-slate-600 dark:text-slate-400">
-          {strings.picker.venue}
-          <select className={select} value={example?.id ?? venueId} onChange={(e) => setVenueId(e.target.value)}>
-            {known.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.title}
+  const scenarioPicker = venue && choice && (
+    <select aria-label={strings.picker.scenario} className={`${select} min-w-0 max-w-[22rem] flex-1`} value={choice.key} onChange={(e) => setSelected((s) => ({ ...s, [example?.id ?? venueId]: e.target.value }))}>
+      {choices.some((c) => c.key.startsWith("server:")) && (
+        <optgroup label={strings.share.serverScenarios}>
+          {choices
+            .filter((c) => c.key.startsWith("server:"))
+            .map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
               </option>
             ))}
-          </select>
-        </label>
-        <nav aria-label={strings.tabs.label} className="flex flex-wrap gap-1" role="tablist">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              aria-selected={tab === t}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === t ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900" : "border border-slate-300 bg-white hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"}`}
-              onClick={() => goTo(t)}
-            >
-              {strings.tabs[t]}
-            </button>
-          ))}
-        </nav>
-      </div>
+        </optgroup>
+      )}
+      {choices.some((c) => c.key.startsWith("builtin:")) && (
+        <optgroup label={strings.picker.builtIn}>
+          {choices
+            .filter((c) => c.key.startsWith("builtin:"))
+            .map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+        </optgroup>
+      )}
+      {choices.some((c) => !c.builtIn) && (
+        <optgroup label={strings.picker.mine}>
+          {choices
+            .filter((c) => !c.builtIn)
+            .map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+        </optgroup>
+      )}
+    </select>
+  );
 
+  const notices = (
+    <>
       {server.route.kind === "venue" && (
-        <div className={`${notice} ${server.shared.status === "error" ? noticeWarn : noticeInfo}`} role="status">
+        <div className={server.shared.status === "error" ? noticeWarn : noticeInfo} role="status">
           {server.shared.status === "ready" ? (
             <p>
               <span className="font-semibold">{strings.share.banner.shared(server.shared.venue.name)}</span> {server.access?.kind === "edit" ? strings.share.banner.edit : strings.share.banner.read}{" "}
-              <button type="button" className="underline" onClick={() => goTo("share")}>
+              <button type="button" className="font-medium underline underline-offset-2" onClick={() => goTo("share")}>
                 {strings.share.banner.manage}
               </button>
             </p>
           ) : server.shared.status === "error" ? (
             <p>
               {server.shared.message}{" "}
-              <button type="button" className="underline" onClick={server.leave}>
+              <button type="button" className="font-medium underline underline-offset-2" onClick={server.leave}>
                 {strings.share.venue.backHome}
               </button>
             </p>
@@ -276,13 +277,12 @@ export function App() {
         </div>
       )}
       {server.route.kind === "notFound" && (
-        <p className={`${notice} ${noticeWarn}`} role="status">
+        <p className={noticeWarn} role="status">
           {strings.share.notFound(server.route.path)}
         </p>
       )}
-
       {(library.dropped.length > 0 || library.error) && (
-        <div className={`${notice} ${noticeWarn}`} role="status">
+        <div className={noticeWarn} role="status">
           {library.error && <p>{library.error}</p>}
           {library.dropped.length > 0 && (
             <>
@@ -296,61 +296,93 @@ export function App() {
               </ul>
             </>
           )}
-          <button type="button" className="mt-1 text-xs underline" onClick={library.dismissNotices}>
+          <button type="button" className="mt-1 text-xs font-medium underline underline-offset-2" onClick={library.dismissNotices}>
             OK
           </button>
         </div>
       )}
+    </>
+  );
+  const hasNotices = server.route.kind !== "home" || library.dropped.length > 0 || !!library.error;
 
-      <main>
-        {/* Every visited section stays mounted (hidden when not shown), so its state survives switching. */}
-        <div hidden={tab !== "simulate"}>
-          {venue && choice && (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-end gap-3">
-                <label className="flex flex-col text-xs text-slate-600 dark:text-slate-400">
-                  {strings.picker.scenario}
-                  <select className={select} value={choice.key} onChange={(e) => setSelected((s) => ({ ...s, [example?.id ?? venueId]: e.target.value }))}>
-                    {choices.some((c) => c.key.startsWith("server:")) && (
-                      <optgroup label={strings.share.serverScenarios}>
-                        {choices
-                          .filter((c) => c.key.startsWith("server:"))
-                          .map((c) => (
-                            <option key={c.key} value={c.key}>
-                              {c.label}
-                            </option>
-                          ))}
-                      </optgroup>
-                    )}
-                    {choices.some((c) => c.key.startsWith("builtin:")) && (
-                      <optgroup label={strings.picker.builtIn}>
-                        {choices
-                          .filter((c) => c.key.startsWith("builtin:"))
-                          .map((c) => (
-                            <option key={c.key} value={c.key}>
-                              {c.label}
-                            </option>
-                          ))}
-                      </optgroup>
-                    )}
-                    {choices.some((c) => !c.builtIn) && (
-                      <optgroup label={strings.picker.mine}>
-                        {choices
-                          .filter((c) => !c.builtIn)
-                          .map((c) => (
-                            <option key={c.key} value={c.key}>
-                              {c.label}
-                            </option>
-                          ))}
-                      </optgroup>
-                    )}
-                  </select>
-                </label>
-                <p className="max-w-md flex-1 text-sm text-slate-600 dark:text-slate-400">
+  /** A non-simulation section: scrolls on its own, in a centred page. */
+  const pageWrap = (t: Tab, child: ReactNode) => (
+    <div hidden={tab !== t} className="h-full overflow-y-auto scroll-thin">
+      <div className={page}>{child}</div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-full flex-col lg:flex-row">
+      {/* Sidebar: brand, sections, engine status. */}
+      <aside className="flex shrink-0 flex-col border-b border-line bg-surface lg:w-56 lg:border-r lg:border-b-0">
+        <div className="flex items-center gap-2.5 px-4 py-3 lg:py-4">
+          <IconLogo />
+          <div className="min-w-0">
+            <h1 className="text-[15px] leading-tight font-semibold tracking-tight">{strings.appName}</h1>
+            <p className="hidden text-[11px] leading-snug text-subtle lg:block">{strings.taglineShort}</p>
+          </div>
+        </div>
+        <nav aria-label={strings.tabs.label} role="tablist" aria-orientation="vertical" className="flex gap-0.5 overflow-x-auto px-2 pb-2 lg:flex-col lg:overflow-visible lg:pb-0">
+          {tabs.map((t) => {
+            const Icon = TAB_ICON[t];
+            const on = tab === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                className={`flex h-9 shrink-0 items-center gap-2.5 rounded-md px-2.5 text-sm font-medium transition-colors ${on ? "bg-sunken text-fg" : "text-muted hover:bg-sunken/60 hover:text-fg"}`}
+                onClick={() => goTo(t)}
+              >
+                <Icon className={on ? "text-accent" : ""} />
+                {strings.tabs[t]}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="mt-auto hidden flex-col gap-2 border-t border-line px-4 py-3 lg:flex">
+          <SelfCheckLine />
+          {server.status === "available" && <p className="text-[11px] text-subtle">{strings.share.footerServer}</p>}
+          <p className="text-[11px] text-subtle">{strings.footer.note}</p>
+          <a className="text-[11px] text-subtle underline underline-offset-2 hover:text-fg" href={strings.footer.sourceUrl}>
+            {strings.footer.source}
+          </a>
+        </div>
+      </aside>
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Top bar: what is open. */}
+        <header className="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-surface px-4 py-2">
+          <select aria-label={strings.picker.venue} className={`${select} max-w-[20rem] font-medium`} value={example?.id ?? venueId} onChange={(e) => setVenueId(e.target.value)}>
+            {known.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.title}
+              </option>
+            ))}
+          </select>
+          {tab === "simulate" && scenarioPicker && (
+            <>
+              <span className="text-subtle" aria-hidden="true">
+                /
+              </span>
+              {scenarioPicker}
+              {choice?.description && (
+                <p className="hidden min-w-0 flex-1 truncate text-xs text-muted xl:block" title={choice.description}>
                   {choice.description}
-                  {savedNote && <span className="mt-1 block font-medium text-emerald-800 dark:text-emerald-300">{savedNote}</span>}
                 </p>
-              </div>
+              )}
+            </>
+          )}
+          {savedNote && tab === "simulate" && <span className="rounded-full bg-ok-soft px-2.5 py-0.5 text-xs font-medium text-ok">{savedNote}</span>}
+        </header>
+        {hasNotices && <div className="flex flex-col gap-2 border-b border-line px-4 py-2">{notices}</div>}
+
+        <main className="relative min-h-0 flex-1">
+          {/* Every visited section stays mounted (hidden when not shown), so its state survives switching. */}
+          <div hidden={tab !== "simulate"} className="h-full">
+            {venue && choice && (
               <SimulationView
                 venue={venue}
                 scenario={choice.scenario}
@@ -361,53 +393,32 @@ export function App() {
                 onSaveWorking={saveWorking}
                 onSaveRun={isShared && server.access?.kind === "edit" ? saveRun : undefined}
               />
-            </div>
-          )}
-          {!choice && venue && <p className="text-sm text-slate-500">{strings.share.noScenarios}</p>}
-        </div>
-        <Suspense fallback={<p className="text-sm text-slate-500">{strings.controls.loading}</p>}>
-          {visited.has("scenarios") && (
-            <div hidden={tab !== "scenarios"}>
-              <LibraryView venueId={example?.id ?? venueId} library={library} request={editorRequest} onOpen={openScenario} onCompare={openComparison} />
-            </div>
-          )}
-          {visited.has("compare") && (
-            <div hidden={tab !== "compare"}>
-              <CompareView
-                venueId={example?.id ?? venueId}
-                entries={library.entries}
-                preset={comparePreset}
-                onSave={(s) => editDraft({ ...s, id: newScenarioId(), name: copyName(s.name, "") }, true)}
-                leadLine={sharedVenue && example?.id === sharedVenue.id ? leadLine : null}
-              />
-            </div>
-          )}
-          {visited.has("scanLogs") && (
-            <div hidden={tab !== "scanLogs"}>
-              <ScanLogView venueId={example?.id ?? venueId} entries={library.entries} onApply={(s) => editDraft(s, true)} />
-            </div>
-          )}
-          {visited.has("editor") && (
-            <div hidden={tab !== "editor"}>
-              <VenueEditor key={example?.id ?? venueId} venueId={example?.id ?? venueId} server={server} onSaved={(id) => setVenueId(id)} />
-            </div>
-          )}
-          {visited.has("share") && tabs.includes("share") && (
-            <div hidden={tab !== "share"}>
-              <ShareView server={server} jobs={jobs} venueId={example?.id ?? venueId} library={library} onOpenScenario={openScenario} />
-            </div>
-          )}
-        </Suspense>
-      </main>
-
-      <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-800">
-        <SelfCheckLine />
-        <span>{strings.footer.note}</span>
-        {server.status === "available" && <span>{strings.share.footerServer}</span>}
-        <a className="underline hover:text-slate-800 dark:hover:text-slate-200" href={strings.footer.sourceUrl}>
-          {strings.footer.source}
-        </a>
-      </footer>
+            )}
+            {!choice && venue && (
+              <div className={page}>
+                <p className="text-sm text-muted">{strings.share.noScenarios}</p>
+              </div>
+            )}
+          </div>
+          <Suspense fallback={<p className="p-6 text-sm text-subtle">{strings.controls.loading}</p>}>
+            {visited.has("scenarios") && pageWrap("scenarios", <LibraryView venueId={example?.id ?? venueId} library={library} request={editorRequest} onOpen={openScenario} onCompare={openComparison} />)}
+            {visited.has("compare") &&
+              pageWrap(
+                "compare",
+                <CompareView
+                  venueId={example?.id ?? venueId}
+                  entries={library.entries}
+                  preset={comparePreset}
+                  onSave={(s) => editDraft({ ...s, id: newScenarioId(), name: copyName(s.name, "") }, true)}
+                  leadLine={sharedVenue && example?.id === sharedVenue.id ? leadLine : null}
+                />,
+              )}
+            {visited.has("scanLogs") && pageWrap("scanLogs", <ScanLogView venueId={example?.id ?? venueId} entries={library.entries} onApply={(s) => editDraft(s, true)} />)}
+            {visited.has("editor") && pageWrap("editor", <VenueEditor key={example?.id ?? venueId} venueId={example?.id ?? venueId} server={server} onSaved={(id) => setVenueId(id)} />)}
+            {visited.has("share") && tabs.includes("share") && pageWrap("share", <ShareView server={server} jobs={jobs} venueId={example?.id ?? venueId} library={library} onOpenScenario={openScenario} />)}
+          </Suspense>
+        </main>
+      </div>
     </div>
   );
 }

@@ -109,16 +109,16 @@ export function CompareView({ venueId, entries: libraryEntries, preset, onSave, 
   return (
     <div className="flex flex-col gap-4">
       {leadLine && (
-        <section className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10" aria-label={strings.share.jobs.leadLineLabel} data-testid="gate-sweep-lead">
+        <section className="rounded-xl border border-ok/30 bg-ok-soft p-3" aria-label={strings.share.jobs.leadLineLabel} data-testid="gate-sweep-lead">
           <p className="text-base font-semibold">{leadLine.main}</p>
-          <p className="text-xs text-slate-600 dark:text-slate-400">{leadLine.detail}</p>
+          <p className="text-xs text-muted">{leadLine.detail}</p>
         </section>
       )}
       <section className={card} aria-labelledby="compare-heading">
         <h2 id="compare-heading" className="text-lg font-semibold">
           {C.heading}
         </h2>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{C.intro}</p>
+        <p className="mt-1 text-sm text-muted">{C.intro}</p>
         <div className="mt-3 flex flex-col gap-2">
           {slots.map((key, k) => (
             <div key={k} className="flex flex-wrap items-end gap-2">
@@ -176,16 +176,16 @@ export function CompareView({ venueId, entries: libraryEntries, preset, onSave, 
             {chosen.length === 1 && seeds > 1 ? C.runBatch : C.run}
           </button>
         </div>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-subtle">
           {C.seedsHint} {C.sameSeedsHint}
         </p>
         {venuesDiffer && (
-          <p className="mt-3 rounded-lg border border-orange-300 bg-orange-50 p-2 text-sm font-medium dark:border-orange-500/40 dark:bg-orange-500/10" role="alert">
+          <p className="mt-3 rounded-lg border border-bad/40 bg-bad-soft p-2 text-sm font-medium" role="alert">
             ⚠ {C.venuesDiffer}
           </p>
         )}
         {unknownVenues.map((id) => (
-          <p key={id} className="mt-2 text-sm text-orange-700" role="alert">
+          <p key={id} className="mt-2 text-sm text-bad" role="alert">
             {C.unknownVenue(id)}
           </p>
         ))}
@@ -240,7 +240,7 @@ function Results({ run }: { run: RunState }) {
   return (
     <>
       {run.errors.length > 0 && (
-        <section className="rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm dark:border-orange-500/40 dark:bg-orange-500/10" role="alert">
+        <section className="rounded-lg border border-bad/40 bg-bad-soft p-3 text-sm" role="alert">
           <p className="font-medium">{C.errors}</p>
           <ul className="ml-5 list-disc">
             {run.errors.map((e, k) => (
@@ -251,17 +251,17 @@ function Results({ run }: { run: RunState }) {
       )}
 
       <section className={card} aria-labelledby="compare-headline-heading">
-        <h2 id="compare-headline-heading" className="text-sm font-semibold text-slate-500">
+        <h2 id="compare-headline-heading" className="text-sm font-semibold text-subtle">
           {C.headline}
         </h2>
         {seedsPerEntry > 1 && (
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-subtle">
             {C.batchNote(seedsPerEntry)} {run.paired && labels.length > 1 && C.pairedNote}
           </p>
         )}
         <div className="mt-2 overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="text-xs text-slate-500">
+            <thead className="text-xs text-subtle">
               <tr>
                 <th className="py-1 pr-3 font-normal">{C.measure}</th>
                 {labels.map((l, i) => (
@@ -274,8 +274,8 @@ function Results({ run }: { run: RunState }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.measure.key} className="border-t border-slate-100 align-top dark:border-slate-800" data-measure={r.measure.key}>
-                  <th scope="row" className={`py-1 pr-3 font-normal ${r.measure.sub ? "pl-4 text-xs text-slate-600 dark:text-slate-400" : ""}`}>
+                <tr key={r.measure.key} className="border-t border-line align-top" data-measure={r.measure.key}>
+                  <th scope="row" className={`py-1 pr-3 font-normal ${r.measure.sub ? "pl-4 text-xs text-muted" : ""}`}>
                     {r.measure.label}
                   </th>
                   {r.cells.map((cell, i) => {
@@ -298,7 +298,7 @@ function Results({ run }: { run: RunState }) {
           </table>
         </div>
         {notes.map((n, k) => (
-          <p key={k} className="mt-2 text-xs text-orange-800 dark:text-orange-300">
+          <p key={k} className="mt-2 text-xs text-bad">
             {n}
           </p>
         ))}
@@ -306,7 +306,7 @@ function Results({ run }: { run: RunState }) {
 
       {labels.length > 1 && (
         <section className={card} aria-labelledby="compare-words-heading">
-          <h2 id="compare-words-heading" className="text-sm font-semibold text-slate-500">
+          <h2 id="compare-words-heading" className="text-sm font-semibold text-subtle">
             {C.differences}
           </h2>
           {labels.slice(1).map((l, k) => (
@@ -321,7 +321,7 @@ function Results({ run }: { run: RunState }) {
                     const d = r.differences[k + 1];
                     if (!d) return null;
                     return (
-                      <li key={r.measure.key} className={`rounded px-2 py-1 ${d.verdict === "better" ? "bg-emerald-50 dark:bg-emerald-500/10" : d.verdict === "worse" ? "bg-orange-50 dark:bg-orange-500/10" : ""}`} data-measure={r.measure.key} data-verdict={d.verdict}>
+                      <li key={r.measure.key} className={`rounded px-2 py-1 ${d.verdict === "better" ? "bg-ok-soft" : d.verdict === "worse" ? "bg-bad-soft" : ""}`} data-measure={r.measure.key} data-verdict={d.verdict}>
                         <span className={`font-semibold ${verdictClass[d.verdict]}`}>
                           <span aria-hidden="true">{verdictSymbol[d.verdict]}</span> {VERDICT_WORDS[d.verdict]}:
                         </span>{" "}
@@ -337,10 +337,10 @@ function Results({ run }: { run: RunState }) {
 
       {seedsPerEntry > 1 && (
         <details className={card}>
-          <summary className="cursor-pointer text-sm font-semibold text-slate-500">{C.perSeed}</summary>
+          <summary className="cursor-pointer text-sm font-semibold text-subtle">{C.perSeed}</summary>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full text-left font-mono text-xs tabular-nums">
-              <thead className="font-sans text-slate-500">
+              <thead className="font-sans text-subtle">
                 <tr>
                   <th className="pr-2 font-normal">{C.scenarioColumn}</th>
                   <th className="pr-2 font-normal">{C.seed}</th>
@@ -354,7 +354,7 @@ function Results({ run }: { run: RunState }) {
               <tbody>
                 {runs.flatMap((rs, i) =>
                   rs.map((res) => (
-                    <tr key={`${i}-${res.seed}`} className="border-t border-slate-100 dark:border-slate-800">
+                    <tr key={`${i}-${res.seed}`} className="border-t border-line">
                       <td className="pr-2 font-sans">{labels[i]}</td>
                       <td className="pr-2">{res.seed}</td>
                       {rows.map((r) => {
@@ -376,13 +376,13 @@ function Results({ run }: { run: RunState }) {
 
       {capacity.length > 0 && (
         <section className={card} aria-labelledby="compare-capacity-heading">
-          <h2 id="compare-capacity-heading" className="text-sm font-semibold text-slate-500">
+          <h2 id="compare-capacity-heading" className="text-sm font-semibold text-subtle">
             {C.capacity}
           </h2>
-          <p className="mt-1 text-xs text-slate-500">{C.capacityIntro}</p>
+          <p className="mt-1 text-xs text-subtle">{C.capacityIntro}</p>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="text-slate-500">
+              <thead className="text-subtle">
                 <tr>
                   <th className="py-1 pr-2 font-normal">{strings.capacity.element}</th>
                   {labels.map((l, i) => (
@@ -394,7 +394,7 @@ function Results({ run }: { run: RunState }) {
               </thead>
               <tbody>
                 {capacity.map((row) => (
-                  <tr key={row.elementId} className="border-t border-slate-100 align-top dark:border-slate-800">
+                  <tr key={row.elementId} className="border-t border-line align-top">
                     <td className="py-1 pr-2">{names(row.elementId)}</td>
                     {row.cells.map((c, i) => (
                       <td key={i} className="py-1 pr-2 text-right font-mono tabular-nums">
@@ -406,7 +406,7 @@ function Results({ run }: { run: RunState }) {
                             <div>
                               {formatCount(c.capacityPerHour)} {strings.capacity.capacity.toLowerCase()}/h
                             </div>
-                            <div className={c.overloaded ? "font-semibold text-orange-700 dark:text-orange-400" : ""}>
+                            <div className={c.overloaded ? "font-semibold text-bad" : ""}>
                               {formatCount(c.peakDemandPerHour)} {strings.capacity.peakDemand.toLowerCase()}/h{c.overloaded ? ` ▲ ${C.overloaded}` : ""}
                             </div>
                             <div>
@@ -414,7 +414,7 @@ function Results({ run }: { run: RunState }) {
                             </div>
                           </>
                         ) : (
-                          "–"
+"–"
                         )}
                       </td>
                     ))}
@@ -428,11 +428,11 @@ function Results({ run }: { run: RunState }) {
 
       {clock && (
         <section className={card} aria-labelledby="compare-charts-heading">
-          <h2 id="compare-charts-heading" className="text-sm font-semibold text-slate-500">
+          <h2 id="compare-charts-heading" className="text-sm font-semibold text-subtle">
             {C.charts}
           </h2>
-          {seedsPerEntry > 1 && <p className="mt-1 text-xs text-slate-500">{C.chartsFirstSeed}</p>}
-          <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts2.loading}</p>}>
+          {seedsPerEntry > 1 && <p className="mt-1 text-xs text-subtle">{C.chartsFirstSeed}</p>}
+          <Suspense fallback={<p className="text-xs text-subtle">{strings.charts2.loading}</p>}>
             <CompareCharts results={firstRuns} labels={labels} names={names} anchor={clock.anchor} fixedStart={clock.fixedStart} />
           </Suspense>
         </section>

@@ -37,7 +37,7 @@ function CopyField({ label, value, testId }: { label: string; value: string; tes
   };
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs text-slate-600 dark:text-slate-400">{label}</span>
+      <span className="text-xs text-muted">{label}</span>
       <div className="flex flex-wrap items-center gap-2">
         <input className={`${input} min-w-0 flex-1 font-mono text-xs`} readOnly value={value} aria-label={label} data-testid={testId} onFocus={(e) => e.currentTarget.select()} />
         <button type="button" className={btnSmall} onClick={() => void copy()}>
@@ -55,13 +55,13 @@ function FreshLinks({ server }: { server: Server }) {
   const origin = window.location.origin;
   const onThisVenue = server.route.kind === "venue" && server.route.venueId === f.venueId;
   return (
-    <section className="rounded-xl border-2 border-amber-400 bg-amber-50 p-4 dark:border-amber-500/60 dark:bg-amber-500/10" aria-labelledby="fresh-heading">
+    <section className="rounded-xl border-2 border-amber-400 bg-warn-soft p-4" aria-labelledby="fresh-heading">
       <h2 id="fresh-heading" className="text-lg font-semibold">
         {f.editKey ? S.fresh.headingPublished : S.fresh.headingShare}
       </h2>
       {f.editKey && (
         <>
-          <p className="mt-2 text-sm font-semibold text-orange-800 dark:text-orange-300" role="alert">
+          <p className="mt-2 text-sm font-semibold text-bad" role="alert">
             ⚠ {S.fresh.warning}
           </p>
           <div className="mt-2">
@@ -72,7 +72,7 @@ function FreshLinks({ server }: { server: Server }) {
       {f.readToken && (
         <div className="mt-3">
           <CopyField label={S.fresh.shareLink} value={shareLink(origin, f.venueId, f.readToken)} testId="share-link" />
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{S.fresh.shareNote}</p>
+          <p className="mt-1 text-xs text-muted">{S.fresh.shareNote}</p>
         </div>
       )}
       <div className="mt-3 flex flex-wrap gap-2">
@@ -119,7 +119,7 @@ function PublishPanel({ server, venueId, library }: { server: Server; venueId: s
       <h2 id="publish-heading" className="text-lg font-semibold">
         {S.publish.heading(venueTitle(venueId))}
       </h2>
-      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{S.publish.intro}</p>
+      <p className="mt-1 text-sm text-muted">{S.publish.intro}</p>
       <fieldset className="mt-3">
         <legend className="text-sm font-semibold">{S.publish.scenarios}</legend>
         <ul className="mt-1 flex flex-col gap-1">
@@ -127,13 +127,13 @@ function PublishPanel({ server, venueId, library }: { server: Server; venueId: s
             <li key={c.key}>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={isPicked(c.key, byDefault)} onChange={(e) => setPicked((p) => ({ ...p, [c.key]: e.target.checked }))} />
-                {c.label} <span className="text-xs text-slate-500">({c.builtIn ? S.publish.example : S.publish.mine})</span>
+                {c.label} <span className="text-xs text-subtle">({c.builtIn ? S.publish.example : S.publish.mine})</span>
               </label>
             </li>
           ))}
         </ul>
       </fieldset>
-      <p className="mt-2 text-xs text-slate-500">{S.publish.privacy}</p>
+      <p className="mt-2 text-xs text-subtle">{S.publish.privacy}</p>
       <button type="button" className={`${btnPrimary} mt-3`} onClick={() => void publish()} disabled={busy}>
         {busy ? S.publish.busy : S.publish.button}
       </button>
@@ -144,7 +144,7 @@ function PublishPanel({ server, venueId, library }: { server: Server; venueId: s
 
 function Message({ ok, lines }: { ok: boolean; lines: string[] }) {
   return (
-    <div className={`mt-3 rounded-lg border p-2 text-sm ${ok ? "border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10" : "border-orange-300 bg-orange-50 dark:border-orange-500/40 dark:bg-orange-500/10"}`} role={ok ? "status" : "alert"}>
+    <div className={`mt-3 rounded-lg border p-2 text-sm ${ok ? "border-ok/30 bg-ok-soft" : "border-bad/40 bg-bad-soft"}`} role={ok ? "status" : "alert"}>
       {lines.map((l, k) => (
         <p key={k}>{l}</p>
       ))}
@@ -163,7 +163,7 @@ function ConfirmButton({ label, question, confirm, onConfirm, disabled }: { labe
       </button>
     );
   return (
-    <span className="flex flex-wrap items-center gap-2 rounded-md border border-orange-300 bg-orange-50 px-2 py-1 text-sm dark:border-orange-500/40 dark:bg-orange-500/10">
+    <span className="flex flex-wrap items-center gap-2 rounded-md border border-bad/40 bg-bad-soft px-2 py-1 text-sm">
       {question}
       <button
         type="button"
@@ -192,13 +192,13 @@ function SharedVenuePanel({ server, jobs, library, onOpenScenario }: { server: S
   if (sh.status === "loading" || sh.status === "none" || server.status === "checking")
     return (
       <section className={card}>
-        <p className="text-sm text-slate-500">{S.venue.loading}</p>
+        <p className="text-sm text-subtle">{S.venue.loading}</p>
       </section>
     );
   if (sh.status === "error")
     return (
       <section className={card}>
-        <p className="text-sm font-medium text-orange-800 dark:text-orange-300" role="alert">
+        <p className="text-sm font-medium text-bad" role="alert">
           {sh.message}
         </p>
         <button type="button" className={`${btn} mt-3`} onClick={server.leave}>
@@ -224,11 +224,11 @@ function SharedVenuePanel({ server, jobs, library, onOpenScenario }: { server: S
         <h2 id="shared-heading" className="text-lg font-semibold">
           {S.venue.heading(v.name)}
         </h2>
-        <p className={`mt-1 inline-block rounded-md px-2 py-0.5 text-sm font-medium ${canEdit ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-500/20 dark:text-emerald-200" : "bg-sky-100 text-sky-900 dark:bg-sky-500/20 dark:text-sky-200"}`} data-testid="access-level">
+        <p className={`mt-1 inline-block rounded-md px-2 py-0.5 text-sm font-medium ${canEdit ? "bg-emerald-100 text-emerald-900 dark:text-emerald-200" : "bg-sky-100 text-sky-900 dark:text-sky-200"}`} data-testid="access-level">
           {canEdit ? S.venue.editAccess : S.venue.readAccess}
         </p>
-        {!canEdit && <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{READ_ONLY_MESSAGE}</p>}
-        <p className="mt-2 text-xs text-slate-500">{S.venue.retention}</p>
+        {!canEdit && <p className="mt-2 text-sm text-muted">{READ_ONLY_MESSAGE}</p>}
+        <p className="mt-2 text-xs text-subtle">{S.venue.retention}</p>
         {v.readToken && (
           <div className="mt-3">
             <CopyField label={S.fresh.shareLink} value={shareLink(window.location.origin, v.id, v.readToken)} testId="current-share-link" />
@@ -247,7 +247,7 @@ function SharedVenuePanel({ server, jobs, library, onOpenScenario }: { server: S
 
       <ServerScenarios venue={v} server={server} canEdit={canEdit} library={library} onOpenScenario={onOpenScenario} />
 
-      <Suspense fallback={<p className="text-sm text-slate-500">{strings.controls.loading}</p>}>
+      <Suspense fallback={<p className="text-sm text-subtle">{strings.controls.loading}</p>}>
         <JobsPanel venue={v} jobs={jobs} canEdit={canEdit} library={library} server={server} />
       </Suspense>
     </>
@@ -300,13 +300,13 @@ function ServerScenarios({ venue, server, canEdit, library, onOpenScenario }: { 
       <h2 id="server-scenarios-heading" className="text-lg font-semibold">
         {S.scenarios.heading}
       </h2>
-      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{S.scenarios.intro}</p>
+      <p className="mt-1 text-sm text-muted">{S.scenarios.intro}</p>
       {venue.scenarios.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-500">{S.scenarios.none}</p>
+        <p className="mt-2 text-sm text-subtle">{S.scenarios.none}</p>
       ) : (
         <ul className="mt-2">
           {venue.scenarios.map((r) => (
-            <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 py-2 dark:border-slate-800">
+            <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-2">
               <span className="font-medium">{r.scenario.name}</span>
               <span className="flex flex-wrap gap-1">
                 <button type="button" className={btnSmall} onClick={() => onOpenScenario(`server:${r.id}`, venue.id)}>
@@ -330,17 +330,17 @@ function ServerScenarios({ venue, server, canEdit, library, onOpenScenario }: { 
       )}
 
       <h3 className="mt-4 text-sm font-semibold">{S.scenarios.draftsHeading}</h3>
-      <p className="text-xs text-slate-500">{S.scenarios.draftsIntro}</p>
+      <p className="text-xs text-subtle">{S.scenarios.draftsIntro}</p>
       {drafts.length === 0 ? (
-        <p className="mt-1 text-sm text-slate-500">{S.scenarios.noDrafts}</p>
+        <p className="mt-1 text-sm text-subtle">{S.scenarios.noDrafts}</p>
       ) : (
         <ul className="mt-1">
           {drafts.map((c) => {
             const onServer = venue.scenarios.some((r) => r.id === c.scenario.id);
             return (
-              <li key={c.key} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 py-2 dark:border-slate-800">
+              <li key={c.key} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-2">
                 <span>
-                  {c.label} <span className="text-xs text-slate-500">({onServer ? S.scenarios.draftOf : S.scenarios.newDraft})</span>
+                  {c.label} <span className="text-xs text-subtle">({onServer ? S.scenarios.draftOf : S.scenarios.newDraft})</span>
                 </span>
                 <button type="button" className={btnSmall} disabled={!canEdit || busy !== null} title={canEdit ? undefined : READ_ONLY_MESSAGE} onClick={() => void save(c.scenario)}>
                   {onServer ? S.scenarios.update : S.scenarios.upload}
@@ -351,7 +351,7 @@ function ServerScenarios({ venue, server, canEdit, library, onOpenScenario }: { 
         </ul>
       )}
       {conflict && (
-        <div className="mt-3 rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm dark:border-orange-500/40 dark:bg-orange-500/10" role="alert">
+        <div className="mt-3 rounded-lg border border-bad/40 bg-bad-soft p-3 text-sm" role="alert">
           <p className="font-semibold">{S.scenarios.conflictHeading(conflict.scenario.name)}</p>
           <p>{conflict.message}</p>
           <div className="mt-2 flex flex-wrap gap-2">

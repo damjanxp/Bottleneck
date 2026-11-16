@@ -56,7 +56,7 @@ export function CarCounts({ counts }: { counts: number[] }) {
   const C = strings.cars;
   return (
     <section className={card} aria-labelledby="cars-heading">
-      <h2 id="cars-heading" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
+      <h2 id="cars-heading" className="text-sm font-semibold text-fg">
         {C.heading}
       </h2>
       <dl className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-sm">
@@ -68,7 +68,7 @@ export function CarCounts({ counts }: { counts: number[] }) {
           </div>
         ))}
       </dl>
-      <p className="mt-1 text-xs text-slate-500" data-cars-on-site={carsOnSite(counts)}>
+      <p className="mt-1 text-xs text-subtle" data-cars-on-site={carsOnSite(counts)}>
         {formatCount(carsOnSite(counts))} {C.onSite}
       </p>
     </section>
@@ -88,17 +88,17 @@ export function ParkingHeadlineCard({ h, names, clock }: { h: ParkingHeadlines; 
       </h2>
       <dl className="grid gap-3">
         <div data-headline="timeToEmpty" data-status={t.status}>
-          <dt className="text-xs text-slate-600 dark:text-slate-400">{H.timeToEmpty}</dt>
+          <dt className="text-xs text-muted">{H.timeToEmpty}</dt>
           <dd className="text-2xl font-bold tabular-nums">{empty}</dd>
-          {t.lotId && t.status === "empty" && <dd className="text-xs text-slate-500">{names(t.lotId)}</dd>}
+          {t.lotId && t.status === "empty" && <dd className="text-xs text-subtle">{names(t.lotId)}</dd>}
         </div>
         {h.longestExitQueue && (
           <div data-headline="longestExitQueue">
-            <dt className="text-xs text-slate-600 dark:text-slate-400">{H.longestExitQueue}</dt>
+            <dt className="text-xs text-muted">{H.longestExitQueue}</dt>
             <dd className="text-xl font-bold tabular-nums">
               {formatCount(h.longestExitQueue.metres)} m · {formatCount(h.longestExitQueue.cars)} {H.cars}
             </dd>
-            <dd className="text-xs text-slate-500">
+            <dd className="text-xs text-subtle">
               {names(h.longestExitQueue.barrierId)}
               {h.longestExitQueue.at !== null && h.longestExitQueue.cars > 0 ? `, ${when(h.longestExitQueue.at)}` : ""}
             </dd>
@@ -106,17 +106,17 @@ export function ParkingHeadlineCard({ h, names, clock }: { h: ParkingHeadlines; 
         )}
         {h.longestEntryQueue && (
           <div data-headline="longestEntryQueue">
-            <dt className="text-xs text-slate-600 dark:text-slate-400">{H.longestEntryQueue}</dt>
+            <dt className="text-xs text-muted">{H.longestEntryQueue}</dt>
             <dd className="text-xl font-bold tabular-nums">
               {formatCount(h.longestEntryQueue.metres)} m · {formatCount(h.longestEntryQueue.cars)} {H.cars}
             </dd>
-            <dd className={`text-xs ${h.entryReachedPublicRoad ? "font-semibold text-orange-700 dark:text-orange-400" : "text-slate-500"}`}>
+            <dd className={`text-xs ${h.entryReachedPublicRoad ? "font-semibold text-bad" : "text-subtle"}`}>
               {h.entryReachedPublicRoad ? `▲ ${names(h.entryReachedPublicRoad.barrierId)}: ${H.reachedPublicRoad} ${when(h.entryReachedPublicRoad.at)}` : H.stayedOnSite}
             </dd>
           </div>
         )}
         <div data-headline="turnedAway">
-          <dt className="text-xs text-slate-600 dark:text-slate-400">{H.turnedAway}</dt>
+          <dt className="text-xs text-muted">{H.turnedAway}</dt>
           <dd className="text-xl font-bold tabular-nums">
             {formatCount(h.turnedAwayCars)} / {formatCount(h.divertedCars)} {H.cars}
           </dd>
@@ -130,11 +130,11 @@ export function LotTable({ rows, onClose, closeDisabled, onCharts, chartsFor }: 
   const T = strings.lots;
   return (
     <section className={card} aria-labelledby="lots-heading">
-      <h2 id="lots-heading" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
+      <h2 id="lots-heading" className="text-sm font-semibold text-fg">
         {T.heading}
       </h2>
       <table className="mt-2 w-full text-sm">
-        <thead className="text-xs text-slate-500">
+        <thead className="text-xs text-subtle">
           <tr>
             <th className="py-1 pr-2 text-left font-normal">{T.lot}</th>
             <th className="py-1 pr-2 text-right font-normal">{T.used}</th>
@@ -145,10 +145,10 @@ export function LotTable({ rows, onClose, closeDisabled, onCharts, chartsFor }: 
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.lotId} className="border-t border-slate-100 align-top dark:border-slate-800" data-lot={r.lotId}>
+            <tr key={r.lotId} className="border-t border-line align-top" data-lot={r.lotId}>
               <td className="py-1 pr-2">
                 <div>{r.name}</div>
-                <div className={`text-xs ${r.closed ? "font-semibold text-orange-700 dark:text-orange-400" : "text-slate-500"}`}>
+                <div className={`text-xs ${r.closed ? "font-semibold text-bad" : "text-subtle"}`}>
                   {r.closed ? `✕ ${T.closed}` : T.open}
                   {r.maxOccupancy !== null && ` · ${formatCount(r.maxOccupancy)} ${T.maxOccupancy}`}
                   {r.turnedAway !== null && r.turnedAway > 0 && ` · ${formatCount(r.turnedAway)} ${T.turnedAway}`}
@@ -158,10 +158,10 @@ export function LotTable({ rows, onClose, closeDisabled, onCharts, chartsFor }: 
                 <div className="font-mono tabular-nums" data-lot-used={r.occupied}>
                   {formatCount(r.occupied)} / {formatCount(r.stalls)}
                 </div>
-                <div className="mt-0.5 h-2 w-full rounded bg-slate-100 dark:bg-slate-800">
+                <div className="mt-0.5 h-2 w-full rounded bg-sunken">
                   <div className="h-2 rounded bg-slate-500" style={{ width: `${Math.min(100, 100 * r.share)}%` }} />
                 </div>
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-subtle">
                   {formatPercent(r.share)} · {formatCount(r.free)} {T.free}
                 </div>
               </td>
@@ -179,7 +179,7 @@ export function LotTable({ rows, onClose, closeDisabled, onCharts, chartsFor }: 
           ))}
         </tbody>
       </table>
-      <p className="mt-1 text-xs text-slate-500">{T.closeHint}</p>
+      <p className="mt-1 text-xs text-subtle">{T.closeHint}</p>
     </section>
   );
 }
@@ -188,11 +188,11 @@ export function BarrierTable({ rows, clock, onCharts, chartsFor }: { rows: Barri
   const T = strings.barriers;
   return (
     <section className={card} aria-labelledby="barriers-heading">
-      <h2 id="barriers-heading" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
+      <h2 id="barriers-heading" className="text-sm font-semibold text-fg">
         {T.heading}
       </h2>
       <table className="mt-2 w-full text-sm">
-        <thead className="text-xs text-slate-500">
+        <thead className="text-xs text-subtle">
           <tr>
             <th className="py-1 pr-2 text-left font-normal">{T.barrier}</th>
             <th className="py-1 pr-2 text-right font-normal">{T.waiting}</th>
@@ -204,13 +204,13 @@ export function BarrierTable({ rows, clock, onCharts, chartsFor }: { rows: Barri
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.barrierId} className="border-t border-slate-100 align-top dark:border-slate-800" data-barrier={r.barrierId}>
+            <tr key={r.barrierId} className="border-t border-line align-top" data-barrier={r.barrierId}>
               <td className="py-1 pr-2">
                 <div>{r.name}</div>
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-subtle">
                   {r.kind === "entry" ? T.entry : T.exit} · {r.busyLanes}/{r.laneCount} {T.busy}
                 </div>
-                <div className={`text-xs ${r.reachedPublicRoadAt !== null ? "font-semibold text-orange-700 dark:text-orange-400" : "text-slate-500"}`}>
+                <div className={`text-xs ${r.reachedPublicRoadAt !== null ? "font-semibold text-bad" : "text-subtle"}`}>
                   {T.reachedPublicRoad}: {r.reachedPublicRoadAt !== null ? `▲ ${T.yesAt} ${formatRelativeClock(r.reachedPublicRoadAt, clock.anchor, clock.fixedStart)}` : T.no}
                 </div>
               </td>
@@ -231,7 +231,7 @@ export function BarrierTable({ rows, clock, onCharts, chartsFor }: { rows: Barri
           ))}
         </tbody>
       </table>
-      <p className="mt-1 text-xs text-slate-500">{T.note}</p>
+      <p className="mt-1 text-xs text-subtle">{T.note}</p>
     </section>
   );
 }

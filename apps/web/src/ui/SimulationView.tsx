@@ -17,7 +17,8 @@ import { downloadText } from "./browserFiles.ts";
 import { Legend } from "./Legend.tsx";
 import { CapacityTable, ClockDisplay, Headlines, LaneTable, ParametersList, StateCounts, WorstLane, type ClockInfo } from "./Panels.tsx";
 import { BarrierTable, CarCounts, LotTable, ParkingHeadlineCard } from "./ParkingPanels.tsx";
-import { btn, btnPrimary, btnSmall } from "./styles.ts";
+import { IconEyeOff, IconExit, IconFit, IconLayers, IconPause, IconPeak, IconPlay, IconRestart, IconStep } from "./icons.tsx";
+import { btn, btnGhost, btnIcon, btnPrimary, btnSmall, card, cardHint, cardTitle, overlay, select } from "./styles.ts";
 
 const LaneCharts = lazy(() => import("./LaneCharts.tsx").then((m) => ({ default: m.LaneCharts })));
 const LotChart = lazy(() => import("./ParkingCharts.tsx").then((m) => ({ default: m.LotChart })));
@@ -333,115 +334,57 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
   const lotChartReport = lotChart ? metrics?.parking?.lots.find((l) => l.lotId === lotChart) : undefined;
   const statusNote = stats?.done ? (stats.deadlock ? strings.controls.deadlock : stats.drained ? strings.controls.drained : strings.controls.horizon) : null;
 
+  const playDisabled = !loaded || done || seek !== null;
+  const stepDisabled = !loaded || playing || done || seek !== null;
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="flex min-w-0 flex-col gap-3">
-          {/* Controls */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={btnPrimary} onClick={onPlayPause} disabled={!loaded || done || seek !== null}>
-              {playing ? strings.controls.pause : strings.controls.play}
-            </button>
-            <button type="button" className={btn} onClick={() => controllerRef.current?.step(STEP_TICKS)} disabled={!loaded || playing || done || seek !== null} title={strings.controls.stepHint}>
-              {strings.controls.step}
-            </button>
-            <button type="button" className={btn} onClick={() => controllerRef.current?.step(MINUTE_TICKS)} disabled={!loaded || playing || done || seek !== null} title={strings.controls.plusMinuteHint}>
-              {strings.controls.plusMinute}
-            </button>
-            <button type="button" className={btn} onClick={() => controllerRef.current?.restart()} disabled={!loaded}>
-              {strings.controls.restart}
-            </button>
-            <button type="button" className={btn} onClick={() => loaded && controllerRef.current?.seek(loaded.peakStart)} disabled={!loaded || seek !== null} title={strings.controls.jumpToPeakHint}>
-              {strings.controls.jumpToPeak}
-            </button>
-            {loaded?.departurePeakStart !== null && loaded?.departurePeakStart !== undefined && (
-              <button type="button" className={btn} onClick={() => loaded.departurePeakStart !== null && controllerRef.current?.seek(loaded.departurePeakStart)} disabled={seek !== null} title={strings.controls.jumpToDeparturesHint}>
-                {strings.controls.jumpToDepartures}
-              </button>
-            )}
-            <label className="flex items-center gap-1 text-sm">
-              {strings.controls.speed}
-              <select className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900" value={speed} onChange={(e) => onSpeed(Number(e.target.value))}>
-                {SPEEDS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}×
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-1 text-sm">
-              <input type="checkbox" checked={heatmap} onChange={(e) => setHeatmap(e.target.checked)} />
-              {strings.controls.heatmap}
-            </label>
-            {showMap && (
-              <button type="button" className={btn} onClick={() => rendererRef.current?.fit()}>
-                {strings.controls.fit}
-              </button>
-            )}
-            <button type="button" className={btn} onClick={() => setShowMap((v) => !v)}>
-              {showMap ? strings.controls.hideMap : strings.controls.showMap}
-            </button>
+    <div className="flex h-full flex-col lg:flex-row">
+      {/* The map fills the stage; controls float over it (map-first, like kepler.gl or a video player). */}
+      <section className="relative min-h-[460px] min-w-0 flex-1 overflow-hidden bg-map lg:min-h-0" aria-label={strings.controls.stage}>
+        {showMap ? (
+          <div ref={hostRef} className="absolute inset-0">
+            {!loaded && <p className="absolute inset-0 grid place-items-center text-sm text-subtle">{strings.controls.loading}</p>}
+            {perf && <PerfOverlay controller={controllerRef} renderer={rendererRef} stats={stats} agentCount={loaded?.agentCount ?? 0} />}
           </div>
-
-          {/* Run-level actions: batch over seeds, scan-log export */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={btn} onClick={() => onCompare([{ key: "adhoc:current", label: effectiveLabel, scenario: effective }], 5)} title={strings.runActions.batchHint}>
-              {strings.runActions.batch}
-            </button>
-            <button type="button" className={btn} onClick={() => void onExportScanLog()} disabled={!done || exporting || seek !== null} title={strings.runActions.exportScanLogHint}>
-              {strings.runActions.exportScanLog}
-            </button>
-            {onSaveRun && (
-              <button type="button" className={btn} onClick={() => void onSaveRunClick()} disabled={!done || savingRun || seek !== null} title={strings.share.saveRun.hint}>
-                {savingRun ? strings.share.saveRun.busy : strings.share.saveRun.button}
+        ) : (
+          <div className="absolute inset-0 grid place-items-center p-6 text-center">
+            <div className="flex max-w-sm flex-col items-center gap-3">
+              <p className="text-sm text-muted">{strings.controls.mapHiddenNote}</p>
+              <button type="button" className={btn} onClick={() => setShowMap(true)}>
+                {strings.controls.showMap}
               </button>
-            )}
-            {runSaved && (
-              <span className={`text-xs ${runSaved.ok ? "text-emerald-800 dark:text-emerald-300" : "text-orange-800 dark:text-orange-300"}`} role={runSaved.ok ? "status" : "alert"}>
-                {runSaved.text}
-              </span>
-            )}
-            {!done && loaded && (
-              <span className="text-xs text-slate-500">
-                {strings.runActions.runToEndFirst}{" "}
-                <button type="button" className="underline" onClick={() => controllerRef.current?.seek(loaded.endTime)} disabled={seek !== null}>
-                  {strings.runActions.runToEnd}
-                </button>
-              </span>
-            )}
-          </div>
-
-          <ClockDisplay time={scrub ?? time} clock={clock} phase={phase} />
-
-          {/* Scrubber */}
-          {loaded && (
-            <div className="flex flex-col gap-1">
-              <input
-                type="range"
-                aria-label={strings.controls.scrubber}
-                aria-valuetext={formatRelativeClock(scrub ?? time, clock.anchor, clock.fixedStart)}
-                min={loaded.startTime}
-                max={loaded.endTime}
-                step={30}
-                value={scrub ?? seek?.target ?? time}
-                onChange={(e) => onScrub(Number(e.target.value))}
-                className="w-full accent-amber-500"
-              />
-              {seek && (
-                <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400" role="status">
-                  <progress className="h-2 flex-1 accent-amber-500" max={1} value={seek.fraction} />
-                  <span>{applyingSeek === seek.seekId ? strings.laneActions.applying : strings.controls.seeking}</span>
-                  <button type="button" className="underline" onClick={() => controllerRef.current?.cancelSeek()}>
-                    {strings.controls.cancel}
-                  </button>
-                </div>
-              )}
             </div>
-          )}
+          </div>
+        )}
 
+        {/* Top left: the event clock. */}
+        <div className={`${overlay} absolute top-3 left-3 px-3.5 py-2`}>
+          <ClockDisplay time={scrub ?? time} clock={clock} phase={phase} />
+        </div>
+
+        {/* Top right: map tools. */}
+        <div className={`${overlay} absolute top-3 right-3 flex items-center gap-0.5 p-1`}>
+          <button type="button" className={`${btnGhost} ${heatmap ? "bg-accent-soft text-fg" : ""}`} aria-pressed={heatmap} onClick={() => setHeatmap((v) => !v)} title={strings.controls.heatmap}>
+            <IconLayers />
+            <span className="hidden sm:inline">{strings.controls.heatmapShort}</span>
+          </button>
+          {showMap && (
+            <button type="button" className={btnIcon} onClick={() => rendererRef.current?.fit()} aria-label={strings.controls.fit} title={strings.controls.fit}>
+              <IconFit />
+            </button>
+          )}
+          {showMap && (
+            <button type="button" className={btnIcon} onClick={() => setShowMap(false)} aria-label={strings.controls.hideMap} title={strings.controls.hideMap}>
+              <IconEyeOff />
+            </button>
+          )}
+        </div>
+
+        {/* Messages about the run, under the clock. */}
+        <div className="pointer-events-none absolute top-[4.25rem] right-3 left-3 flex flex-col items-start gap-2">
           {working && (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-300 bg-sky-50 p-2 text-sm dark:border-sky-500/40 dark:bg-sky-500/10" role="status">
-              <span className="font-medium text-sky-900 dark:text-sky-200">
+            <div className={`${overlay} pointer-events-auto flex flex-wrap items-center gap-2 px-3 py-2 text-sm`} role="status">
+              <span className="font-medium">
                 {strings.working.heading}: {strings.working.events(working.added)}
               </span>
               {ownScenario && (
@@ -472,95 +415,188 @@ export function SimulationView({ venue, scenario, label, ownScenario, active, on
               </button>
             </div>
           )}
-
-          {reducedMotion && !playing && time === loaded?.startTime && <p className="text-sm text-slate-600 dark:text-slate-400">{strings.controls.reducedMotion}</p>}
+          {reducedMotion && !playing && time === loaded?.startTime && <p className={`${overlay} px-3 py-2 text-sm text-muted`}>{strings.controls.reducedMotion}</p>}
           {statusNote && (
-            <p className="text-sm font-medium" role="status">
-              {strings.controls.finished}: {statusNote}
+            <p className={`${overlay} px-3 py-2 text-sm font-medium`} role="status">
+              <span className="text-ok">●</span> {strings.controls.finished}: {statusNote}
             </p>
           )}
           {error && (
-            <p className="text-sm font-medium text-red-700 dark:text-red-400" role="alert">
+            <p className={`${overlay} pointer-events-auto px-3 py-2 text-sm font-medium text-bad`} role="alert">
               {strings.errors.worker}: {error}
             </p>
           )}
+        </div>
 
-          {/* Map */}
-          {showMap ? (
-            <div ref={hostRef} className="relative h-[62vh] min-h-[360px] w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800">
-              {!loaded && <p className="absolute inset-0 grid place-items-center text-sm text-slate-500">{strings.controls.loading}</p>}
-              {perf && <PerfOverlay controller={controllerRef} renderer={rendererRef} stats={stats} agentCount={loaded?.agentCount ?? 0} />}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500">{strings.controls.mapHiddenNote}</p>
-          )}
-          <Legend heatmap={heatmap} cars={layout !== null} />
-          {venue.attribution && <p className="text-xs text-slate-500">{venue.attribution}</p>}
-        </section>
-
-        <aside className="flex min-w-0 flex-col gap-3">
-          {parkingHeads && <ParkingHeadlineCard h={parkingHeads} names={names} clock={clock} />}
-          {heads.length > 0 && <Headlines items={heads} clock={clock} />}
-          <WorstLane name={worst ? (laneNames.get(worst.laneId) ?? null) : null} queue={worst?.queueLength ?? 0} onAddLane={worstElement ? () => onAddLane(worstElement) : undefined} addDisabled={busy} />
-          {selectedLayout && (
-            <section className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm dark:border-sky-500/40 dark:bg-sky-500/10" aria-labelledby="lane-actions-heading">
-              <h2 id="lane-actions-heading" className="text-xs font-semibold text-sky-900 dark:text-sky-200">
-                {strings.laneActions.heading}: {laneNames.get(selectedLayout.laneId)}
-              </h2>
-              {selectedLayout.manual ? (
-                <p className="mt-1 text-xs">{strings.laneActions.manual}</p>
-              ) : (
-                <>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {selectedLive?.failed ? (
-                      <button type="button" className={btnSmall} onClick={() => onLaneEvent("laneReopen", selectedLayout.laneId)} disabled={busy || done}>
-                        {strings.laneActions.reopen}
-                      </button>
-                    ) : (
-                      <button type="button" className={btnSmall} onClick={() => onLaneEvent("laneFail", selectedLayout.laneId)} disabled={busy || done}>
-                        {strings.laneActions.fail}
-                      </button>
-                    )}
-                  </div>
-                  <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">{strings.laneActions.intro}</p>
-                </>
+        {/* Bottom: the legend, then the playback bar. */}
+        <div className="absolute right-3 bottom-3 left-3 flex flex-col gap-2">
+          <div className={`${overlay} self-start px-3 py-1.5`}>
+            <Legend heatmap={heatmap} cars={layout !== null} />
+          </div>
+          <div className={`${overlay} flex flex-col gap-2 px-3 py-2.5`}>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button type="button" className={`${btnPrimary} w-[5.5rem]`} onClick={onPlayPause} disabled={playDisabled}>
+                {playing ? <IconPause /> : <IconPlay />}
+                {playing ? strings.controls.pause : strings.controls.play}
+              </button>
+              <button type="button" className={btnIcon} onClick={() => controllerRef.current?.step(STEP_TICKS)} disabled={stepDisabled} aria-label={strings.controls.step} title={strings.controls.stepHint}>
+                <IconStep />
+              </button>
+              <button type="button" className={btnGhost} onClick={() => controllerRef.current?.step(MINUTE_TICKS)} disabled={stepDisabled} title={strings.controls.plusMinuteHint}>
+                {strings.controls.plusMinute}
+              </button>
+              <button type="button" className={btnIcon} onClick={() => controllerRef.current?.restart()} disabled={!loaded} aria-label={strings.controls.restart} title={strings.controls.restart}>
+                <IconRestart />
+              </button>
+              <span className="mx-1 h-5 w-px bg-line" aria-hidden="true" />
+              <button type="button" className={btn} onClick={() => loaded && controllerRef.current?.seek(loaded.peakStart)} disabled={!loaded || seek !== null} title={strings.controls.jumpToPeakHint}>
+                <IconPeak />
+                {strings.controls.jumpToPeak}
+              </button>
+              {loaded?.departurePeakStart !== null && loaded?.departurePeakStart !== undefined && (
+                <button type="button" className={btn} onClick={() => loaded.departurePeakStart !== null && controllerRef.current?.seek(loaded.departurePeakStart)} disabled={seek !== null} title={strings.controls.jumpToDeparturesHint}>
+                  <IconExit />
+                  {strings.controls.jumpToDepartures}
+                </button>
               )}
-            </section>
+              {!done && loaded && (
+                <button type="button" className={btnGhost} onClick={() => controllerRef.current?.seek(loaded.endTime)} disabled={seek !== null} title={strings.runActions.runToEndFirst}>
+                  {strings.runActions.runToEnd}
+                </button>
+              )}
+              <div className="ml-auto flex items-center gap-1.5">
+                <span className="text-xs text-subtle" aria-hidden="true">
+                  {strings.controls.speed}
+                </span>
+                <select aria-label={strings.controls.speed} className={`${select} h-7 px-1.5 text-xs`} value={speed} onChange={(e) => onSpeed(Number(e.target.value))}>
+                  {SPEEDS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}×
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            {loaded && (
+              <div className="flex items-center gap-3">
+                <span className="w-14 shrink-0 font-mono text-[11px] text-subtle tabular">{formatRelativeClock(loaded.startTime, clock.anchor, clock.fixedStart)}</span>
+                <input
+                  type="range"
+                  aria-label={strings.controls.scrubber}
+                  aria-valuetext={formatRelativeClock(scrub ?? time, clock.anchor, clock.fixedStart)}
+                  min={loaded.startTime}
+                  max={loaded.endTime}
+                  step={30}
+                  value={scrub ?? seek?.target ?? time}
+                  onChange={(e) => onScrub(Number(e.target.value))}
+                  className="h-1.5 w-full cursor-pointer"
+                />
+                <span className="w-14 shrink-0 text-right font-mono text-[11px] text-subtle tabular">{formatRelativeClock(loaded.endTime, clock.anchor, clock.fixedStart)}</span>
+              </div>
+            )}
+            {seek && (
+              <div className="flex items-center gap-2 text-xs text-muted" role="status">
+                <progress className="h-1.5 flex-1 accent-amber-500" max={1} value={seek.fraction} />
+                <span>{applyingSeek === seek.seekId ? strings.laneActions.applying : strings.controls.seeking}</span>
+                <button type="button" className="font-medium underline underline-offset-2" onClick={() => controllerRef.current?.cancelSeek()}>
+                  {strings.controls.cancel}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Inspector: the answer first, details below. */}
+      <aside className="flex min-h-0 w-full shrink-0 flex-col gap-3 overflow-y-auto border-line bg-canvas p-3 scroll-thin lg:w-[384px] lg:border-l [&>*]:shrink-0">
+        {parkingHeads && <ParkingHeadlineCard h={parkingHeads} names={names} clock={clock} />}
+        {heads.length > 0 && <Headlines items={heads} clock={clock} />}
+        <WorstLane name={worst ? (laneNames.get(worst.laneId) ?? null) : null} queue={worst?.queueLength ?? 0} onAddLane={worstElement ? () => onAddLane(worstElement) : undefined} addDisabled={busy} />
+        {selectedLayout && (
+          <section className={`${card} border-info/40 p-3 text-sm`} aria-labelledby="lane-actions-heading">
+            <h2 id="lane-actions-heading" className={cardTitle}>
+              {strings.laneActions.heading}: {laneNames.get(selectedLayout.laneId)}
+            </h2>
+            {selectedLayout.manual ? (
+              <p className={cardHint}>{strings.laneActions.manual}</p>
+            ) : (
+              <>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedLive?.failed ? (
+                    <button type="button" className={btnSmall} onClick={() => onLaneEvent("laneReopen", selectedLayout.laneId)} disabled={busy || done}>
+                      {strings.laneActions.reopen}
+                    </button>
+                  ) : (
+                    <button type="button" className={btnSmall} onClick={() => onLaneEvent("laneFail", selectedLayout.laneId)} disabled={busy || done}>
+                      {strings.laneActions.fail}
+                    </button>
+                  )}
+                </div>
+                <p className={cardHint}>{strings.laneActions.intro}</p>
+              </>
+            )}
+          </section>
+        )}
+        {selectedReport && loaded && (
+          <Suspense fallback={<p className="text-xs text-subtle">{strings.charts.loading}</p>}>
+            <LaneCharts
+              name={laneNames.get(selectedReport.laneId) ?? ""}
+              report={selectedReport}
+              startTime={loaded.startTime}
+              queueInterval={loaded.parameters.queueSampleInterval}
+              binSeconds={loaded.parameters.throughputBin}
+              anchor={clock.anchor}
+              fixedStart={clock.fixedStart}
+              onClose={() => setSelectedLane(null)}
+            />
+          </Suspense>
+        )}
+        {metrics && metrics.elements.length > 0 && <CapacityTable elements={metrics.elements} names={names} clock={clock} onAddLane={onAddLane} addDisabled={busy} />}
+        {loaded && stats && <LaneTable lanes={loaded.lanes} states={stats.lanes} names={laneNames} selected={selectedLane} onSelect={(id) => setSelectedLane((cur) => (cur === id ? null : id))} />}
+        {layout && stats && <CarCounts counts={stats.carCounts} />}
+        {layout && stats && <LotTable rows={lots} onClose={onLotClose} closeDisabled={busy || done} onCharts={(id) => setLotChart((cur) => (cur === id ? null : id))} chartsFor={lotChart} />}
+        {lotChartReport && loaded && (
+          <Suspense fallback={<p className="text-xs text-subtle">{strings.charts.loading}</p>}>
+            <LotChart name={names(lotChartReport.lotId)} report={lotChartReport} startTime={loaded.startTime} binSeconds={loaded.parameters.throughputBin} anchor={clock.anchor} fixedStart={clock.fixedStart} />
+          </Suspense>
+        )}
+        {layout && stats && <BarrierTable rows={barriers} clock={clock} onCharts={(id) => setBarrierChart((cur) => (cur === id ? null : id))} chartsFor={barrierChart} />}
+        {barrierChart && metrics?.parking && loaded && (
+          <Suspense fallback={<p className="text-xs text-subtle">{strings.charts.loading}</p>}>
+            <BarrierChart name={names(barrierChart)} barrierId={barrierChart} lanes={metrics.parking.barrierLanes} startTime={loaded.startTime} queueInterval={loaded.parameters.queueSampleInterval} anchor={clock.anchor} fixedStart={clock.fixedStart} />
+          </Suspense>
+        )}
+        {stats && <StateCounts counts={stats.countsByState} time={stats.time} cars={layout !== null} leaving={!!loaded?.parameters.departureCurve} />}
+
+        {/* This run: batch over seeds, scan-log export, saving to the server. */}
+        <section className={`${card} p-3`} aria-labelledby="run-actions-heading">
+          <h2 id="run-actions-heading" className={cardTitle}>
+            {strings.runActions.heading}
+          </h2>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" className={btnSmall} onClick={() => onCompare([{ key: "adhoc:current", label: effectiveLabel, scenario: effective }], 5)} title={strings.runActions.batchHint}>
+              {strings.runActions.batch}
+            </button>
+            <button type="button" className={btnSmall} onClick={() => void onExportScanLog()} disabled={!done || exporting || seek !== null} title={strings.runActions.exportScanLogHint}>
+              {strings.runActions.exportScanLog}
+            </button>
+            {onSaveRun && (
+              <button type="button" className={btnSmall} onClick={() => void onSaveRunClick()} disabled={!done || savingRun || seek !== null} title={strings.share.saveRun.hint}>
+                {savingRun ? strings.share.saveRun.busy : strings.share.saveRun.button}
+              </button>
+            )}
+          </div>
+          {!done && <p className={cardHint}>{strings.runActions.runToEndFirst}</p>}
+          {runSaved && (
+            <p className={`mt-2 text-xs ${runSaved.ok ? "text-ok" : "text-bad"}`} role={runSaved.ok ? "status" : "alert"}>
+              {runSaved.text}
+            </p>
           )}
-          {selectedReport && loaded && (
-            <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts.loading}</p>}>
-              <LaneCharts
-                name={laneNames.get(selectedReport.laneId) ?? ""}
-                report={selectedReport}
-                startTime={loaded.startTime}
-                queueInterval={loaded.parameters.queueSampleInterval}
-                binSeconds={loaded.parameters.throughputBin}
-                anchor={clock.anchor}
-                fixedStart={clock.fixedStart}
-                onClose={() => setSelectedLane(null)}
-              />
-            </Suspense>
-          )}
-          {metrics && metrics.elements.length > 0 && <CapacityTable elements={metrics.elements} names={names} clock={clock} onAddLane={onAddLane} addDisabled={busy} />}
-          {loaded && stats && <LaneTable lanes={loaded.lanes} states={stats.lanes} names={laneNames} selected={selectedLane} onSelect={(id) => setSelectedLane((cur) => (cur === id ? null : id))} />}
-          {layout && stats && <CarCounts counts={stats.carCounts} />}
-          {layout && stats && <LotTable rows={lots} onClose={onLotClose} closeDisabled={busy || done} onCharts={(id) => setLotChart((cur) => (cur === id ? null : id))} chartsFor={lotChart} />}
-          {lotChartReport && loaded && (
-            <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts.loading}</p>}>
-              <LotChart name={names(lotChartReport.lotId)} report={lotChartReport} startTime={loaded.startTime} binSeconds={loaded.parameters.throughputBin} anchor={clock.anchor} fixedStart={clock.fixedStart} />
-            </Suspense>
-          )}
-          {layout && stats && <BarrierTable rows={barriers} clock={clock} onCharts={(id) => setBarrierChart((cur) => (cur === id ? null : id))} chartsFor={barrierChart} />}
-          {barrierChart && metrics?.parking && loaded && (
-            <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts.loading}</p>}>
-              <BarrierChart name={names(barrierChart)} barrierId={barrierChart} lanes={metrics.parking.barrierLanes} startTime={loaded.startTime} queueInterval={loaded.parameters.queueSampleInterval} anchor={clock.anchor} fixedStart={clock.fixedStart} />
-            </Suspense>
-          )}
-          {stats && <StateCounts counts={stats.countsByState} time={stats.time} cars={layout !== null} leaving={!!loaded?.parameters.departureCurve} />}
-          {paramRows.length > 0 && <ParametersList rows={paramRows} />}
-          {!showMap && perf && <PerfOverlay controller={controllerRef} renderer={rendererRef} stats={stats} agentCount={loaded?.agentCount ?? 0} />}
-        </aside>
-      </div>
+        </section>
+        {paramRows.length > 0 && <ParametersList rows={paramRows} />}
+        {venue.attribution && <p className="px-1 text-[11px] text-subtle">{venue.attribution}</p>}
+        {!showMap && perf && <PerfOverlay controller={controllerRef} renderer={rendererRef} stats={stats} agentCount={loaded?.agentCount ?? 0} />}
+      </aside>
     </div>
   );
 }
@@ -575,7 +611,7 @@ function PerfOverlay({ controller, renderer, stats, agentCount }: { controller: 
   const P = strings.perf;
   const ms = (v: number | undefined) => (v === undefined ? "–" : v.toFixed(1));
   return (
-    <div className="pointer-events-none absolute top-2 right-2 rounded-md bg-slate-950/80 px-3 py-2 font-mono text-xs text-slate-100" aria-label={P.heading}>
+    <div className="pointer-events-none absolute top-16 right-3 rounded-md bg-black/75 px-3 py-2 font-mono text-xs text-white" aria-label={P.heading}>
       <div>
         {P.agents}: {formatCount(agentCount)}
       </div>

@@ -105,13 +105,13 @@ export function CompareCharts({ results, labels, names, anchor, fixedStart }: { 
           </select>
         </label>
       </div>
-      <p className="text-xs text-slate-500">{labels.map((l, k) => `${l}: ${DASH_WORDS[k % 4]}`).join(" · ")}</p>
+      <p className="text-xs text-subtle">{labels.map((l, k) => `${l}: ${DASH_WORDS[k % 4]}`).join(" · ")}</p>
       <OverlayChart data={data} labels={labels} anchor={anchor} fixedStart={fixedStart} unit={strings.charts.people} />
       <details className="text-xs">
-        <summary className="cursor-pointer text-slate-600 dark:text-slate-400">{strings.charts2.tableSummary}</summary>
+        <summary className="cursor-pointer text-muted">{strings.charts2.tableSummary}</summary>
         <table className="mt-1 w-full text-left font-mono tabular-nums">
           <thead>
-            <tr className="text-slate-500">
+            <tr className="text-subtle">
               <th className="font-normal">{strings.charts2.time}</th>
               {labels.map((l, k) => (
                 <th key={k} className="text-right font-normal">

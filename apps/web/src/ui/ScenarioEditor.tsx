@@ -141,7 +141,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
           </select>
         </Field>
         {form.customPoints > 0 && form.keepCustomPoints && (
-          <p className="text-xs text-slate-600 sm:col-span-2 dark:text-slate-400">
+          <p className="text-xs text-muted sm:col-span-2">
             {E.customPoints(form.customPoints)}{" "}
             <button type="button" className="underline" onClick={() => setForm((f) => ({ ...f, keepCustomPoints: false, arrivalPreset: f.arrivalPreset === "custom" ? (f.eventType === "fair" ? "fair" : f.eventType) : f.arrivalPreset }))}>
               {E.removePoints}
@@ -154,7 +154,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
         <Field label={E.carShare}>
           <input className={cls("carSharePercent")} inputMode="decimal" value={form.carSharePercent} onChange={(e) => set("carSharePercent", e.target.value)} />
         </Field>
-        <p className="self-end text-xs text-slate-600 sm:col-span-2 dark:text-slate-400">
+        <p className="self-end text-xs text-muted sm:col-span-2">
           {parking ? (
             <>
               {E.carShareHint(E.eventTypes[form.eventType].toLowerCase(), Math.round(CAR_SHARE_DEFAULTS[form.eventType] * 100))}{" "}
@@ -205,10 +205,10 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
       {form.barriers.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-sm font-semibold">{E.barriers}</legend>
-          <p className="text-xs text-slate-500">{E.barriersIntro}</p>
+          <p className="text-xs text-subtle">{E.barriersIntro}</p>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="text-xs text-slate-500">
+              <thead className="text-xs text-subtle">
                 <tr>
                   <th className="py-1 pr-2 font-normal">{E.barrier}</th>
                   <th className="py-1 pr-2 font-normal">{E.laneCount}</th>
@@ -221,9 +221,9 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
                   const vb = venue.vehicleBarriers?.find((x) => x.id === b.id);
                   const f = `barriers.${b.id}`;
                   return (
-                    <tr key={b.id} className="border-t border-slate-100 dark:border-slate-800">
+                    <tr key={b.id} className="border-t border-line">
                       <td className="py-1 pr-2">
-                        {b.name} <span className="text-xs text-slate-500">({b.kind === "entry" ? strings.barriers.entry : strings.barriers.exit})</span>
+                        {b.name} <span className="text-xs text-subtle">({b.kind === "entry" ? strings.barriers.entry : strings.barriers.exit})</span>
                       </td>
                       <td className="py-1 pr-2">
                         <input className={`${cls(`${f}.laneCount`)} w-16`} inputMode="numeric" placeholder={String(vb?.laneCount ?? "")} aria-label={`${b.name}: ${E.laneCount}`} value={b.laneCount} onChange={(e) => setBarrier(b.id, { laneCount: e.target.value })} />
@@ -255,10 +255,10 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
       {form.lots.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-sm font-semibold">{E.lots}</legend>
-          <p className="text-xs text-slate-500">{E.lotsIntro}</p>
+          <p className="text-xs text-subtle">{E.lotsIntro}</p>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="text-xs text-slate-500">
+              <thead className="text-xs text-subtle">
                 <tr>
                   <th className="py-1 pr-2 font-normal">{E.lot}</th>
                   <th className="py-1 pr-2 font-normal">{E.paymentMode}</th>
@@ -271,7 +271,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
                   const vl = venue.parkingLots?.find((x) => x.id === l.id);
                   const venueText = (v: string | undefined) => `${E.venueValue}${v ? ` (${v})` : ""}`;
                   return (
-                    <tr key={l.id} className="border-t border-slate-100 align-top dark:border-slate-800">
+                    <tr key={l.id} className="border-t border-line align-top">
                       <td className="py-1 pr-2">{l.name}</td>
                       <td className="py-1 pr-2">
                         <select className={input} aria-label={`${l.name}: ${E.paymentMode}`} value={l.paymentMode} onChange={(e) => setLot(l.id, { paymentMode: e.target.value as LotForm["paymentMode"] })}>
@@ -327,7 +327,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
 
       <fieldset className="grid gap-3 sm:grid-cols-4">
         <legend className="mb-1 text-sm font-semibold">{E.timeline}</legend>
-        <p className="text-xs text-slate-500 sm:col-span-4">{E.timelineIntro}</p>
+        <p className="text-xs text-subtle sm:col-span-4">{E.timelineIntro}</p>
         <Field label={E.referenceClock}>
           <input className={cls("referenceClock")} value={form.referenceClock} onChange={(e) => set("referenceClock", e.target.value)} />
         </Field>
@@ -343,10 +343,10 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
 
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-sm font-semibold">{E.elements}</legend>
-        <p className="text-xs text-slate-500">{E.elementsIntro}</p>
+        <p className="text-xs text-subtle">{E.elementsIntro}</p>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="text-xs text-slate-500">
+            <thead className="text-xs text-subtle">
               <tr>
                 <th className="py-1 pr-2 font-normal">{E.element}</th>
                 <th className="py-1 pr-2 font-normal">{E.laneCount}</th>
@@ -359,7 +359,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
                 const v = groups.find((g) => g.id === el.id);
                 const f = `elements.${el.id}`;
                 return (
-                  <tr key={el.id} className="border-t border-slate-100 align-top dark:border-slate-800">
+                  <tr key={el.id} className="border-t border-line align-top">
                     <td className="py-1 pr-2">{el.name}</td>
                     <td className="py-1 pr-2">
                       <input className={`${cls(`${f}.laneCount`)} w-16`} inputMode="numeric" placeholder={String(v?.laneCount ?? "")} aria-label={`${el.name}: ${E.laneCount}`} value={el.laneCount} onChange={(e) => setElement(el.id, { laneCount: e.target.value })} />
@@ -373,7 +373,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
                             </option>
                           ))}
                         </select>
-                        {el.serviceMode === "default" && v && <span className="text-xs text-slate-500">{formatDistribution(v.serviceTime, "s")}</span>}
+                        {el.serviceMode === "default" && v && <span className="text-xs text-subtle">{formatDistribution(v.serviceTime, "s")}</span>}
                         {el.serviceMode === "simple" && (
                           <>
                             <input className={`${cls(`${f}.serviceMin`)} w-16`} inputMode="decimal" aria-label={`${el.name}: ${E.min}`} value={el.serviceMin} onChange={(e) => setElement(el.id, { serviceMin: e.target.value })} />
@@ -423,7 +423,7 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
             </Field>
           </>
         ) : (
-          <p className="text-xs text-slate-500 sm:col-span-2">{E.walkingAdvanced}</p>
+          <p className="text-xs text-subtle sm:col-span-2">{E.walkingAdvanced}</p>
         )}
         <Field label={E.nearestShare}>
           <input className={cls("nearestLaneSharePercent")} inputMode="decimal" placeholder="30" value={form.nearestLaneSharePercent} onChange={(e) => set("nearestLaneSharePercent", e.target.value)} />
@@ -454,10 +454,10 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
 
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-sm font-semibold">{E.events}</legend>
-        <p className="text-xs text-slate-500">{E.eventsIntro}</p>
-        {form.events.length === 0 && <p className="text-sm text-slate-500">{E.noEvents}</p>}
+        <p className="text-xs text-subtle">{E.eventsIntro}</p>
+        {form.events.length === 0 && <p className="text-sm text-subtle">{E.noEvents}</p>}
         {form.events.map((ev) => (
-          <div key={ev.key} className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-2 dark:border-slate-800">
+          <div key={ev.key} className="flex flex-wrap items-end gap-2 border-t border-line pt-2">
             <Field label={strings.editor.eventType}>
               <select className={input} value={ev.kind} onChange={(e) => setEvent(ev.key, { kind: e.target.value as TimedEvent["kind"] })}>
                 {(lotsOfVenue.length > 0 ? (["laneFail", "laneReopen", "busBurst", "lotClose"] as const) : (["laneFail", "laneReopen", "busBurst"] as const)).map((k) => (
@@ -541,16 +541,16 @@ export function ScenarioEditor({ venue, base: initialBase, isNew, onSave, onCanc
           }
         }}
       >
-        <summary className="cursor-pointer text-slate-600 dark:text-slate-400">{E.json}</summary>
+        <summary className="cursor-pointer text-muted">{E.json}</summary>
         <textarea className={`${input} mt-2 h-64 w-full font-mono text-xs`} value={json} onChange={(e) => setJson(e.target.value)} aria-label={E.json} />
         <button type="button" className={`${btnSmall} mt-1`} onClick={applyJson}>
           {E.applyJson}
         </button>
-        {jsonError && <p className="mt-1 text-xs text-orange-700 dark:text-orange-400">{jsonError}</p>}
+        {jsonError && <p className="mt-1 text-xs text-bad">{jsonError}</p>}
       </details>
 
       {problems.length > 0 && (
-        <div className="rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm dark:border-orange-500/40 dark:bg-orange-500/10" role="alert">
+        <div className="rounded-lg border border-bad/40 bg-bad-soft p-3 text-sm" role="alert">
           <p className="font-medium">{E.problems}</p>
           <ul className="ml-5 list-disc">
             {problems.map((p, k) => (

@@ -282,8 +282,8 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
         <h2 id="editor-heading" className="text-lg font-semibold">
           {E.heading}
         </h2>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{E.intro}</p>
-        {readOnly && <p className="mt-2 text-sm text-orange-700 dark:text-orange-400">{E.readOnly}</p>}
+        <p className="mt-1 text-sm text-muted">{E.intro}</p>
+        {readOnly && <p className="mt-2 text-sm text-bad">{E.readOnly}</p>}
         <div className="mt-3 flex flex-wrap items-end gap-3">
           {!shared && (
             <label className={labelText}>
@@ -334,7 +334,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
               {E.tool[t]}
             </button>
           ))}
-          <span className="mx-2 h-6 w-px bg-slate-300 dark:bg-slate-700" />
+          <span className="mx-2 h-6 w-px bg-slate-300" />
           <button type="button" className={btn} disabled={!canUndo(history) || readOnly} onClick={() => setHistory(undo)} aria-keyshortcuts="Control+Z">
             {E.undo}
           </button>
@@ -351,7 +351,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
             {E.fit}
           </button>
         </div>
-        <p className="mt-2 text-xs text-slate-600 dark:text-slate-400" aria-live="polite">
+        <p className="mt-2 text-xs text-muted" aria-live="polite">
           {hint}
         </p>
         {POLYGON_TOOLS.has(tool) && draft.length > 0 && (
@@ -377,7 +377,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
             <button type="button" className={btnSmall} disabled={calPoints.length !== 2} onClick={applyCalibration}>
               {E.applyCalibration}
             </button>
-            <span className="text-xs text-slate-500">{E.backgroundNote}</span>
+            <span className="text-xs text-subtle">{E.backgroundNote}</span>
           </div>
         )}
 
@@ -386,7 +386,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
           role="img"
           aria-label={E.canvas}
           data-testid="venue-canvas"
-          className="mt-3 h-[28rem] w-full touch-none select-none rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+          className="mt-3 h-[28rem] w-full touch-none select-none rounded-lg border border-line bg-sunken"
           viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
           preserveAspectRatio="xMidYMid meet"
           tabIndex={0}
@@ -429,7 +429,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
           {calPoints.length === 2 && <line x1={calPoints[0]?.x} y1={calPoints[0]?.y} x2={calPoints[1]?.x} y2={calPoints[1]?.y} stroke="#dc2626" strokeWidth={stroke} />}
           {tool === "select" && !readOnly && handles(venue).map((h, k) => <rect key={k} x={h.point.x - stroke * 2.5} y={h.point.y - stroke * 2.5} width={stroke * 5} height={stroke * 5} fill="#fff" stroke="#334155" strokeWidth={stroke * 0.8} />)}
         </svg>
-        {venue.background && !background && <p className="mt-1 text-xs text-slate-500">{E.calibrated(venue.background.metresPerPixel)}</p>}
+        {venue.background && !background && <p className="mt-1 text-xs text-subtle">{E.calibrated(venue.background.metresPerPixel)}</p>}
       </section>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -438,12 +438,12 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
             {E.elements}
           </h3>
           {elementRows.length === 0 ? (
-            <p className="mt-1 text-sm text-slate-500">{E.noElements}</p>
+            <p className="mt-1 text-sm text-subtle">{E.noElements}</p>
           ) : (
             <ul className="mt-2 flex flex-col gap-1 text-sm">
               {elementRows.map((r) => (
-                <li key={r.id} className={`flex flex-wrap items-center gap-2 rounded px-1 ${selected === r.id ? "bg-amber-100 dark:bg-amber-500/20" : ""}`}>
-                  <span className="w-28 text-xs text-slate-500">{E.kinds[r.list]}</span>
+                <li key={r.id} className={`flex flex-wrap items-center gap-2 rounded px-1 ${selected === r.id ? "bg-amber-100" : ""}`}>
+                  <span className="w-28 text-xs text-subtle">{E.kinds[r.list]}</span>
                   <input aria-label={`${E.kinds[r.list]} ${r.id}`} className={`${input} min-w-0 flex-1`} value={r.name} disabled={readOnly} onFocus={() => setSelected(r.id)} onChange={(e) => rename(r.list, r.id, e.target.value)} />
                   {r.list === "gateGroups" && (
                     <input
@@ -473,13 +473,13 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
             {E.problems}
           </h3>
           {problems === null ? (
-            <p className="mt-1 text-sm text-slate-500">{E.checking}</p>
+            <p className="mt-1 text-sm text-subtle">{E.checking}</p>
           ) : problems.length === 0 ? (
-            <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400">✓ {E.noProblems}</p>
+            <p className="mt-1 text-sm text-ok">✓ {E.noProblems}</p>
           ) : (
             <ul className="mt-1 flex flex-col gap-1 text-sm" data-testid="venue-problems">
               {problems.map((p, k) => (
-                <li key={k} className={p.severity === "error" ? "text-orange-700 dark:text-orange-400" : "text-slate-600 dark:text-slate-400"}>
+                <li key={k} className={p.severity === "error" ? "text-bad" : "text-muted"}>
                   {p.severity === "error" ? "✗ " : "! "}
                   {p.message}
                 </li>
@@ -504,7 +504,7 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
             )}
           </div>
           {message && (
-            <p className={`mt-2 text-sm ${message.ok ? "text-emerald-700 dark:text-emerald-400" : "text-orange-700 dark:text-orange-400"}`} role={message.ok ? "status" : "alert"}>
+            <p className={`mt-2 text-sm ${message.ok ? "text-ok" : "text-bad"}`} role={message.ok ? "status" : "alert"}>
               {message.text}
             </p>
           )}

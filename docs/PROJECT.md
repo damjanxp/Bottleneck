@@ -568,6 +568,17 @@ apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/sc
 - **Alternatives:** Making the API accept `-gzip` suffixes in If-Match (works around one proxy's behaviour in application code); weak ETags (would weaken the concurrency check).
 - **Consequences:** API responses are larger on the wire; if that ever matters, the API can compress them itself (ASP.NET Core response compression keeps the ETag).
 
+
+### D-069 Redesign 1 (trial): a map-first layout with one set of design tokens
+- **Context:** The owner found the interface too complicated and cheap-looking and asked for a trial redesign, inspired by existing tools, before Phase 6. Looked at: kepler.gl (the map fills the screen; a floating side panel; a timeline with play controls along the bottom), Bentley LEGION (playback with density heatmaps), AnyLogic Cloud (inputs and outputs on one dashboard; a table of runs), Oasys MassMotion (saved viewpoints).
+- **Decision:**
+  - **Shell:** a sidebar for the sections (with icons), a top bar with the venue and, on Simulate, the scenario; each other section scrolls on its own in a centred page.
+  - **Simulate:** the map fills the stage; the clock floats top left, map tools (density, fit, hide) top right, the legend and a playback bar (play, step, +1 min, restart, jump to peak/departures, run to the end, speed, scrubber with start and end times) at the bottom; messages float under the clock. A right-hand inspector puts the answer first (headline numbers in large type, the worst lane with a coloured stripe), then collapsible sections (capacity as a list per stage with a load bar, queues per lane, people by state, assumptions) and a "This run" card for batch, scan-log export and saving to the server.
+  - **Design tokens** (`index.css`): semantic colours as CSS variables (canvas, surface, sunken, line, fg, muted, subtle, accent, ok, warn, bad, info, map) with light and dark values; Inter (self-hosted, `@fontsource-variable/inter`); tabular numbers. `ui/styles.ts` builds every button, card, input, overlay and notice from them; 284 hard-coded grey, orange and green classes were mapped onto the tokens. A small inline icon set (`ui/icons.tsx`) needs no dependency.
+  - Accessible names, roles and texts stay as they were (the browser tests pass unchanged, except one selector that now finds a `<section>` around a collapsible card).
+- **Alternatives:** A component library (shadcn/ui, Radix): more to install and bend to the CSP for a trial; keeping the old layout and only restyling (would not fix the clutter).
+- **Consequences:** Known gaps for the next round: the map renderer's colours are fixed (dark), so the light theme's map clashes; on phones the map and inspector stack; in a browser without a GPU (the headless test browser) the larger always-visible map makes some browser tests about 3 times slower (parking: 25 s → about 70 s), still well within their timeouts. To be measured on the owner's machine with `?perf=1`.
+
 ---
 
 ## 3. Review notes triage

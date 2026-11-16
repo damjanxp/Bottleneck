@@ -121,10 +121,10 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
         <h2 id="jobs-heading" className="text-lg font-semibold">
           {J.heading}
         </h2>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{J.intro}</p>
-        {!canEdit && <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{J.readOnly}</p>}
+        <p className="mt-1 text-sm text-muted">{J.intro}</p>
+        {!canEdit && <p className="mt-2 text-sm text-muted">{J.readOnly}</p>}
         {options.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">{J.noScenarios}</p>
+          <p className="mt-2 text-sm text-subtle">{J.noScenarios}</p>
         ) : (
           <fieldset disabled={!canEdit} className="mt-3 flex flex-col gap-3" title={canEdit ? undefined : READ_ONLY_MESSAGE}>
             <div className="flex flex-wrap items-end gap-3">
@@ -195,19 +195,19 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
                 {numberField(J.targetShare, targetShare, setTargetShare, 1, 100)}
                 {numberField(J.seedsPerPoint, seedsPerPoint, setSeedsPerPoint, 1, 30)}
                 <RuleField rule={rule} setRule={setRule} />
-                {eventStart === null && <p className="text-sm text-orange-700">{J.needsStart}</p>}
+                {eventStart === null && <p className="text-sm text-bad">{J.needsStart}</p>}
               </div>
             )}
             <div>
               <button type="button" className={btnPrimary} onClick={() => void submit()} disabled={busy || !canEdit}>
                 {busy ? J.submitting : J.submit}
               </button>
-              <p className="mt-1 text-xs text-slate-500">{J.budget}</p>
+              <p className="mt-1 text-xs text-subtle">{J.budget}</p>
             </div>
           </fieldset>
         )}
         {message && (
-          <p className={`mt-2 text-sm ${message.ok ? "text-emerald-800 dark:text-emerald-300" : "text-orange-800 dark:text-orange-300"}`} role={message.ok ? "status" : "alert"}>
+          <p className={`mt-2 text-sm ${message.ok ? "text-ok" : "text-bad"}`} role={message.ok ? "status" : "alert"}>
             {message.lines.join(" ")}
           </p>
         )}
@@ -223,11 +223,11 @@ export function JobsPanel({ venue, jobs, canEdit, library, server }: { venue: Sh
           </button>
         </div>
         {jobs.error && (
-          <p className="mt-1 text-sm text-orange-800 dark:text-orange-300" role="alert">
+          <p className="mt-1 text-sm text-bad" role="alert">
             {jobs.error}
           </p>
         )}
-        {jobs.list.length === 0 ? <p className="mt-2 text-sm text-slate-500">{J.none}</p> : <ul className="mt-2 flex flex-col gap-2">{jobs.list.map((j) => <JobRow key={j.id} job={j} detail={jobs.details[j.id]} jobs={jobs} venue={venue} canEdit={canEdit} />)}</ul>}
+        {jobs.list.length === 0 ? <p className="mt-2 text-sm text-subtle">{J.none}</p> : <ul className="mt-2 flex flex-col gap-2">{jobs.list.map((j) => <JobRow key={j.id} job={j} detail={jobs.details[j.id]} jobs={jobs} venue={venue} canEdit={canEdit} />)}</ul>}
       </section>
 
       <RunsPanel venue={venue} server={server} canEdit={canEdit} />
@@ -264,14 +264,14 @@ function JobRow({ job, detail, jobs, venue, canEdit }: { job: JobSummary | JobRe
   }, [open, job.status, job.id]);
 
   return (
-    <li className="rounded-lg border border-slate-200 p-2 dark:border-slate-800" data-testid="job-row" data-status={job.status}>
+    <li className="rounded-lg border border-line p-2" data-testid="job-row" data-status={job.status}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-medium">
             {KIND_LABEL[job.kind]}
             {scenarioName && ` · ${scenarioName}`}
           </p>
-          <p className="text-xs text-slate-600 dark:text-slate-400" role="status">
+          <p className="text-xs text-muted" role="status">
             {jobStatusText(job)} · {new Date(job.createdAt).toLocaleString("en-GB")}
           </p>
         </div>
@@ -294,7 +294,7 @@ function JobRow({ job, detail, jobs, venue, canEdit }: { job: JobSummary | JobRe
       </div>
       {active && <progress className="mt-1 h-2 w-full accent-amber-500" max={1} value={progressFraction(job)} aria-label={J.progress} />}
       {error && (
-        <p className="mt-1 text-sm text-orange-800 dark:text-orange-300" role="alert">
+        <p className="mt-1 text-sm text-bad" role="alert">
           {error}
         </p>
       )}
@@ -306,7 +306,7 @@ function JobRow({ job, detail, jobs, venue, canEdit }: { job: JobSummary | JobRe
 function TrustedNote({ job }: { job: JobResponse }) {
   const r = jobResult(job);
   return (
-    <p className="text-xs text-emerald-800 dark:text-emerald-300">
+    <p className="text-xs text-ok">
       ✓ {J.trusted} · {J.engine(job.engineVersion ?? "?")} · {J.runs(r?.runs ?? job.progress.totalRuns)} · {J.seedsUsed(r?.seeds.length ?? 0)}
     </p>
   );
@@ -314,7 +314,7 @@ function TrustedNote({ job }: { job: JobResponse }) {
 
 export function JobResultView({ job, venue }: { job: JobResponse; venue: SharedVenue }) {
   const r = jobResult(job);
-  if (!r) return <p className="mt-2 text-sm text-slate-500">{J.noResult}</p>;
+  if (!r) return <p className="mt-2 text-sm text-subtle">{J.noResult}</p>;
   const names = (id: string) => elementName(venue.venue, id);
   const scenario = job.request.scenario as Scenario | undefined;
   const timeline = scenario?.timeline ?? { eventStart: 0, referenceClock: "00:00" };
@@ -325,7 +325,7 @@ export function JobResultView({ job, venue }: { job: JobResponse; venue: SharedV
       <div className="mt-2" data-testid="batch-result">
         <TrustedNote job={job} />
         <table className="mt-1 w-full text-left text-sm">
-          <thead className="text-xs text-slate-500">
+          <thead className="text-xs text-subtle">
             <tr>
               <th className="py-1 pr-3 font-normal">{J.measure}</th>
               <th className="py-1 pr-3 text-right font-normal">{J.meanCi}</th>
@@ -334,7 +334,7 @@ export function JobResultView({ job, venue }: { job: JobResponse; venue: SharedV
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.key} className="border-t border-slate-100 dark:border-slate-800">
+              <tr key={row.key} className="border-t border-line">
                 <th scope="row" className="py-1 pr-3 font-normal">
                   {row.label}
                 </th>
@@ -360,8 +360,8 @@ export function JobResultView({ job, venue }: { job: JobResponse; venue: SharedV
           <SweepChart result={r} />
         </Suspense>
         <table className="mt-2 w-full text-left text-sm">
-          <caption className="text-left text-xs text-slate-500">{J.sweepTable(METRIC_LABEL[r.metric], formatDuration(r.targetWait))}</caption>
-          <thead className="text-xs text-slate-500">
+          <caption className="text-left text-xs text-subtle">{J.sweepTable(METRIC_LABEL[r.metric], formatDuration(r.targetWait))}</caption>
+          <thead className="text-xs text-subtle">
             <tr>
               <th className="py-1 pr-3 font-normal">{J.laneCount}</th>
               <th className="py-1 pr-3 text-right font-normal">{J.meanCi}</th>
@@ -370,7 +370,7 @@ export function JobResultView({ job, venue }: { job: JobResponse; venue: SharedV
           </thead>
           <tbody>
             {r.points.map((p) => (
-              <tr key={p.laneCount} className={`border-t border-slate-100 dark:border-slate-800 ${p.laneCount === r.answer ? "font-semibold" : ""}`}>
+              <tr key={p.laneCount} className={`border-t border-line ${p.laneCount === r.answer ? "font-semibold" : ""}`}>
                 <th scope="row" className="py-1 pr-3 font-normal">
                   {p.laneCount}
                   {p.laneCount === r.answer ? ` ← ${J.answer}` : ""}
@@ -393,8 +393,8 @@ export function JobResultView({ job, venue }: { job: JobResponse; venue: SharedV
       <p className="text-sm">{h.byMean}</p>
       <p className="text-sm">{h.byCi}</p>
       <table className="mt-2 w-full text-left text-sm">
-        <caption className="text-left text-xs text-slate-500">{J.gateTable(formatPercent(r.targetShareInside))}</caption>
-        <thead className="text-xs text-slate-500">
+        <caption className="text-left text-xs text-subtle">{J.gateTable(formatPercent(r.targetShareInside))}</caption>
+        <thead className="text-xs text-subtle">
           <tr>
             <th className="py-1 pr-3 font-normal">{J.gatesOpen}</th>
             <th className="py-1 pr-3 text-right font-normal">{J.shareInside}</th>
@@ -403,7 +403,7 @@ export function JobResultView({ job, venue }: { job: JobResponse; venue: SharedV
         </thead>
         <tbody>
           {gateSweepRows(r, timeline).map((row) => (
-            <tr key={row.gatesOpen} className={`border-t border-slate-100 dark:border-slate-800 ${row.gatesOpen === r.answer ? "font-semibold" : ""}`}>
+            <tr key={row.gatesOpen} className={`border-t border-line ${row.gatesOpen === r.answer ? "font-semibold" : ""}`}>
               <th scope="row" className="py-1 pr-3 font-normal">
                 {row.time}
               </th>
@@ -447,16 +447,16 @@ function RunsPanel({ venue, server, canEdit }: { venue: SharedVenue; server: Ser
           {J.refresh}
         </button>
       </div>
-      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{J.runsIntro}</p>
+      <p className="mt-1 text-sm text-muted">{J.runsIntro}</p>
       {error && (
-        <p className="mt-1 text-sm text-orange-800 dark:text-orange-300" role="alert">
+        <p className="mt-1 text-sm text-bad" role="alert">
           {error}
         </p>
       )}
-      {runs && runs.length === 0 && <p className="mt-2 text-sm text-slate-500">{J.noRuns}</p>}
+      {runs && runs.length === 0 && <p className="mt-2 text-sm text-subtle">{J.noRuns}</p>}
       {runs && runs.length > 0 && (
         <table className="mt-2 w-full text-left text-sm">
-          <thead className="text-xs text-slate-500">
+          <thead className="text-xs text-subtle">
             <tr>
               <th className="py-1 pr-3 font-normal">{J.origin}</th>
               <th className="py-1 pr-3 font-normal">{J.scenario}</th>
@@ -467,7 +467,7 @@ function RunsPanel({ venue, server, canEdit }: { venue: SharedVenue; server: Ser
           </thead>
           <tbody>
             {runs.map((r) => (
-              <tr key={r.id} className="border-t border-slate-100 dark:border-slate-800">
+              <tr key={r.id} className="border-t border-line">
                 <td className="py-1 pr-3">{r.origin === "job" ? `✓ ${J.trusted}` : J.reported}</td>
                 <td className="py-1 pr-3">{name(r.scenarioId)}</td>
                 <td className="py-1 pr-3 text-right tabular-nums">{r.seed}</td>

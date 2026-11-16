@@ -61,9 +61,9 @@ export function ScanLogView({ venueId, entries, onApply }: { venueId: string; en
         <h2 id="scanlog-heading" className="text-lg font-semibold">
           {S.heading}
         </h2>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{S.intro}</p>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{S.exportIntro}</p>
-        <p className="mt-1 text-xs text-slate-500">{S.format}</p>
+        <p className="mt-1 text-sm text-muted">{S.intro}</p>
+        <p className="mt-1 text-sm text-muted">{S.exportIntro}</p>
+        <p className="mt-1 text-xs text-subtle">{S.format}</p>
         <div className="mt-3">
           <button type="button" className={btn} onClick={() => fileRef.current?.click()}>
             {S.import}
@@ -77,7 +77,7 @@ export function ScanLogView({ venueId, entries, onApply }: { venueId: string; en
             </p>
             {imported.errors.length > 0 && (
               <>
-                <p className="mt-1 text-orange-800 dark:text-orange-300">{S.errors(imported.errors.length)}</p>
+                <p className="mt-1 text-bad">{S.errors(imported.errors.length)}</p>
                 <ul className="ml-5 list-disc text-xs">
                   {imported.errors.slice(0, 10).map((e, k) => (
                     <li key={k}>{e}</li>
@@ -92,11 +92,11 @@ export function ScanLogView({ venueId, entries, onApply }: { venueId: string; en
       {fit && (
         <>
           <section className={card} aria-labelledby="scanlog-groups-heading">
-            <h2 id="scanlog-groups-heading" className="text-sm font-semibold text-slate-500">
+            <h2 id="scanlog-groups-heading" className="text-sm font-semibold text-subtle">
               {S.groups}
             </h2>
             <table className="mt-2 w-full text-left text-sm">
-              <thead className="text-xs text-slate-500">
+              <thead className="text-xs text-subtle">
                 <tr>
                   <th className="py-1 pr-2 font-normal">{S.group}</th>
                   <th className="py-1 pr-2 text-right font-normal">{S.meanService}</th>
@@ -105,7 +105,7 @@ export function ScanLogView({ venueId, entries, onApply }: { venueId: string; en
               </thead>
               <tbody>
                 {fit.groups.map((g) => (
-                  <tr key={g.group} className="border-t border-slate-100 dark:border-slate-800">
+                  <tr key={g.group} className="border-t border-line">
                     <td className="py-1 pr-2">{name(g.group)}</td>
                     <td className="py-1 pr-2 text-right font-mono tabular-nums">{g.meanServiceTime === null ? S.noEstimate : `${g.meanServiceTime.toFixed(2)} s`}</td>
                     <td className="py-1 text-right font-mono tabular-nums">{formatCount(g.busyIntervals)}</td>
@@ -114,9 +114,9 @@ export function ScanLogView({ venueId, entries, onApply }: { venueId: string; en
               </tbody>
             </table>
             <details className="mt-2 text-xs">
-              <summary className="cursor-pointer text-slate-600 dark:text-slate-400">{S.lanes}</summary>
+              <summary className="cursor-pointer text-muted">{S.lanes}</summary>
               <table className="mt-1 w-full text-left font-mono tabular-nums">
-                <thead className="font-sans text-slate-500">
+                <thead className="font-sans text-subtle">
                   <tr>
                     <th className="font-normal">{strings.charts2.lane}</th>
                     <th className="text-right font-normal">{S.passes}</th>
@@ -138,24 +138,24 @@ export function ScanLogView({ venueId, entries, onApply }: { venueId: string; en
 
           {fit.arrivals.length >= 2 && tl && (
             <section className={card} aria-labelledby="scanlog-arrivals-heading">
-              <h2 id="scanlog-arrivals-heading" className="text-sm font-semibold text-slate-500">
+              <h2 id="scanlog-arrivals-heading" className="text-sm font-semibold text-subtle">
                 {S.arrivals}
               </h2>
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-subtle">
                 {formatDuration(fit.lastTime - fit.firstTime)} · {fit.arrivals.length} points
               </p>
-              <Suspense fallback={<p className="text-xs text-slate-500">{strings.charts2.loading}</p>}>
+              <Suspense fallback={<p className="text-xs text-subtle">{strings.charts2.loading}</p>}>
                 <OverlayChart data={{ x: fit.arrivals.map((p) => p.t), ys: [fit.arrivals.map((p) => p.weight)] }} labels={[S.arrivals]} anchor={tl.eventStart ?? tl.gatesOpen} fixedStart={tl.eventStart !== null} unit="" height={180} />
               </Suspense>
             </section>
           )}
 
           <section className={card} aria-labelledby="scanlog-apply-heading">
-            <h2 id="scanlog-apply-heading" className="text-sm font-semibold text-slate-500">
+            <h2 id="scanlog-apply-heading" className="text-sm font-semibold text-subtle">
               {S.apply}
             </h2>
-            <p className="mt-1 text-xs text-slate-500">{S.applyHint}</p>
-            <p className="mt-1 text-xs text-slate-500">{S.applyNote}</p>
+            <p className="mt-1 text-xs text-subtle">{S.applyHint}</p>
+            <p className="mt-1 text-xs text-subtle">{S.applyNote}</p>
             <div className="mt-2 flex flex-wrap items-end gap-2">
               <label className={labelText}>
                 {S.applyBase}
@@ -171,7 +171,7 @@ export function ScanLogView({ venueId, entries, onApply }: { venueId: string; en
                 {S.apply}
               </button>
             </div>
-            {note && <p className="mt-2 text-xs text-orange-800 dark:text-orange-300">{note}</p>}
+            {note && <p className="mt-2 text-xs text-bad">{note}</p>}
           </section>
         </>
       )}

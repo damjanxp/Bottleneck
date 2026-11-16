@@ -6,6 +6,7 @@
 export const strings = {
   appName: "Bottleneck",
   tagline: "See where a venue's entrances will jam before the event happens.",
+  taglineShort: "Queue and crowd simulator",
   tabs: {
     label: "Sections",
     simulate: "Simulate",
@@ -22,6 +23,8 @@ export const strings = {
     mine: "My scenarios (saved in this browser)",
   },
   controls: {
+    stage: "Simulation map and playback",
+    heatmapShort: "Density",
     play: "Play",
     pause: "Pause",
     step: "Step",
@@ -304,6 +307,7 @@ export const strings = {
     saved: "Saved.",
   },
   runActions: {
+    heading: "This run",
     batch: "Batch: 5 seeds",
     batchHint: "Run this scenario with 5 seeds and show each headline number as mean ± 95% confidence interval",
     exportScanLog: "Export scan log (CSV)",

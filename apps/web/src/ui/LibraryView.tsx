@@ -77,16 +77,16 @@ export function LibraryView({ venueId, library, request, onOpen, onCompare }: { 
       .join(", ");
     const entry = library.entries.find((e) => e.id === s.id);
     return (
-      <li key={c.key} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 py-2 dark:border-slate-800">
+      <li key={c.key} className="flex flex-wrap items-center justify-between gap-2 border-t border-line py-2">
         <div className="min-w-0">
           <p className="font-medium">{c.label}</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-subtle">
             {s.attendance.toLocaleString("en-GB")} people · seed {s.seed}
             {lanes && ` · ${L.lanes}: ${lanes}`}
             {(s.timedEvents?.length ?? 0) > 0 && ` · ${s.timedEvents?.length} ${L.events}`}
             {entry?.savedAt && ` · ${L.savedAt} ${entry.savedAt.slice(0, 16).replace("T", " ")}`}
           </p>
-          {c.description && <p className="text-xs text-slate-500">{c.description}</p>}
+          {c.description && <p className="text-xs text-subtle">{c.description}</p>}
         </div>
         <div className="flex flex-wrap gap-1">
           <button type="button" className={btnSmall} onClick={() => onOpen(c.key, c.venueId)} aria-label={`${L.open} ${c.label}`}>
@@ -140,7 +140,7 @@ export function LibraryView({ venueId, library, request, onOpen, onCompare }: { 
         <h2 id="library-heading" className="text-lg font-semibold">
           {L.heading}: {venueTitle}
         </h2>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{L.intro}</p>
+        <p className="mt-1 text-sm text-muted">{L.intro}</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button type="button" className={btn} onClick={() => startEdit(blankScenario(venue, newScenarioId(), builtIns[0]?.scenario.timeline.eventStart === null), true)}>
             {L.newFromDefaults}
@@ -151,7 +151,7 @@ export function LibraryView({ venueId, library, request, onOpen, onCompare }: { 
           <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" aria-label={L.importJson} onChange={() => void onImport()} />
         </div>
         {message && (
-          <div className={`mt-3 rounded-lg border p-2 text-sm ${message.ok ? "border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10" : "border-orange-300 bg-orange-50 dark:border-orange-500/40 dark:bg-orange-500/10"}`} role="status">
+          <div className={`mt-3 rounded-lg border p-2 text-sm ${message.ok ? "border-ok/30 bg-ok-soft" : "border-bad/40 bg-bad-soft"}`} role="status">
             {message.lines.map((l, k) => (
               <p key={k}>{l}</p>
             ))}
@@ -175,13 +175,13 @@ export function LibraryView({ venueId, library, request, onOpen, onCompare }: { 
       )}
 
       <section className={card} aria-labelledby="mine-heading">
-        <h3 id="mine-heading" className="text-sm font-semibold text-slate-500">
+        <h3 id="mine-heading" className="text-sm font-semibold text-subtle">
           {L.mine}
         </h3>
-        {mine.length === 0 ? <p className="mt-2 text-sm text-slate-500">{L.none}</p> : <ul className="mt-1">{mine.map(row)}</ul>}
+        {mine.length === 0 ? <p className="mt-2 text-sm text-subtle">{L.none}</p> : <ul className="mt-1">{mine.map(row)}</ul>}
       </section>
       <section className={card} aria-labelledby="builtin-heading">
-        <h3 id="builtin-heading" className="text-sm font-semibold text-slate-500">
+        <h3 id="builtin-heading" className="text-sm font-semibold text-subtle">
           {remote ? strings.share.serverScenarios : L.builtIn}
         </h3>
         <ul className="mt-1">{builtIns.map(row)}</ul>

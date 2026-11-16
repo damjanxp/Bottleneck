@@ -1,23 +1,98 @@
-import { useEffect, useRef, useState } from "react";
-import { AgentState, type LaneLayout, type LaneLive, type LaneReport } from "@bottleneck/engine";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  AgentState,
+  type LaneLayout,
+  type LaneLive,
+  type LaneReport,
+} from "@bottleneck/engine";
 import type { ElementReport, LanePeriod } from "@bottleneck/schema";
-import { formatCount, formatDuration, formatPercent, formatRelativeClock, formatWallClock } from "../sim/format.ts";
+import {
+  formatCount,
+  formatDuration,
+  formatPercent,
+  formatRelativeClock,
+  formatWallClock,
+} from "../sim/format.ts";
 import type { Headline, HeadlineKind } from "../sim/headline.ts";
 import type { ParameterRow } from "../sim/parameters.ts";
 import type { EventPhase } from "../sim/parking.ts";
 import { strings } from "../strings.ts";
+import { IconChevron } from "./icons.tsx";
 import { ShapeIcon, stateShape } from "./Legend.tsx";
+import { btnSmall, cardHint, cardTitle } from "./styles.ts";
 
-const card = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900";
+/**
+ * A card in the inspector: a title, an optional hint, and its content. Collapsible ones use
+ * <details>, so they work without JavaScript and keyboard users get the native disclosure.
+ */
+export function Section({
+  id,
+  title,
+  hint,
+  right,
+  collapsible = false,
+  defaultOpen = true,
+  className = "",
+  children,
+  ...rest
+}: {
+  id: string;
+  title: ReactNode;
+  hint?: ReactNode;
+  right?: ReactNode;
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+  className?: string;
+  children?: ReactNode;
+} & Record<`data-${string}`, unknown>) {
+  const heading = (
+    <h2 id={id} className={cardTitle}>
+      {title}
+    </h2>
+  );
+  if (!collapsible)
+    return (
+      <section
+        className={`${cardBase} p-3.5 ${className}`}
+        aria-labelledby={id}
+        {...rest}
+      >
+        <div className="flex items-center gap-2">
+          {heading}
+          {right && <div className="ml-auto">{right}</div>}
+        </div>
+        {hint && <p className={cardHint}>{hint}</p>}
+        {children}
+      </section>
+    );
+  return (
+    <section
+      className={`${cardBase} ${className}`}
+      aria-labelledby={id}
+      {...rest}
+    >
+      <details open={defaultOpen} className="group">
+        <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-3.5 py-3 select-none hover:bg-sunken/50">
+          <IconChevron className="chevron text-subtle transition-transform" />
+          {heading}
+          {right && <div className="ml-auto">{right}</div>}
+        </summary>
+        <div className="px-3.5 pb-3.5">
+          {hint && <p className={`${cardHint} mt-0 mb-2`}>{hint}</p>}
+          {children}
+        </div>
+      </details>
+    </section>
+  );
+}
+
+const cardBase = "rounded-xl border border-line bg-surface";
 
 export interface ClockInfo {
   anchor: number;
   fixedStart: boolean;
   referenceClock: string;
 }
-
-const btnSmall =
-  "rounded-md border border-slate-300 bg-white px-2 py-0.5 text-xs font-semibold shadow-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800";
 
 /** A headline value as text: people, a duration or a percentage. */
 export function formatHeadlineValue(kind: HeadlineKind, value: number): string {
@@ -31,22 +106,43 @@ export function formatHeadlineValue(kind: HeadlineKind, value: number): string {
   }
 }
 
-function headlineText(h: Headline, clock: ClockInfo): { label: string; value: string } {
+function headlineText(
+  h: Headline,
+  clock: ClockInfo,
+): { label: string; value: string } {
   const H = strings.headline;
   switch (h.kind) {
     case "stillOutside":
       return h.final
-        ? { label: H.stillOutsideFinal, value: `${formatCount(h.value)} ${H.people}` }
-        : { label: `${H.stillOutsideSoFar} ${formatWallClock(clock.referenceClock, h.at ?? 0)})`, value: `${formatCount(h.value)} ${H.people}` };
+        ? {
+            label: H.stillOutsideFinal,
+            value: `${formatCount(h.value)} ${H.people}`,
+          }
+        : {
+            label: `${H.stillOutsideSoFar} ${formatWallClock(clock.referenceClock, h.at ?? 0)})`,
+            value: `${formatCount(h.value)} ${H.people}`,
+          };
     case "p95PeakWait":
-      return { label: h.final ? H.p95PeakWait : `${H.p95PeakWait} (${H.soFar})`, value: formatDuration(h.value) };
+      return {
+        label: h.final ? H.p95PeakWait : `${H.p95PeakWait} (${H.soFar})`,
+        value: formatDuration(h.value),
+      };
     case "shareInside":
-      return { label: `${H.shareInside} ${formatWallClock(clock.referenceClock, h.at ?? 0)}${h.final ? "" : ` (${H.soFar})`}`, value: formatPercent(h.value) };
+      return {
+        label: `${H.shareInside} ${formatWallClock(clock.referenceClock, h.at ?? 0)}${h.final ? "" : ` (${H.soFar})`}`,
+        value: formatPercent(h.value),
+      };
   }
 }
 
 /** Headline numbers. The visible numbers update live; the screen-reader copy at most every 15 s. */
-export function Headlines({ items, clock }: { items: Headline[]; clock: ClockInfo }) {
+export function Headlines({
+  items,
+  clock,
+}: {
+  items: Headline[];
+  clock: ClockInfo;
+}) {
   const texts = items.map((h) => headlineText(h, clock));
   const spoken = texts.map((t) => `${t.label}: ${t.value}`).join(". ");
   const latest = useRef(spoken);
@@ -55,24 +151,32 @@ export function Headlines({ items, clock }: { items: Headline[]; clock: ClockInf
   }, [spoken]);
   const [announced, setAnnounced] = useState(spoken);
   useEffect(() => {
-    const id = setInterval(() => setAnnounced((prev) => (prev === latest.current ? prev : latest.current)), 15000);
+    const id = setInterval(
+      () =>
+        setAnnounced((prev) =>
+          prev === latest.current ? prev : latest.current,
+        ),
+      15000,
+    );
     return () => clearInterval(id);
   }, []);
   return (
-    <section className={card} aria-labelledby="headline-heading">
-      <h2 id="headline-heading" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-        {strings.headline.heading}
-      </h2>
-      <dl className="mt-2 grid gap-3">
+    <Section id="headline-heading" title={strings.headline.heading}>
+      <dl className="mt-3 grid gap-4">
         {texts.map((t, k) => {
           const split = items[k]?.split;
           return (
             <div key={t.label}>
-              <dt className="text-xs text-slate-600 dark:text-slate-400">{t.label}</dt>
-              <dd className="text-2xl font-bold tabular-nums">{t.value}</dd>
+              <dt className="text-xs text-muted">{t.label}</dt>
+              <dd
+                className={`${k === 0 ? "text-[30px]" : "text-2xl"} mt-0.5 leading-tight font-semibold tracking-tight tabular`}
+              >
+                {t.value}
+              </dd>
               {split && (
-                <dd className="text-xs text-slate-600 tabular-nums dark:text-slate-400">
-                  {formatCount(split.onSite)} {strings.headline.onSite} · {formatCount(split.notArrived)} {strings.headline.notArrived}
+                <dd className="mt-0.5 text-xs text-muted tabular">
+                  {formatCount(split.onSite)} {strings.headline.onSite} ·{" "}
+                  {formatCount(split.notArrived)} {strings.headline.notArrived}
                 </dd>
               )}
             </div>
@@ -82,21 +186,47 @@ export function Headlines({ items, clock }: { items: Headline[]; clock: ClockInf
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {announced}
       </p>
-    </section>
+    </Section>
   );
 }
 
-export function WorstLane({ name, queue, onAddLane, addDisabled }: { name: string | null; queue: number; onAddLane?: () => void; addDisabled?: boolean }) {
+export function WorstLane({
+  name,
+  queue,
+  onAddLane,
+  addDisabled,
+}: {
+  name: string | null;
+  queue: number;
+  onAddLane?: () => void;
+  addDisabled?: boolean;
+}) {
   const W = strings.worstLane;
+  const calm = name === null;
   return (
-    <section className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-500/40 dark:bg-amber-500/10" aria-labelledby="worst-lane-heading">
-      <h2 id="worst-lane-heading" className="text-xs font-semibold text-amber-900 dark:text-amber-300">
+    <section
+      className={`${cardBase} relative overflow-hidden p-3.5 pl-4 text-sm`}
+      aria-labelledby="worst-lane-heading"
+    >
+      <span
+        className={`absolute inset-y-0 left-0 w-1 ${calm ? "bg-ok" : "bg-warn"}`}
+        aria-hidden="true"
+      />
+      <h2 id="worst-lane-heading" className="text-xs font-medium text-muted">
         {W.heading}
       </h2>
       <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-        <p className="font-medium">{name === null ? W.none : `${name}: ${formatCount(queue)} ${W.queue}`}</p>
-        {name !== null && onAddLane && (
-          <button type="button" className={btnSmall} onClick={onAddLane} disabled={addDisabled} title={W.addLaneHint}>
+        <p className="font-semibold">
+          {calm ? W.none : `${name}: ${formatCount(queue)} ${W.queue}`}
+        </p>
+        {!calm && onAddLane && (
+          <button
+            type="button"
+            className={btnSmall}
+            onClick={onAddLane}
+            disabled={addDisabled}
+            title={W.addLaneHint}
+          >
             {W.addLane}
           </button>
         )}
@@ -105,44 +235,105 @@ export function WorstLane({ name, queue, onAddLane, addDisabled }: { name: strin
   );
 }
 
-const SHOWN_STATES = [AgentState.Pending, AgentState.Walking, AgentState.Queuing, AgentState.InService, AgentState.Inside, AgentState.TurnedAway] as const;
+const SHOWN_STATES = [
+  AgentState.Pending,
+  AgentState.Walking,
+  AgentState.Queuing,
+  AgentState.InService,
+  AgentState.Inside,
+  AgentState.TurnedAway,
+] as const;
 /** With cars or departures, people can also be in a car on the way out, or gone. */
-const SHOWN_STATES_LEAVING = [AgentState.Pending, AgentState.Walking, AgentState.Queuing, AgentState.InService, AgentState.Inside, AgentState.Driving, AgentState.Departed, AgentState.TurnedAway] as const;
-const STATE_KEYS = { 0: "Pending", 1: "Walking", 2: "Queuing", 3: "InService", 4: "Inside", 5: "Driving", 7: "Departed", 8: "TurnedAway" } as const;
+const SHOWN_STATES_LEAVING = [
+  AgentState.Pending,
+  AgentState.Walking,
+  AgentState.Queuing,
+  AgentState.InService,
+  AgentState.Inside,
+  AgentState.Driving,
+  AgentState.Departed,
+  AgentState.TurnedAway,
+] as const;
+const STATE_KEYS = {
+  0: "Pending",
+  1: "Walking",
+  2: "Queuing",
+  3: "InService",
+  4: "Inside",
+  5: "Driving",
+  7: "Departed",
+  8: "TurnedAway",
+} as const;
 
 /** `time` (scenario s of these counts) is exposed as data-time for the end-to-end tests. */
-export function StateCounts({ counts, time, cars = false, leaving = false }: { counts: number[]; time: number; cars?: boolean; leaving?: boolean }) {
+export function StateCounts({
+  counts,
+  time,
+  cars = false,
+  leaving = false,
+}: {
+  counts: number[];
+  time: number;
+  cars?: boolean;
+  leaving?: boolean;
+}) {
   return (
-    <section className={card} aria-labelledby="states-heading" data-time={time}>
-      <h2 id="states-heading" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-        {strings.states.heading}
-      </h2>
-      <dl className="mt-2 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-sm">
+    <Section
+      id="states-heading"
+      title={strings.states.heading}
+      collapsible
+      data-time={time}
+    >
+      <dl className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 text-sm">
         {(cars || leaving ? SHOWN_STATES_LEAVING : SHOWN_STATES).map((s) => {
           const shape = stateShape(s);
           return (
             <div key={s} className="contents">
-              <span className="w-3">{shape && <ShapeIcon shape={shape.shape} color={shape.css} />}</span>
-              <dt>{s === AgentState.Pending && cars ? strings.states.PendingWithCars : strings.states[STATE_KEYS[s]]}</dt>
-              <dd className="text-right font-mono tabular-nums">{formatCount(counts[s] ?? 0)}</dd>
+              <span className="w-3">
+                {shape && <ShapeIcon shape={shape.shape} color={shape.css} />}
+              </span>
+              <dt>
+                {s === AgentState.Pending && cars
+                  ? strings.states.PendingWithCars
+                  : strings.states[STATE_KEYS[s]]}
+              </dt>
+              <dd className="text-right tabular">
+                {formatCount(counts[s] ?? 0)}
+              </dd>
             </div>
           );
         })}
       </dl>
-    </section>
+    </Section>
   );
 }
 
-export function LaneTable({ lanes, states, names, selected, onSelect }: { lanes: LaneLayout[]; states: LaneLive[]; names: Map<number, string>; selected: number | null; onSelect: (laneId: number) => void }) {
+export function LaneTable({
+  lanes,
+  states,
+  names,
+  selected,
+  onSelect,
+}: {
+  lanes: LaneLayout[];
+  states: LaneLive[];
+  names: Map<number, string>;
+  selected: number | null;
+  onSelect: (laneId: number) => void;
+}) {
   const T = strings.lanes;
   const max = Math.max(1, ...states.map((s) => s.queueLength));
   return (
-    <section className={card} aria-labelledby="lanes-heading">
-      <h2 id="lanes-heading" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-        {T.heading}
-      </h2>
-      <p className="mt-1 text-xs text-slate-500">{T.clickHint}</p>
-      <table className="mt-2 w-full text-sm">
+    <Section
+      id="lanes-heading"
+      title={T.heading}
+      hint={T.clickHint}
+      collapsible
+      right={
+        <span className="text-xs text-subtle tabular">{lanes.length}</span>
+      }
+    >
+      <table className="w-full text-sm">
         <thead className="sr-only">
           <tr>
             <th>{T.laneColumn}</th>
@@ -157,22 +348,32 @@ export function LaneTable({ lanes, states, names, selected, onSelect }: { lanes:
             const status = s?.failed ? T.failed : s?.open ? T.open : T.closed;
             const isSel = selected === lane.laneId;
             return (
-              <tr key={lane.laneId} className={isSel ? "bg-sky-50 dark:bg-sky-500/10" : ""}>
-                <td className="py-0.5 pr-2">
-                  <button type="button" aria-pressed={isSel} onClick={() => onSelect(lane.laneId)} className="text-left underline-offset-2 hover:underline">
+              <tr key={lane.laneId} className={isSel ? "bg-info-soft" : ""}>
+                <td className="py-1 pr-2">
+                  <button
+                    type="button"
+                    aria-pressed={isSel}
+                    onClick={() => onSelect(lane.laneId)}
+                    className="text-left text-[13px] underline-offset-2 hover:underline"
+                  >
                     {names.get(lane.laneId)}
                   </button>
                   {lane.manual && <ManualBadge />}
                 </td>
                 <td className="w-1/3 py-0.5">
                   <div className="flex items-center gap-2">
-                    <div className="h-2 flex-1 rounded bg-slate-100 dark:bg-slate-800">
-                      <div className="h-2 rounded bg-amber-500" style={{ width: `${(100 * q) / max}%` }} />
+                    <div className="h-1.5 flex-1 rounded-full bg-sunken">
+                      <div
+                        className="h-1.5 rounded-full bg-accent"
+                        style={{ width: `${(100 * q) / max}%` }}
+                      />
                     </div>
-                    <span className="w-10 text-right font-mono tabular-nums">{q}</span>
+                    <span className="w-8 text-right tabular">{q}</span>
                   </div>
                 </td>
-                <td className={`py-0.5 pl-2 text-right text-xs ${s?.failed ? "font-semibold text-orange-700 dark:text-orange-400" : "text-slate-500"}`}>
+                <td
+                  className={`py-0.5 pl-2 text-right text-xs ${s?.failed ? "font-semibold text-bad" : "text-subtle"}`}
+                >
                   {s?.failed ? "✕ " : ""}
                   {status}
                 </td>
@@ -181,47 +382,70 @@ export function LaneTable({ lanes, states, names, selected, onSelect }: { lanes:
           })}
         </tbody>
       </table>
-    </section>
+    </Section>
   );
 }
 
 export function ParametersList({ rows }: { rows: ParameterRow[] }) {
   const P = strings.parameters;
   return (
-    <details className={card}>
-      <summary className="cursor-pointer text-sm font-semibold text-slate-500 dark:text-slate-400">{P.heading}</summary>
-      <p className="mt-2 text-xs text-slate-500">{P.intro}</p>
-      <dl className="mt-2 grid gap-1 text-xs">
+    <Section
+      id="parameters-heading"
+      title={P.heading}
+      hint={P.intro}
+      collapsible
+      defaultOpen={false}
+    >
+      <dl className="grid gap-1 text-xs">
         {rows.map((r) => (
           <div key={r.key} className="flex flex-wrap justify-between gap-x-2">
-            <dt className="text-slate-600 dark:text-slate-400">{r.label}</dt>
+            <dt className="text-muted">{r.label}</dt>
             <dd className="font-mono">
               {r.value}{" "}
               {r.assumed ? (
-                <span className="rounded bg-amber-100 px-1 font-sans text-amber-900 dark:bg-amber-500/15 dark:text-amber-300">{P.assumed}</span>
+                <span className="rounded bg-warn-soft px-1 font-sans text-warn">
+                  {P.assumed}
+                </span>
               ) : (
-                <span className="font-sans text-slate-400">({P.fromScenario})</span>
+                <span className="font-sans text-subtle">
+                  ({P.fromScenario})
+                </span>
               )}
             </dd>
           </div>
         ))}
       </dl>
-    </details>
+    </Section>
   );
 }
 
-export function ClockDisplay({ time, clock, phase }: { time: number; clock: ClockInfo; phase?: EventPhase }) {
+export function ClockDisplay({
+  time,
+  clock,
+  phase,
+}: {
+  time: number;
+  clock: ClockInfo;
+  phase?: EventPhase;
+}) {
   const C = strings.clock;
   return (
     <div className="flex flex-wrap items-baseline gap-x-3">
       <div className="flex items-baseline gap-3" aria-label={C.eventClock}>
-        <span className="font-mono text-2xl font-bold tabular-nums">{formatRelativeClock(time, clock.anchor, clock.fixedStart)}</span>
-        <span className="text-sm text-slate-500">
-          {formatWallClock(clock.referenceClock, time, true)} · {clock.fixedStart ? C.relativeToStart : C.relativeToOpening}
+        <span className="font-mono text-2xl font-bold tabular-nums">
+          {formatRelativeClock(time, clock.anchor, clock.fixedStart)}
+        </span>
+        <span className="text-sm text-subtle">
+          {formatWallClock(clock.referenceClock, time, true)} ·{" "}
+          {clock.fixedStart ? C.relativeToStart : C.relativeToOpening}
         </span>
       </div>
       {phase && (
-        <span className={`rounded px-2 py-0.5 text-xs font-semibold ${phase === "departures" ? "bg-sky-100 text-sky-900 dark:bg-sky-500/15 dark:text-sky-200" : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"}`} aria-label={C.phaseLabel} data-phase={phase}>
+        <span
+          className={`rounded px-2 py-0.5 text-xs font-semibold ${phase === "departures" ? "bg-sky-100 text-sky-900 dark:text-sky-200" : "bg-sunken text-muted"}`}
+          aria-label={C.phaseLabel}
+          data-phase={phase}
+        >
           {C.phases[phase]}
         </span>
       )}
@@ -231,64 +455,127 @@ export function ClockDisplay({ time, clock, phase }: { time: number; clock: Cloc
 
 export function ManualBadge() {
   return (
-    <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] font-semibold tracking-wide text-slate-600 uppercase dark:bg-slate-800 dark:text-slate-300" title={strings.lanes.manualHint}>
+    <span
+      className="ml-1 rounded bg-sunken px-1 text-[10px] font-semibold tracking-wide text-muted uppercase"
+      title={strings.lanes.manualHint}
+    >
       {strings.lanes.manualBadge}
     </span>
   );
 }
 
 /** Capacity in people per hour next to peak demand per hour, and when the crunch ends (review E1). */
-export function CapacityTable({ elements, names, clock, onAddLane, addDisabled }: { elements: readonly ElementReport[]; names: (id: string) => string; clock: ClockInfo; onAddLane: (elementId: string) => void; addDisabled: boolean }) {
+export function CapacityTable({
+  elements,
+  names,
+  clock,
+  onAddLane,
+  addDisabled,
+}: {
+  elements: readonly ElementReport[];
+  names: (id: string) => string;
+  clock: ClockInfo;
+  onAddLane: (elementId: string) => void;
+  addDisabled: boolean;
+}) {
   const C = strings.capacity;
   return (
-    <section className={card} aria-labelledby="capacity-heading">
-      <h2 id="capacity-heading" className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-        {C.heading}
-      </h2>
-      <p className="mt-1 text-xs text-slate-500">{C.intro}</p>
-      <div className="mt-2 overflow-x-auto">
-        <table className="w-full text-left text-xs">
-          <thead className="text-slate-500">
-            <tr>
-              <th className="py-1 pr-2 font-normal">{C.element}</th>
-              <th className="py-1 pr-2 text-right font-normal">{C.lanes}</th>
-              <th className="py-1 pr-2 text-right font-normal">
-                {C.capacity} {C.perHour}
-              </th>
-              <th className="py-1 pr-2 text-right font-normal">
-                {C.peakDemand} {C.perHour}
-              </th>
-              <th className="py-1 pr-2 text-right font-normal">{C.peakUtilisation}</th>
-              <th className="py-1 pr-2 font-normal">{C.below85}</th>
-              <th className="py-1 font-normal">
-                <span className="sr-only">{C.addLane}</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {elements.map((e) => {
-              const over = e.peakDemandPerHour > e.capacityPerHour;
-              const below = e.below85At !== null ? formatRelativeClock(e.below85At, clock.anchor, clock.fixedStart) : e.peakUtilisation < 0.85 ? C.neverAbove : C.notYet;
-              return (
-                <tr key={e.elementId} className="border-t border-slate-100 dark:border-slate-800">
-                  <td className="py-1 pr-2">{names(e.elementId)}</td>
-                  <td className="py-1 pr-2 text-right font-mono tabular-nums">{e.laneCount}</td>
-                  <td className="py-1 pr-2 text-right font-mono tabular-nums">{formatCount(e.capacityPerHour)}</td>
-                  <td className={`py-1 pr-2 text-right font-mono tabular-nums ${over ? "font-semibold text-orange-700 dark:text-orange-400" : ""}`}>{formatCount(e.peakDemandPerHour)}</td>
-                  <td className="py-1 pr-2 text-right font-mono tabular-nums">{formatPercent(e.peakUtilisation)}</td>
-                  <td className="py-1 pr-2 font-mono tabular-nums">{below}</td>
-                  <td className="py-1 text-right">
-                    <button type="button" className={btnSmall} onClick={() => onAddLane(e.elementId)} disabled={addDisabled} aria-label={`${C.addLaneLabel} ${names(e.elementId)}`} title={strings.worstLane.addLaneHint}>
-                      {C.addLane}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
+    <Section id="capacity-heading" title={C.heading} hint={C.intro} collapsible>
+      <table className="w-full text-sm">
+        <thead className="sr-only">
+          <tr>
+            <th>{C.element}</th>
+            <th>{C.capacity}</th>
+            <th>{C.addLane}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {elements.map((e) => {
+            const over = e.peakDemandPerHour > e.capacityPerHour;
+            const load =
+              e.capacityPerHour > 0
+                ? e.peakDemandPerHour / e.capacityPerHour
+                : 0;
+            const below =
+              e.below85At !== null
+                ? formatRelativeClock(
+                    e.below85At,
+                    clock.anchor,
+                    clock.fixedStart,
+                  )
+                : e.peakUtilisation < 0.85
+                  ? C.neverAbove
+                  : C.notYet;
+            return (
+              <tr
+                key={e.elementId}
+                className="border-t border-line first:border-t-0"
+              >
+                <td className="py-2.5 pr-2 align-top">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[13px] font-medium">
+                      {names(e.elementId)}
+                    </span>
+                    <span className="text-xs text-subtle tabular">
+                      {e.laneCount} {C.lanes.toLowerCase()}
+                    </span>
+                  </div>
+                  <div
+                    className="mt-1.5 h-1.5 rounded-full bg-sunken"
+                    title={`${C.peakDemand} / ${C.capacity}`}
+                  >
+                    <div
+                      className={`h-1.5 rounded-full ${over ? "bg-bad" : load >= 0.85 ? "bg-warn" : "bg-ok"}`}
+                      style={{ width: `${Math.min(100, 100 * load)}%` }}
+                    />
+                  </div>
+                  <dl className="mt-1.5 grid grid-cols-3 gap-x-2 text-[11px] text-muted">
+                    <div>
+                      <dt className="text-subtle">{C.capacity}</dt>
+                      <dd className="text-fg tabular">
+                        {formatCount(e.capacityPerHour)}
+                        <span className="text-subtle">{C.perHour}</span>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-subtle">{C.peakDemand}</dt>
+                      <dd
+                        className={`tabular ${over ? "font-semibold text-bad" : "text-fg"}`}
+                      >
+                        {formatCount(e.peakDemandPerHour)}
+                        <span className="text-subtle">{C.perHour}</span>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-subtle">{C.peakUtilisation}</dt>
+                      <dd className="text-fg tabular">
+                        {formatPercent(e.peakUtilisation)}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="mt-1 text-[11px] text-subtle">
+                    {C.below85}:{" "}
+                    <span className="text-muted tabular">{below}</span>
+                  </p>
+                </td>
+                <td className="w-14 py-2.5 text-right align-top">
+                  <button
+                    type="button"
+                    className={btnSmall}
+                    onClick={() => onAddLane(e.elementId)}
+                    disabled={addDisabled}
+                    aria-label={`${C.addLaneLabel} ${names(e.elementId)}`}
+                    title={strings.worstLane.addLaneHint}
+                  >
+                    {C.addLane}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </Section>
   );
 }
 
@@ -320,18 +607,24 @@ export function LaneWaits({ report }: { report: LaneReport }) {
   const W = strings.laneWaits;
   const m = report.metrics;
   const periods: { label: string; p: LanePeriod }[] = [];
-  if (report.beforeStart) periods.push({ label: W.beforeStart, p: report.beforeStart });
-  if (report.afterStart) periods.push({ label: W.afterStart, p: report.afterStart });
+  if (report.beforeStart)
+    periods.push({ label: W.beforeStart, p: report.beforeStart });
+  if (report.afterStart)
+    periods.push({ label: W.afterStart, p: report.afterStart });
   return (
     <div className="mt-3 overflow-x-auto">
       <table className="w-full text-left font-mono text-xs tabular-nums">
-        <caption className="text-left font-sans text-xs font-medium text-slate-600 dark:text-slate-400">{W.heading}</caption>
-        <thead className="font-sans text-slate-500">
+        <caption className="text-left font-sans text-xs font-medium text-muted">
+          {W.heading}
+        </caption>
+        <thead className="font-sans text-subtle">
           <tr>
             <th className="py-0.5 pr-2 font-normal">{W.period}</th>
             <th className="py-0.5 pr-2 text-right font-normal">{W.started}</th>
             <th className="py-0.5 pr-2 text-right font-normal">{W.wait}</th>
-            <th className="py-0.5 pr-2 text-right font-normal">{W.queueWait}</th>
+            <th className="py-0.5 pr-2 text-right font-normal">
+              {W.queueWait}
+            </th>
             <th className="py-0.5 text-right font-normal">{W.utilisation}</th>
           </tr>
         </thead>
@@ -342,13 +635,21 @@ export function LaneWaits({ report }: { report: LaneReport }) {
               <PeriodCells p={p} />
             </tr>
           ))}
-          <tr className="border-t border-slate-200 dark:border-slate-700">
+          <tr className="border-t border-line">
             <td className="py-0.5 pr-2 font-sans">{W.wholeRun}</td>
-            <PeriodCells p={{ started: m.started, meanWait: m.meanWait, p95Wait: m.p95Wait, queueWait: report.queueWait, utilisation: m.utilisation }} />
+            <PeriodCells
+              p={{
+                started: m.started,
+                meanWait: m.meanWait,
+                p95Wait: m.p95Wait,
+                queueWait: report.queueWait,
+                utilisation: m.utilisation,
+              }}
+            />
           </tr>
         </tbody>
       </table>
-      <p className="mt-1 text-xs text-slate-500">{W.note}</p>
+      <p className="mt-1 text-xs text-subtle">{W.note}</p>
     </div>
   );
 }

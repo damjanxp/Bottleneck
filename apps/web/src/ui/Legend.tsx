@@ -42,7 +42,7 @@ export function stateShape(state: number): { shape: Shape; css: string } | null 
 export function Legend({ heatmap, cars = false }: { heatmap: boolean; cars?: boolean }) {
   const L = strings.legend;
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400" aria-label={L.heading}>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted" aria-label={L.heading}>
       {STATE_STYLES.map((s) => (
         <span key={s.state} className="inline-flex items-center gap-1">
           <ShapeIcon shape={s.shape} color={s.css} />
