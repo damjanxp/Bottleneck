@@ -12,7 +12,8 @@
 import /etc/caddy/security-headers.caddy
 
 {$DOMAIN:localhost} {
-	encode zstd gzip
+	# No `encode` for the API: Caddy would rewrite its strong ETags ("1" -> "1-gzip"), and every
+	# If-Match sent back would then fail with 412 (D-057). Only the static site is compressed.
 
 	# Access logs must never contain secrets: read tokens travel in ?t=, edit keys in X-Edit-Key.
 	log {
@@ -41,6 +42,7 @@ import /etc/caddy/security-headers.caddy
 	}
 
 	handle {
+		encode zstd gzip
 		import security_headers
 		root * /srv
 		@assets path /assets/*

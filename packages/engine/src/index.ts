@@ -69,3 +69,4 @@ export {
   type VehicleWorld,
 } from "./vehicles.ts";
 export { LANE_WIDTH, RoadNetwork } from "./roadNetwork.ts";
+export { checkWalkingReachability, type ReachabilityIssue } from "./venueCheck.ts";

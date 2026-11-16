@@ -18,13 +18,13 @@ function apiProxy(target: string) {
 const previewProxy = process.env.API_PROXY ? apiProxy(process.env.API_PROXY) : {};
 
 /**
- * `virtual:scenario-validator`: the JSON Schema validator for scenarios, compiled by Ajv at build
+ * `virtual:scenario-validator`: the JSON Schema validators for scenarios and venues, compiled by Ajv at build
  * time (standalone mode), because the CSP forbids the `new Function` Ajv uses at run time (D-033).
  */
 function scenarioValidatorPlugin(): Plugin {
   const id = "virtual:scenario-validator";
   const resolved = `\0${id}`;
-  const schemaFiles = ["common.schema.json", "scenario.schema.json"];
+  const schemaFiles = ["common.schema.json", "scenario.schema.json", "venue.schema.json"];
   return {
     name: "bottleneck-scenario-validator",
     resolveId: (source) => (source === id ? resolved : null),

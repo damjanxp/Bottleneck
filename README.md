@@ -8,7 +8,7 @@ Draw the site over a map, place pedestrian gates, security lanes, vehicle barrie
 
 **Live demo:** (link added after deployment check)
 
-> **Status:** Phases 0 to 4 are done. The engine simulates walking, density-dependent speed, lane choice, queues that spill back, lane failures and scan retries, and cars: roads, barriers, parking, overflow and the exit rush. The web app runs it live (PixiJS, in a Web Worker) on built-in Belgrade Fair examples and a stand-alone car park, lets you edit, save and compare scenarios, and fit service times from scan logs. An optional server (ASP.NET Core + PostgreSQL, run with Docker Compose) adds sharing links and server-side batches and sweeps. Node, Chrome and the server give bit-identical results, checked in CI. Next: the venue editor (Phase 5) and a public deployment of the server. See [docs/PROJECT.md](docs/PROJECT.md) for the full status, decisions and roadmap.
+> **Status:** Phases 0 to 5 are done (the venue editor's core: drawing the pedestrian layout; roads and car parks follow). The engine simulates walking, density-dependent speed, lane choice, queues that spill back, lane failures and scan retries, and cars: roads, barriers, parking, overflow and the exit rush. The web app runs it live (PixiJS, in a Web Worker) on built-in Belgrade Fair examples and a stand-alone car park, lets you edit, save and compare scenarios, and fit service times from scan logs. An optional server (ASP.NET Core + PostgreSQL, run with Docker Compose) adds sharing links and server-side batches and sweeps. Node, Chrome and the server give bit-identical results, checked in CI. Next: the showcase (Phase 6) and a public deployment of the server. See [docs/PROJECT.md](docs/PROJECT.md) for the full status, decisions and roadmap.
 
 ## What you can do
 
@@ -21,6 +21,7 @@ Draw the site over a map, place pedestrian gates, security lanes, vehicle barrie
 - **Compare scenarios** (up to 4) with common random numbers, so differences come from the change and not from luck, with the differences written out in words ("better" / "worse" / "no clear difference").
 - **Run a batch of 5 seeds** and see every headline number as a mean with a 95% confidence interval.
 - **Scan logs:** export a run's scan log as CSV, import a log, fit the service time and the arrival pattern, and apply them to a new scenario.
+- **Draw your own venue** ("Edit venue" tab): walkable areas, obstacles, where people arrive, gate lines and destinations, over a map image calibrated with two clicks; undo/redo; checks in plain sentences (for example a source that cannot reach any gate, computed by the simulation engine itself); saved in your browser and usable in every section.
 - **With the server** ("Share & server" tab): publish a venue and get a private edit link and a read-only share link (no accounts; the key stays after `#` in the link); run 20-seed batches, **lane sweeps** ("how many lanes keep the p95 wait under 10 minutes?") and **gate-opening sweeps** ("how late can the gates open and still get 95% inside by the start?") on the server, with a chart of the answer.
 
 ![The concert example at the busiest time](docs/media/screenshot.png)
