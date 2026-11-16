@@ -617,6 +617,19 @@ apps/web/src/validation/buildValidator.ts` from `/schema/common` and `/schema/sc
 - **Alternatives:** hiding problem shapes instead of marking them (the user could not fix what they cannot see); stricter automatic rules only (every map style has exceptions; a correction brush handles them).
 - **Consequences:** Detected street blocks are still islands until crossings or connections are added (now shown on the map with a one-click removal, which is not always what is wanted). A widget right next to an area becomes part of that area unless corrected. Tests: `autodetect.test.ts` (widgets, pins, labels, corrections, widget shadows), `editor.test.ts` (tiny shapes and islands with their repairs).
 
+
+### D-073 Importing OpenStreetMap exports as venues
+- **Context:** Screenshot detection (D-071, D-072) guesses from colours and is confused by map text, label halos and widgets; round 4's clean-up rules made it worse on real Google screenshots. The owner exported the Belgrade Fair from openstreetmap.org (`map.osm`, about 400 × 270 m); decoded, it already says what every line and area is: 38 roads (Bulevar vojvode Mišića as primary, 33 service roads of which 9 car-park aisles and 10 driveways), 13 footways (7 sidewalks), 4 steps, 12 crossings, 21 named buildings (Hala 1A, 2, 3, 3A, 5, 7, 11 …), 4 car parks, the fair's fence with a gate, grass, the Sava and the railway.
+- **Decision:** "Import OpenStreetMap" in the venue editor (`editor/osm.ts`) reads the `.osm` file (a small regex reader for OSM XML; no network, so the CSP and F13 stand) and builds a venue in metres from the box's north-west corner, clipped to the export box (Liang–Barsky for lines, Sutherland–Hodgman for areas):
+  - **roads** for cars: lanes per direction from `lanes` (primary/trunk default 2), one-way from `oneway`, speed from `maxspeed`; streets are public roads, service roads, driveways and aisles are not;
+  - **obstacles:** buildings (with their names) and water;
+  - **walkable ground** on a grid: the site (exhibition grounds, squares, parks, car parks; the whole box if there is no site) minus buildings, **public** streets, rail, water and fences, plus every footway, sidewalk, path, step and crossing (so crossings join blocks); service roads and car-park aisles stay walkable, shared with people;
+  - **gates** suggested where a footway or driveway crosses a fence, or at a gate or entrance node on a fence, with the fence opened there (3 lanes, the default turnstile);
+  - **sources** at public-transport stops in the box; the venue is named after the site; the attribution says "© OpenStreetMap contributors (ODbL)".
+  The import replaces the drawing and is one undo step. Screenshot import and detection stay as a fallback for places OpenStreetMap does not cover.
+- **Alternatives:** live queries to the Overpass API (needs the network from the page; the CSP allows only 'self'); keeping colour detection as the main path (unreliable on real screenshots).
+- **Consequences:** On the owner's file: 397 × 269 m, 5 walkable areas, 21 buildings, 36 roads, 2 suggested gates, no sources (the only stop lies outside the box), schema-valid; only a source and a destination are left to add. Not imported yet: car parks as parking lots with stalls and barriers (they become walkable ground; their aisles roads), pedestrian areas mapped only as `area:highway` details, building entrances as destinations. Tests: `editor/osm.test.ts` (parsing, roads, gates, sources, one connected walkable area through the gate and over the crossing, clipping, refusals), `e2e/editor-osm.spec.ts`.
+
 ---
 
 ## 3. Review notes triage

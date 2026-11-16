@@ -6,6 +6,7 @@ import { addGate, addRoad, addSource, blankVenue, deleteElement, handles, moveHa
 import { canRedo, canUndo, commit, createHistory, redo, undo, type History } from "../editor/history.ts";
 import { mergePolygon, paintPath } from "../editor/paint.ts";
 import { AREA_KINDS, changeKind, duplicateElement, elementAt, moveElement, polygonOf, shapePoints, type AreaKind, type ShapeKind } from "../editor/shapes.ts";
+import { OsmError, osmToVenue, parseOsm } from "../editor/osm.ts";
 import { DEFAULT_TRACE, simplifyPath, traceRegion } from "../editor/trace.ts";
 import { applyFix, checkVenue, hasErrors, type VenueProblem } from "../editor/venueChecks.ts";
 import { knownVenues } from "../library/catalog.ts";
@@ -286,6 +287,23 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
       URL.revokeObjectURL(raw);
     }
   };
+  /** Replaces the drawing with an OpenStreetMap export (undo brings the old one back). */
+  const pickOsm = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const r = osmToVenue(parseOsm(await file.text()), { id: venue.id as string, name: venue.name !== E.newName ? venue.name : undefined });
+      edit(r.venue);
+      setImage(null);
+      setDetection(null);
+      setSelected(null);
+      setView(bounds(r.venue));
+      chooseTool("select");
+      setMessage({ ok: true, text: E.osmDone(r.report) });
+    } catch (err) {
+      setMessage({ ok: false, text: err instanceof OsmError ? err.message : E.osmFailed });
+    }
+  };
+
   const removeImage = () => {
     setImage(null);
     setDetection(null);
@@ -687,6 +705,10 @@ export function VenueEditor({ venueId, server, onSaved }: { venueId: string; ser
           {group(
             E.groups.map,
             <>
+              <label className={`${btnPrimary} w-full cursor-pointer ${readOnly ? "pointer-events-none opacity-45" : ""}`} title={E.osmHint}>
+                {E.osmImport}
+                <input type="file" accept=".osm,.xml,application/xml,text/xml" className="sr-only" aria-label={E.osmImport} disabled={readOnly} onChange={(e) => void pickOsm(e.target.files?.[0])} />
+              </label>
               <label className={`${btn} w-full cursor-pointer ${readOnly ? "pointer-events-none opacity-45" : ""}`} title={E.importHint}>
                 {E.importImage}
                 <input type="file" accept="image/png,image/jpeg" className="sr-only" aria-label={E.importImage} disabled={readOnly} onChange={(e) => void pickImage(e.target.files?.[0])} />

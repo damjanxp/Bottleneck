@@ -21,3 +21,6 @@ apps/api/src/Bottleneck.Api/storage/
 
 # Local agent tooling
 .claude/
+
+# Local OpenStreetMap checks (owner data, not committed)
+tmp-osm-check/
